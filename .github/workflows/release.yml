@@ -71,7 +71,6 @@ jobs:
             exit 1
           fi
 
-  gate:
   # 单独一个 job 把「有没有签名身份」算成输出。
   # 不能在 job 级 `if` 里用 `matrix`（矩阵展开前就求值了），`needs` 才可以。
   gate:

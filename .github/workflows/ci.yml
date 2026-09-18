@@ -66,3 +66,12 @@ jobs:
       # 个人私有特征放在仓库外的清单里，这里不配置也不会漏掉通用规则。
       - name: 扫描
         run: scripts/check-publish-safety.sh
+
+  workflows:
+    name: 工作流语法
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # actionlint 会抓到 YAML 解析器不会报的问题：重复的 job 名、缺失的 runs-on、
+      # 表达式里引用不存在的输出。重复 key 尤其隐蔽——PyYAML 之类的解析器会静默接受。
+      - uses: raven-actions/actionlint@v2
