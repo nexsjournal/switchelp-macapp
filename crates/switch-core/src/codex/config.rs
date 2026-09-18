@@ -1,0 +1,754 @@
+//! Codex `config.toml` 的保真读写与字段所有权。
+//!
+//! 规则来自 [配置生命周期](../../../../docs/architecture/02-configuration-lifecycle.md)：
+//! 只管理被计划声明的字段；未知项、注释、引号与换行尽可能保留；解析失败立即停止。
+
+use crate::domain::error::{CoreError, ErrorCode};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
+use toml_edit::{value, DocumentMut, Item, Table};
+
+/// 本工具在用户 providers 表中使用的固定 ID。占用检测以该 ID 为边界。
+pub const PROVIDER_ID: &str = "gptswitch";
+/// 本工具生成的 provider 显示名。
+pub const PROVIDER_NAME: &str = "GPTSwitch";
+/// 宿主调用 auth helper 时固定传入的 `--instance` 参数值。
+///
+/// 宿主不接受参数化命令，只会照字面拼出 `["--instance", <本常量>]`。
+/// helper 安装时必须用同一个值，否则双方对不上，宿主拿不到令牌。
+pub const AUTH_HELPER_INSTANCE: &str = "local-main";
+
+/// 本工具允许管理的顶层键路径（不含 `[model_providers.gptswitch]` 子表）。
+pub const MANAGED_KEYS: [&str; 5] = [
+    "model",
+    "model_provider",
+    "model_catalog_json",
+    "model_context_window",
+    "model_reasoning_effort",
+];
+
+/// 配置文件快照：原始字节、摘要、换行风格与解析后的语法树。
+#[derive(Debug, Clone)]
+pub struct ConfigSnapshot {
+    pub path: PathBuf,
+    pub existed: bool,
+    pub content_hash: String,
+    /// 原始换行风格，写入时保持一致，避免整文件行尾被改写。
+    pub line_ending: String,
+    document: DocumentMut,
+}
+
+/// 检测文件的换行风格。默认 LF。
+pub fn detect_line_ending(text: &str) -> String {
+    if text.contains("\r\n") {
+        "\r\n".to_owned()
+    } else {
+        "\n".to_owned()
+    }
+}
+
+/// 按指定换行风格渲染语法树。toml_edit 只输出 LF，因此这里做一次统一转换。
+fn render(document: &DocumentMut, line_ending: &str) -> String {
+    let text = document.to_string();
+    if line_ending == "\r\n" {
+        text.replace("\r\n", "\n").replace('\n', "\r\n")
+    } else {
+        text.replace("\r\n", "\n")
+    }
+}
+
+impl ConfigSnapshot {
+    /// 解析配置文本。row/col 只用于定位，不携带用户内容。
+    pub fn parse(path: impl Into<PathBuf>, text: &str) -> Result<Self, CoreError> {
+        let document: DocumentMut = text.parse().map_err(|error: toml_edit::TomlError| {
+            let mut message = "配置文件无法解析".to_owned();
+            if let Some(span) = error.span() {
+                message.push_str(&format!("，错误位置偏移 {}", span.start));
+            }
+            CoreError::new(ErrorCode::ConfigParseFailed, "error.configParseFailed")
+                .with_detail(message)
+                .with_recovery("openCopy", "action.openConfigCopy")
+        })?;
+        Ok(Self {
+            path: path.into(),
+            existed: true,
+            content_hash: hash(text),
+            line_ending: detect_line_ending(text),
+            document,
+        })
+    }
+
+    /// 读取文件并解析；文件不存在时返回空文档（首次应用场景）。
+    pub fn read(path: impl Into<PathBuf>) -> Result<Self, CoreError> {
+        let path = path.into();
+        if !path.exists() {
+            return Ok(Self {
+                path,
+                existed: false,
+                content_hash: hash(""),
+                line_ending: "\n".to_owned(),
+                document: DocumentMut::new(),
+            });
+        }
+        let text = std::fs::read_to_string(&path)?;
+        let mut snapshot = Self::parse(path, &text)?;
+        snapshot.existed = true;
+        Ok(snapshot)
+    }
+
+    pub fn to_text(&self) -> String {
+        render(&self.document, &self.line_ending)
+    }
+
+    pub fn document(&self) -> &DocumentMut {
+        &self.document
+    }
+
+    /// 读取本工具管理的字段当前值（用于差异与恢复）。
+    pub fn managed_value(&self, key: &str) -> Option<String> {
+        // provider 子表统一走“读回语义 -> 规范化序列化”，
+        // 避免直接对语法树节点取字符串导致比较口径漂移。
+        if key == "model_providers.gptswitch" {
+            return self.read_provider().and_then(|p| serialized_provider(&p));
+        }
+        self.document.get(key).map(|item| {
+            item.as_str()
+                .map(|s| s.to_owned())
+                .unwrap_or_else(|| item.to_string().trim().to_owned())
+        })
+    }
+
+    /// 是否存在 `[model_providers.gptswitch]` 子表。
+    pub fn has_gateway_provider(&self) -> bool {
+        self.document
+            .get("model_providers")
+            .and_then(|item| item.get(PROVIDER_ID))
+            .is_some()
+    }
+
+    /// 把 `[model_providers.gptswitch]` 读回为结构体；不存在或结构不符时返回 None。
+    pub fn read_provider(&self) -> Option<ManagedProvider> {
+        let table = self
+            .document
+            .get("model_providers")?
+            .get(PROVIDER_ID)?
+            .as_table()?;
+
+        let base_url = table.get("base_url")?.as_str()?.to_owned();
+        let wire_api = table
+            .get("wire_api")
+            .and_then(|i| i.as_str())
+            .unwrap_or("responses")
+            .to_owned();
+        let auth_table = table.get("auth").and_then(|i| i.as_table());
+        let auth = match auth_table {
+            Some(auth) => {
+                if let Some(command) = auth.get("command").and_then(|i| i.as_str()) {
+                    ProviderAuth::Command {
+                        command: command.to_owned(),
+                        timeout_ms: auth
+                            .get("timeout_ms")
+                            .and_then(|i| i.as_integer())
+                            .unwrap_or(5000)
+                            .max(0) as u64,
+                        refresh_interval_ms: auth
+                            .get("refresh_interval_ms")
+                            .and_then(|i| i.as_integer())
+                            .unwrap_or(300_000)
+                            .max(0) as u64,
+                    }
+                } else if let Some(env_key) = auth.get("env_key").and_then(|i| i.as_str()) {
+                    ProviderAuth::EnvKey {
+                        env_key: env_key.to_owned(),
+                    }
+                } else {
+                    return None;
+                }
+            }
+            None => return None,
+        };
+
+        Some(ManagedProvider {
+            base_url,
+            wire_api,
+            auth,
+        })
+    }
+
+    /// 是否存在其他工具已经占用的同名 provider 或非本工具的目录配置。
+    pub fn foreign_managers(&self) -> Vec<String> {
+        let mut found: Vec<String> = Vec::new();
+        if let Some(providers) = self.document.get("model_providers").and_then(|i| i.as_table()) {
+            for (id, item) in providers.iter() {
+                if id == PROVIDER_ID {
+                    continue;
+                }
+                let name = item
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                if !name.is_empty() {
+                    found.push(id.to_owned());
+                }
+            }
+        }
+        found
+    }
+
+    /// 脱敏预览：秘密字段替换为掩码，供 UI 只读展示。
+    ///
+    /// 先按字段名替换，再对整段文本做一次“密钥形状”扫描，避免秘密藏在
+    /// `args`、`headers` 等列表里被原样导出。扫描只做替换，不做任何网络动作。
+    pub fn redacted_preview(&self) -> String {
+        let mut preview = self.document.clone();
+        let secret_keys = ["key", "api_key", "token", "password", "secret", "authorization"];
+        redact_table(preview.as_table_mut(), &secret_keys, None);
+        redact_secret_shapes(&preview.to_string())
+    }
+}
+
+fn redact_table(table: &mut Table, secrets: &[&str], parent: Option<&str>) {
+    let keys: Vec<String> = table.iter().map(|(k, _)| k.to_owned()).collect();
+    for key in keys {
+        let lowered = key.to_ascii_lowercase();
+        let path = match parent {
+            Some(parent) => format!("{}.{}", parent, lowered),
+            None => lowered.clone(),
+        };
+        let is_secret = secrets.iter().any(|s| lowered.contains(s))
+            || lowered == "env_key"
+            || path.ends_with("auth.env_key");
+        if is_secret {
+            if let Some(item) = table.get_mut(&key) {
+                *item = value("••••••••");
+            }
+            continue;
+        }
+        if let Some(item) = table.get_mut(&key) {
+            if let Some(child) = item.as_table_mut() {
+                redact_table(child, secrets, Some(&path));
+            }
+        }
+    }
+}
+
+/// 已知密钥前缀形状。只覆盖可识别的公开前缀，不做启发式猜测。
+const SECRET_PREFIXES: [&str; 8] = [
+    "sk-", "sk_", "rk-", "api-", "key-", "pk-", "ghp_", "xoxb-",
+];
+
+/// 把形如 `sk-xxxx` 的连续秘密片段替换为掩码，保留前缀以便用户识别来源。
+fn redact_secret_shapes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for token in split_keep_delimiters(text) {
+        let trimmed = token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_');
+        let is_secret = SECRET_PREFIXES.iter().any(|prefix| trimmed.starts_with(prefix))
+            && trimmed.chars().count() >= 12;
+        if is_secret {
+            let prefix_len = SECRET_PREFIXES
+                .iter()
+                .find(|prefix| trimmed.starts_with(**prefix))
+                .map(|prefix| prefix.len())
+                .unwrap_or(0);
+            let prefix = &trimmed[..prefix_len];
+            out.push_str(&token.replace(trimmed, &format!("{}••••••••", prefix)));
+        } else {
+            out.push_str(&token);
+        }
+    }
+    out
+}
+
+/// 按 TOML 语法边界切分，保证替换不跨越引号或结构符号。
+fn split_keep_delimiters(text: &str) -> Vec<String> {
+    let mut parts: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
+            current.push(ch);
+        } else {
+            if !current.is_empty() {
+                parts.push(std::mem::take(&mut current));
+            }
+            parts.push(ch.to_string());
+        }
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    parts
+}
+
+/// 本工具生成的 provider 表内容。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedProvider {
+    pub base_url: String,
+    /// 宿主侧 wire_api；当前版本只接受 responses。
+    pub wire_api: String,
+    /// 认证方式：`command` 或 `env_key`，具体值必须显式给出。
+    pub auth: ProviderAuth,
+}
+
+/// 构造 provider 子表。apply 与 diff 必须共用同一构造逻辑，否则差异判定会漂移。
+fn provider_table(provider: &ManagedProvider) -> Table {
+    let mut table = Table::new();
+    table["name"] = value(PROVIDER_NAME);
+    table["base_url"] = value(provider.base_url.clone());
+    table["wire_api"] = value(provider.wire_api.clone());
+    let mut auth = Table::new();
+    match &provider.auth {
+        ProviderAuth::Command { command, timeout_ms, refresh_interval_ms } => {
+            auth["command"] = value(command.clone());
+            let mut args: toml_edit::Array = toml_edit::Array::new();
+            args.push("--instance");
+            args.push(AUTH_HELPER_INSTANCE);
+            auth["args"] = value(args);
+            auth["timeout_ms"] = value(*timeout_ms as i64);
+            auth["refresh_interval_ms"] = value(*refresh_interval_ms as i64);
+        }
+        ProviderAuth::EnvKey { env_key } => {
+            auth["env_key"] = value(env_key.clone());
+        }
+    }
+    table["auth"] = Item::Table(auth);
+    table
+}
+
+/// provider 子表的规范化字符串。
+///
+/// `Table::to_string()` 只渲染本级标量，嵌套的 `auth` 会作为独立 section 出现在
+/// 文档里而被丢掉；这里显式拼出完整语义，保证 diff 与所有权记录口径一致。
+fn serialized_provider(provider: &ManagedProvider) -> Option<String> {
+    let mut text = format!(
+        "name = \"{}\"\nbase_url = \"{}\"\nwire_api = \"{}\"",
+        PROVIDER_NAME, provider.base_url, provider.wire_api
+    );
+    match &provider.auth {
+        ProviderAuth::Command { command, timeout_ms, refresh_interval_ms } => {
+            text.push_str(&format!(
+                "\n\n[auth]\ncommand = \"{}\"\nargs = [\"--instance\", \"{}\"]\ntimeout_ms = {}\nrefresh_interval_ms = {}",
+                command, AUTH_HELPER_INSTANCE, timeout_ms, refresh_interval_ms
+            ));
+        }
+        ProviderAuth::EnvKey { env_key } => {
+            text.push_str(&format!("\n\n[auth]\nenv_key = \"{}\"", env_key));
+        }
+    }
+    Some(text)
+}
+
+/// provider 认证投影。core 只接受本机令牌，不接受上游 Key。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ProviderAuth {
+    /// 通过 helper 输出本机访问令牌。
+    Command { command: String, timeout_ms: u64, refresh_interval_ms: u64 },
+    /// 旧宿主使用环境变量注入本机令牌。
+    EnvKey { env_key: String },
+}
+
+impl ProviderAuth {
+    /// 该认证配置是否会泄露上游秘密。
+    pub fn carries_upstream_secret(&self) -> bool {
+        false
+    }
+
+    fn validate(&self) -> Result<(), CoreError> {
+        match self {
+            ProviderAuth::Command { command, timeout_ms, refresh_interval_ms } => {
+                if command.trim().is_empty() {
+                    return Err(CoreError::validation("auth helper 路径不能为空"));
+                }
+                if *timeout_ms == 0 || *timeout_ms > 60_000 {
+                    return Err(CoreError::validation("auth helper 超时必须为 1-60000 ms"));
+                }
+                if *refresh_interval_ms < 1_000 {
+                    return Err(CoreError::validation("令牌刷新间隔不能小于 1 秒"));
+                }
+            }
+            ProviderAuth::EnvKey { env_key } => {
+                if env_key.trim().is_empty() {
+                    return Err(CoreError::validation("env_key 不能为空"));
+                }
+                if env_key.to_ascii_lowercase().contains("key") && env_key.contains("sk-") {
+                    return Err(CoreError::validation("env_key 不能是上游 Key 明文"));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// 期望写入的受管配置。字段为 None 表示不纳入本次事务。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedConfig {
+    pub model: Option<String>,
+    pub model_provider: Option<String>,
+    pub model_catalog_json: Option<String>,
+    pub provider: Option<ManagedProvider>,
+    pub model_context_window: Option<u64>,
+    pub model_reasoning_effort: Option<String>,
+}
+
+/// 单个字段的所有权记录：基线原值、最后一次写入值。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldOwnership {
+    pub key_path: String,
+    /// 基线时字段是否存在。
+    pub baseline_presence: bool,
+    /// 基线原值；原本不存在时为空。
+    pub baseline_value: Option<String>,
+    /// 本工具最后一次写入的值。
+    pub last_written_value: Option<String>,
+}
+
+impl FieldOwnership {
+    pub fn new(key_path: impl Into<String>, baseline_value: Option<String>) -> Self {
+        Self {
+            key_path: key_path.into(),
+            baseline_presence: baseline_value.is_some(),
+            baseline_value: baseline_value.clone(),
+            last_written_value: baseline_value,
+        }
+    }
+}
+
+/// 字段级差异。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldChange {
+    pub key_path: String,
+    pub before: Option<String>,
+    pub after: Option<String>,
+    /// 修改原因 key，供 UI 说明为什么写这个字段。
+    pub reason_key: String,
+}
+
+impl FieldChange {
+    pub fn is_removal(&self) -> bool {
+        self.after.is_none()
+    }
+}
+
+/// 三方还原结果。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "outcome")]
+pub enum RestoreOutcome {
+    /// 当前值仍等于本工具写入值，可安全恢复基线。
+    Restore { key_path: String },
+    /// 基线原本不存在，恢复即删除该键。
+    Delete { key_path: String },
+    /// 外部已修改，保留当前值并进入冲突处理。
+    Conflict { key_path: String, current: Option<String> },
+    /// 无需处理。
+    Unchanged { key_path: String },
+}
+
+impl RestoreOutcome {
+    pub fn key_path(&self) -> &str {
+        match self {
+            RestoreOutcome::Restore { key_path }
+            | RestoreOutcome::Delete { key_path }
+            | RestoreOutcome::Conflict { key_path, .. }
+            | RestoreOutcome::Unchanged { key_path } => key_path,
+        }
+    }
+
+    pub fn is_conflict(&self) -> bool {
+        matches!(self, RestoreOutcome::Conflict { .. })
+    }
+}
+
+/// 应用受管字段，返回新文本与更新后的所有权记录。
+///
+/// 不做隐式执行：调用方负责在写入前重新比对文件摘要（CAS）。
+pub fn apply_managed(
+    snapshot: &ConfigSnapshot,
+    managed: &ManagedConfig,
+    ownership: &[FieldOwnership],
+) -> Result<(String, Vec<FieldOwnership>), CoreError> {
+    if let Some(provider) = &managed.provider {
+        provider.auth.validate()?;
+        if provider.wire_api != "responses" {
+            return Err(CoreError::validation(
+                "Codex 侧 wire_api 只支持 responses；Chat 在网关转译",
+            ));
+        }
+    }
+    if let Some(model) = &managed.model {
+        if model.trim().is_empty() {
+            return Err(CoreError::validation("默认模型不能为空字符串"));
+        }
+    }
+    if let Some(context) = managed.model_context_window {
+        if context == 0 {
+            return Err(CoreError::validation("上下文窗口必须是正整数"));
+        }
+    }
+
+    let mut document = snapshot.document().clone();
+    let mut updated: Vec<FieldOwnership> = Vec::new();
+
+    let existing: std::collections::HashMap<&str, &FieldOwnership> =
+        ownership.iter().map(|o| (o.key_path.as_str(), o)).collect();
+
+    let record = |document: &DocumentMut, key: &str, new_value: Option<String>, updated: &mut Vec<FieldOwnership>| {
+        let baseline = match existing.get(key) {
+            Some(record) => (*record).clone(),
+            None => FieldOwnership::new(key, snapshot.managed_value(key)),
+        };
+        let _ = document;
+        updated.push(FieldOwnership {
+            last_written_value: new_value,
+            ..baseline
+        });
+    };
+
+    // 顶层标量字段
+    let scalars: [(&str, Option<String>); 5] = [
+        ("model", managed.model.clone()),
+        ("model_provider", managed.model_provider.clone()),
+        ("model_catalog_json", managed.model_catalog_json.clone()),
+        (
+            "model_context_window",
+            managed.model_context_window.map(|v| v.to_string()),
+        ),
+        (
+            "model_reasoning_effort",
+            managed.model_reasoning_effort.clone(),
+        ),
+    ];
+    for (key, new_value) in scalars {
+        match new_value {
+            Some(new_value) => {
+                document[key] = value(new_value.clone());
+                record(&document, key, Some(new_value), &mut updated);
+            }
+            None => {
+                if document.contains_key(key) && ownership.iter().any(|o| o.key_path == key) {
+                    document.remove(key);
+                    record(&document, key, None, &mut updated);
+                }
+            }
+        }
+    }
+
+    // provider 子表：仅在明确接管时写入
+    if let Some(provider) = &managed.provider {
+        let key_path = "model_providers.gptswitch";
+        if !document.contains_key("model_providers") {
+            document["model_providers"] = Item::Table(Table::new());
+        }
+        document["model_providers"][PROVIDER_ID] = Item::Table(provider_table(provider));
+        record(&document, key_path, serialized_provider(provider), &mut updated);
+    }
+
+    Ok((render(&document, &snapshot.line_ending), updated))
+}
+
+/// 计算字段级差异，供“查看差异”页面使用。
+pub fn diff_managed(snapshot: &ConfigSnapshot, managed: &ManagedConfig) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+    let mut push = |key: &str, after: Option<String>, reason: &str| {
+        let before = snapshot.managed_value(key);
+        if before != after {
+            changes.push(FieldChange {
+                key_path: key.to_owned(),
+                before,
+                after,
+                reason_key: reason.to_owned(),
+            });
+        }
+    };
+
+    push("model", managed.model.clone(), "reason.defaultModel");
+    push(
+        "model_provider",
+        managed.model_provider.clone(),
+        "reason.providerRoute",
+    );
+    push(
+        "model_catalog_json",
+        managed.model_catalog_json.clone(),
+        "reason.catalog",
+    );
+    push(
+        "model_context_window",
+        managed.model_context_window.map(|v| v.to_string()),
+        "reason.contextOverride",
+    );
+    push(
+        "model_reasoning_effort",
+        managed.model_reasoning_effort.clone(),
+        "reason.reasoningDefault",
+    );
+    if let Some(provider) = &managed.provider {
+        let serialized = serialized_provider(provider).unwrap_or_default();
+        let before = snapshot.managed_value("model_providers.gptswitch");
+        if before.as_deref() != Some(serialized.as_str()) {
+            changes.push(FieldChange {
+                key_path: "model_providers.gptswitch".to_owned(),
+                before,
+                after: Some(serialized),
+                reason_key: "reason.gatewayProvider".to_owned(),
+            });
+        }
+    }
+    changes
+}
+
+/// 三方比较：基线 B、本工具写入 W、当前值 C。
+pub fn plan_restore(
+    snapshot: &ConfigSnapshot,
+    ownership: &[FieldOwnership],
+) -> Vec<RestoreOutcome> {
+    ownership
+        .iter()
+        .map(|record| {
+            let current = snapshot.managed_value(&record.key_path);
+            if current == record.last_written_value {
+                if record.baseline_presence {
+                    RestoreOutcome::Restore {
+                        key_path: record.key_path.clone(),
+                    }
+                } else {
+                    RestoreOutcome::Delete {
+                        key_path: record.key_path.clone(),
+                    }
+                }
+            } else if current == record.baseline_value {
+                RestoreOutcome::Unchanged {
+                    key_path: record.key_path.clone(),
+                }
+            } else {
+                RestoreOutcome::Conflict {
+                    key_path: record.key_path.clone(),
+                    current,
+                }
+            }
+        })
+        .collect()
+}
+
+/// 执行还原：只撤销与外部修改无冲突的字段，无关字段全部保留。
+pub fn execute_restore(
+    snapshot: &ConfigSnapshot,
+    ownership: &[FieldOwnership],
+) -> Result<(String, Vec<RestoreOutcome>), CoreError> {
+    let outcomes = plan_restore(snapshot, ownership);
+    let mut document = snapshot.document().clone();
+    for (record, outcome) in ownership.iter().zip(outcomes.iter()) {
+        match outcome {
+            RestoreOutcome::Restore { .. } => match &record.baseline_value {
+                Some(baseline) => {
+                    document[record.key_path.as_str()] = value(baseline.clone());
+                }
+                None => {
+                    document.remove(record.key_path.as_str());
+                }
+            },
+            RestoreOutcome::Delete { .. } => {
+                if record.key_path == "model_providers.gptswitch" {
+                    if let Some(providers) = document["model_providers"].as_table_mut() {
+                        providers.remove(PROVIDER_ID);
+                        if providers.is_empty() {
+                            document.remove("model_providers");
+                        }
+                    }
+                } else {
+                    document.remove(record.key_path.as_str());
+                }
+            }
+            RestoreOutcome::Conflict { .. } | RestoreOutcome::Unchanged { .. } => {}
+        }
+    }
+    Ok((render(&document, &snapshot.line_ending), outcomes))
+}
+
+/// 内容摘要，用于 CAS 比对。
+pub fn hash(text: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(text.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+/// 原子写入：同目录临时文件 + fsync + rename。
+pub fn write_atomic(path: &Path, content: &str) -> Result<(), CoreError> {
+    use std::io::Write;
+    let parent = path
+        .parent()
+        .ok_or_else(|| CoreError::validation("配置路径缺少父目录"))?;
+    std::fs::create_dir_all(parent)?;
+    let temp = parent.join(format!(
+        ".{}.gptswitch.tmp",
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("config.toml")
+    ));
+    {
+        let mut file = std::fs::File::create(&temp)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+    }
+    std::fs::rename(&temp, path)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn command_provider() -> ManagedProvider {
+        ManagedProvider {
+            base_url: "http://127.0.0.1:18765/i/inst_1/c/rev_1/v1".to_owned(),
+            wire_api: "responses".to_owned(),
+            auth: ProviderAuth::Command {
+                command: "/tmp/helper".to_owned(),
+                timeout_ms: 5_000,
+                refresh_interval_ms: 300_000,
+            },
+        }
+    }
+
+    /// 宿主只会照字面拼 `--instance <固定值>`；渲染与 helper 安装必须用同一个常量，
+    /// 一旦漂移，宿主就再也取不到本机令牌。
+    #[test]
+    fn auth_command_args_use_the_shared_instance_constant() {
+        let rendered = serialized_provider(&command_provider()).unwrap();
+        assert!(
+            rendered.contains("--instance") && rendered.contains(AUTH_HELPER_INSTANCE),
+            "渲染出的 args 必须引用共享常量，实际：{rendered}"
+        );
+        assert_eq!(AUTH_HELPER_INSTANCE, "local-main");
+    }
+
+    /// 上游 Key 永远不能出现在受管 provider 表里，只能出现本机 helper。
+    #[test]
+    fn command_auth_never_carries_an_upstream_secret() {
+        let provider = command_provider();
+        assert!(!provider.auth.carries_upstream_secret());
+        let rendered = serialized_provider(&provider).unwrap();
+        assert!(rendered.contains("command = \"/tmp/helper\""));
+        assert!(!rendered.contains("api_key"));
+        assert!(!rendered.contains("sk-"));
+    }
+
+    /// 空 helper 路径必须在写入前被拒绝，而不是写进配置让宿主启动失败。
+    #[test]
+    fn empty_auth_command_is_rejected_before_writing() {
+        let provider = ManagedProvider {
+            auth: ProviderAuth::Command {
+                command: "   ".to_owned(),
+                timeout_ms: 5_000,
+                refresh_interval_ms: 300_000,
+            },
+            ..command_provider()
+        };
+        assert!(provider.auth.validate().is_err());
+    }
+}

@@ -1,0 +1,7 @@
+model = "gpt-5-codex"
+model_provider = "openai"
+sandbox_workspace_write = { network_access = false, writable_roots = ["/tmp/work"] }
+
+[model_providers.other-tool]
+name = "Other Manager"
+base_url = "https://other.example.com/v1"

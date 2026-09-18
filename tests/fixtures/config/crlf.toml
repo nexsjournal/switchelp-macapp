@@ -1,0 +1,5 @@
+# CRLF 换行
+model = "gpt-5-codex"
+model_provider = "openai"
+[mcp_servers.docs]
+command = "npx"

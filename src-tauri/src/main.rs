@@ -1,0 +1,199 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod commands;
+mod state;
+
+use std::sync::Arc;
+use switch_core::{
+    application::{ApplyService, GatewayLayout, SystemClock, WorkspaceService},
+    codex::config::AUTH_HELPER_INSTANCE,
+    diagnostics::DiagnosticLog,
+    credentials::{SecretVault, SystemVault},
+    domain::ids::InstanceId,
+    gateway::{
+        self, helper_path, install_auth_helper, Gateway, GatewayConfig,
+        GatewayRouter, GatewayToken,
+    },
+    storage::{OperationStore, Repository, SqliteOperationStore, SqliteRepository},
+};
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    tray::TrayIconBuilder,
+    Manager,
+};
+
+use state::DesktopState;
+
+/// 本机网关的凭据 helper 路径。
+///
+/// Codex 以 `<command> --instance <固定值>` 调用它并读取输出作为本机令牌，
+/// 上游 Key 因此永不写入 `config.toml`。路径必须与写进配置里的完全一致，
+/// 否则宿主调用一个不存在的可执行文件。
+fn auth_helper(directory: &std::path::Path) -> String {
+    helper_path(directory).display().to_string()
+}
+
+/// 组装本机网关。绑定失败不致命：状态里保留原因，界面据此显示“网关未启动”。
+///
+/// 每次启动都重新生成令牌并覆盖 helper，上一次运行的令牌随之失效。
+fn start_gateway(
+    directory: &std::path::Path,
+    repository: Arc<dyn Repository>,
+    vault: Arc<dyn SecretVault>,
+    router: Arc<GatewayRouter>,
+    diagnostics: Arc<DiagnosticLog>,
+) -> Result<Arc<Gateway>, switch_core::CoreError> {
+    let token = GatewayToken::generate();
+    let gateway = Arc::new(Gateway::new(
+        repository,
+        vault,
+        router,
+        GatewayConfig {
+            instance_id: InstanceId::new(AUTH_HELPER_INSTANCE),
+            token: token.clone(),
+            port: gateway::DEFAULT_PORT,
+            timeouts: Default::default(),
+            diagnostics,
+        },
+    ));
+    gateway.bind()?;
+    // 只有取得端口后才能替换 helper 令牌；第二个启动失败的进程不能使已有网关失联。
+    install_auth_helper(directory, AUTH_HELPER_INSTANCE, &token)?;
+    gateway.spawn()?;
+    Ok(gateway)
+}
+
+/// 托盘菜单。
+///
+/// 刻意**不**把关闭窗口改成“隐藏到托盘”：那会改变用户对“关闭”的预期，
+/// 而托盘本身的价值是状态可见与快速回到窗口，不是拦截关闭。
+fn install_tray(app: &tauri::AppHandle, gateway_running: bool, port: Option<u16>) -> tauri::Result<()> {
+    let status = match (gateway_running, port) {
+        (true, Some(port)) => format!("网关运行中 · 127.0.0.1:{port}"),
+        _ => "网关未启动".to_owned(),
+    };
+    let show = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
+    // 状态项只读：它是信息，不是命令。
+    let status_item = MenuItem::with_id(app, "status", &status, false, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "退出 GPTSwitch", true, None::<&str>)?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &show,
+            &status_item,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
+    )?;
+    let mut builder = TrayIconBuilder::with_id("gptswitch")
+        .menu(&menu)
+        .tooltip(status.as_str())
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        });
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon);
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
+fn main() {
+    tauri::Builder::default()
+        .setup(|app| {
+            let mut directory = app.path().app_data_dir()?;
+            // 开发验证使用隔离目录，发行包不读取此覆盖变量。
+            #[cfg(debug_assertions)]
+            if let Some(value) = std::env::var_os("GPTSWITCH_TEST_DATA_DIR") {
+                directory = std::path::PathBuf::from(value);
+            }
+            std::fs::create_dir_all(&directory)?;
+            #[cfg(unix)] {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
+            }
+            let db_path = directory.join("metadata.sqlite");
+            // 仓库与事务记录共用同一个库文件；两个连接各自持有自己的迁移入口。
+            let repository: Arc<dyn Repository> = Arc::new(SqliteRepository::open(&db_path)?);
+            let operations: Arc<dyn OperationStore> = Arc::new(SqliteOperationStore::open(&db_path)?);
+            #[cfg(unix)] {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o600))?;
+            }
+            let vault: Arc<dyn SecretVault> = Arc::new(SystemVault::new("app.gptswitch.desktop")?);
+            let workspace = Arc::new(WorkspaceService::new(repository.clone(), vault.clone()));
+            // 路由注册表必须由配置事务与网关共享：应用成功即发布，
+            // 网关立刻按新目录版本服务；两个实例各建一个会让网关永远看不到路由。
+            let router = Arc::new(GatewayRouter::new());
+            let apply = Arc::new(ApplyService::new(
+                repository.clone(),
+                operations,
+                router.clone(),
+                GatewayLayout {
+                    app_data_dir: directory.clone(),
+                    port: gateway::DEFAULT_PORT,
+                    auth_helper: auth_helper(&directory),
+                    base_instructions: "通过 GPTSwitch 本机网关访问第三方模型。".to_owned(),
+                },
+                Arc::new(SystemClock),
+            ));
+            // 未完成事务在下一次启动时按记录判定恢复；窗口重建不新建事务。
+            for report in apply.startup_recovery()? {
+                eprintln!(
+                    "GPTSwitch 启动恢复：operation={} instance={} applied={}",
+                    report.operation_id, report.instance_id, report.applied
+                );
+            }
+            // 网关与界面共用一份诊断日志：网关写，界面读。
+            let diagnostics = Arc::new(DiagnosticLog::default());
+            let gateway = start_gateway(&directory, repository, vault, router, diagnostics.clone());
+            if let Err(error) = &gateway {
+                // 端口被占用时不能假装在跑：状态里保留原因，界面显示“网关未启动”。
+                eprintln!(
+                    "GPTSwitch 网关未启动：{} {:?}",
+                    error.message_key, error.safe_details
+                );
+            }
+            let (tray_running, tray_port) = match &gateway {
+                Ok(gateway) => (true, gateway.local_addr().map(|address| address.port())),
+                Err(_) => (false, None),
+            };
+            // 托盘失败不应阻止应用启动：它只是入口，不是功能本体。
+            if let Err(error) = install_tray(app.handle(), tray_running, tray_port) {
+                eprintln!("GPTSwitch 托盘未创建：{error}");
+            }
+            let home = app.path().home_dir()?;
+            app.manage(Arc::new(DesktopState::new(
+                workspace,
+                apply,
+                home,
+                directory.clone(),
+                gateway,
+                diagnostics,
+            )));
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::providers_list, commands::providers_save,
+            commands::credentials_list, commands::credentials_add,
+            commands::credentials_replace, commands::credentials_select,
+            commands::models_list, commands::models_save,
+            commands::instances_detect, commands::config_inspect,
+            commands::apply_plan, commands::apply_execute,
+            commands::apply_status, commands::apply_confirm_reload,
+            commands::restore_plan, commands::restore_execute,
+            commands::gateway_status,
+            commands::diagnostics_list, commands::diagnostics_preview, commands::diagnostics_export,
+            commands::models_discover, commands::platform_info,
+            commands::probes_start, commands::probes_cancel,
+        ])
+        .run(tauri::generate_context!())
+        .expect("GPTSwitch 无法启动");
+}

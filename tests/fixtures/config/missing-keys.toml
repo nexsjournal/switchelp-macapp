@@ -1,0 +1,5 @@
+# 只设置了一个字段
+model = "gpt-5-codex"
+
+[mcp_servers.docs]
+command = "npx"

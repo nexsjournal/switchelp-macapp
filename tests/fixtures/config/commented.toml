@@ -1,0 +1,15 @@
+# 用户自己的注释，必须保留
+model = "gpt-5-codex"
+model_provider = "openai"
+# 下面这段不能动
+[mcp_servers.docs]
+command = "npx"
+args = ["-y", "docs-server"]
+
+[projects."/Users/example/Code/Ünïcode"]
+trust_level = "trusted"
+
+[model_providers.other-tool]
+name = "Other Manager"
+base_url = "https://other.example.com/v1"
+wire_api = "responses"

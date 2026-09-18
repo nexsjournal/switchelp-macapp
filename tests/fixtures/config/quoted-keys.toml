@@ -1,0 +1,6 @@
+"model" = "gpt-5-codex"
+"model_provider" = "openai"
+
+[model_providers."other-tool"]
+name = "Other Manager"
+base_url = "https://other.example.com/v1"

@@ -1,0 +1,33 @@
+.page { display: grid; gap: 24px; }
+.card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.header > div { display: flex; align-items: center; gap: 10px; }
+.header h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.header > div > svg { color: var(--text-muted); }
+.actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+
+.policy { margin: 0 0 16px; padding: 12px 14px; border-radius: 8px; background: var(--bg-input); color: var(--text-muted); font-size: 12px; line-height: 20px; }
+.empty { color: var(--text-muted); font-size: 13px; margin: 0; }
+
+.events { list-style: none; margin: 0; padding: 0; max-height: 460px; overflow-y: auto; }
+.events li { display: grid; grid-template-columns: 16px 168px 72px minmax(0, 1.1fr) minmax(0, 1fr) 64px; gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--border-subtle); font-size: 12px; }
+.events li > svg { color: var(--text-muted); transform: translateY(2px); }
+.events li.warning > svg { color: var(--status-warning); }
+.events li.error > svg { color: var(--status-danger); }
+.category { color: var(--text-secondary); font-size: 11px; }
+.meta { grid-column: 2 / -1; color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
+
+.scopes { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.checkbox { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+
+.preview { padding: 16px; border-radius: 8px; background: var(--bg-input); }
+.preview > p { margin: 0 0 10px; font-size: 12px; }
+.preview ul { list-style: none; margin: 0; padding: 0; }
+.preview li { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.6fr); gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border-subtle); font-size: 12px; }
+.preview li.included > span:first-child { color: var(--text-primary); }
+.preview li > span:first-child { color: var(--text-secondary); }
+
+.saved { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding: 12px 14px; border-radius: 8px; background: var(--status-success-bg); color: var(--status-success); font-size: 12px; }
+.spin { animation: rotate 1s linear infinite; }
+@keyframes rotate { to { transform: rotate(360deg); } }

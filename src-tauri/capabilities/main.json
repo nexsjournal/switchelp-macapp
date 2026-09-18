@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "仅本地配置窗口使用核心桌面能力",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

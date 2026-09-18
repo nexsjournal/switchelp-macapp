@@ -1,0 +1,26 @@
+[package]
+name = "switch-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+toml_edit = "0.22"
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+percent-encoding = "2"
+rusqlite = { version = "0.40", features = ["bundled"] }
+zeroize = "1"
+ureq = "3.4.2"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+keyring = { version = "3.6", features = ["apple-native", "windows-native"] }
+
+[dev-dependencies]
+tempfile = "3"

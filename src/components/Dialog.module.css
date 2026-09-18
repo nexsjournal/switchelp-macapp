@@ -1,0 +1,5 @@
+.overlay { position: fixed; inset: 0; background: var(--overlay); z-index: var(--z-dialog); }
+.dialog { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(720px, calc(100vw - 48px)); max-height: 88vh; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-dialog); box-shadow: var(--shadow-popover); z-index: var(--z-dialog); }
+.header { display: flex; justify-content: space-between; align-items: flex-start; padding: 24px; gap: 24px; border-bottom: 1px solid var(--border-subtle); }
+.description { color: var(--text-secondary); margin: 8px 0 0; font-size: 13px; }
+.discard { padding: 24px; }

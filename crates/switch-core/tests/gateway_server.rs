@@ -1,0 +1,706 @@
+//! 本机网关的端到端测试：真实 TCP、真实 HTTP、真实 SSE 转发。
+//!
+//! 覆盖的不变量（来自 [安全与跨平台](../../docs/architecture/05-security-and-platforms.md)
+//! 与 [网关与协议](../../docs/architecture/03-gateway-and-protocols.md)）：
+//! - 未认证请求绝不触达上游；
+//! - 未发布的目录版本与 alias 不回落、不猜测；
+//! - 上游是 chat 协议时，宿主仍然只看到合法的 Responses 事件序列；
+//! - 上游 Key 不出现在任何回给宿主的内容里。
+
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use serde_json::{json, Value};
+use switch_core::{
+    application::{ModelDraft, ProviderDraft, WorkspaceService},
+    credentials::MemoryVault,
+    domain::{
+        ids::{InstanceId, RevisionId},
+        model::ModelPolicy,
+        provider::{AuthKind, Protocol},
+        tokens::TokenCount,
+    },
+    diagnostics::{DiagnosticLog, LogLevel},
+    gateway::{
+        Gateway, GatewayConfig, GatewayRouter, GatewayToken, TimeoutPolicy, MAX_REQUEST_BYTES,
+    },
+    protocols::{CHAT_COMPLETIONS_V1, RESPONSES_V1},
+    storage::{snapshot::{RouteEntry, RouteSnapshot}, Repository, SqliteRepository},
+};
+
+const SECRET: &str = "synthetic-upstream-key-0123456789";
+const INSTANCE: &str = "inst_test";
+const REVISION: &str = "rev_test";
+
+/// 合成上游：按脚本回答，并记录收到的请求体。
+struct MockUpstream {
+    endpoint: String,
+    received: Arc<Mutex<Vec<String>>>,
+}
+
+enum MockReply {
+    Sse(&'static str),
+    Status { code: u16, body: String },
+}
+
+impl MockUpstream {
+    fn start(reply: MockReply) -> Self {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let sink = received.clone();
+        std::thread::spawn(move || {
+            for incoming in listener.incoming() {
+                let Ok(stream) = incoming else { break };
+                let sink = sink.clone();
+                let reply = match &reply {
+                    MockReply::Sse(body) => MockReply::Sse(body),
+                    MockReply::Status { code, body } => {
+                        MockReply::Status { code: *code, body: body.clone() }
+                    }
+                };
+                std::thread::spawn(move || {
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    let mut length = 0usize;
+                    loop {
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                            break;
+                        }
+                        if line == "\r\n" || line == "\n" {
+                            break;
+                        }
+                        if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                            length = value.trim().parse().unwrap_or(0);
+                        }
+                    }
+                    let mut body = vec![0u8; length];
+                    if length > 0 {
+                        let _ = reader.read_exact(&mut body);
+                    }
+                    sink.lock().unwrap().push(String::from_utf8_lossy(&body).into_owned());
+
+                    let mut stream = stream;
+                    let response = match reply {
+                        MockReply::Sse(body) => format!(
+                            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{body}"
+                        ),
+                        MockReply::Status { code, body } => format!(
+                            "HTTP/1.1 {code} Error\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                            body.len()
+                        ),
+                    };
+                    let _ = stream.write_all(response.as_bytes());
+                    let _ = stream.flush();
+                });
+            }
+        });
+        Self { endpoint: format!("http://127.0.0.1:{port}/v1"), received }
+    }
+
+    fn requests(&self) -> usize {
+        self.received.lock().unwrap().len()
+    }
+
+    fn last_body(&self) -> Value {
+        let bodies = self.received.lock().unwrap();
+        serde_json::from_str(bodies.last().expect("上游应至少收到一次请求")).unwrap()
+    }
+}
+
+struct Harness {
+    gateway: Arc<Gateway>,
+    alias: String,
+    port: u16,
+    token: GatewayToken,
+    upstream: MockUpstream,
+}
+
+/// 路由上冻结的模型策略。
+#[derive(Default, Clone)]
+struct TestPolicy {
+    credential_version_offset: u32,
+    output_limit: Option<u64>,
+    reasoning_efforts: Vec<String>,
+    native_modalities: Vec<String>,
+}
+
+impl TestPolicy {
+    fn declaring(modalities: &[&str]) -> Self {
+        Self{ native_modalities: modalities.iter().map(|value| (*value).to_owned()).collect(), ..Self::default() }
+    }
+}
+
+impl Harness {
+    /// `protocol_id` 决定网关用哪个适配器。
+    fn start(protocol_id: &str, reply: MockReply, provider_protocol: Protocol) -> Self {
+        Self::start_with(protocol_id, reply, provider_protocol, TestPolicy::default())
+    }
+
+    fn start_with(
+        protocol_id: &str,
+        reply: MockReply,
+        provider_protocol: Protocol,
+        route_policy: TestPolicy,
+    ) -> Self {
+        let upstream = MockUpstream::start(reply);
+        let repository: Arc<dyn Repository> = Arc::new(SqliteRepository::in_memory().unwrap());
+        let vault = Arc::new(MemoryVault::new());
+        let workspace = WorkspaceService::new(repository.clone(), vault.clone());
+        let provider = workspace
+            .save_provider(
+                ProviderDraft {
+                    id: None,
+                    name: "测试供应商".into(),
+                    endpoint: upstream.endpoint.clone(),
+                    protocol: provider_protocol,
+                    auth_kind: AuthKind::ApiKey,
+                    preset_id: None,
+                    notes: None,
+                    enabled: true,
+                },
+                0,
+            )
+            .unwrap();
+        let credential = workspace
+            .add_credential(provider.id.as_str(), "日常", SECRET.into())
+            .unwrap();
+        workspace
+            .select_credential(provider.id.as_str(), credential.id.as_str())
+            .unwrap();
+        let mut policy = ModelPolicy::default();
+        policy.context_limit = Some(TokenCount::new(128_000).unwrap());
+        policy.output_limit = Some(TokenCount::new(8_192).unwrap());
+        let model = workspace
+            .save_model(
+                ModelDraft {
+                    id: None,
+                    provider_id: provider.id.as_str().to_owned(),
+                    upstream_id: "vendor/Upstream-Model".into(),
+                    catalog_alias: String::new(),
+                    display_name: "测试模型".into(),
+                    policy,
+                    in_catalog: true,
+                    display_name_overridden: true,
+                },
+                0,
+            )
+            .unwrap();
+
+        let router = Arc::new(GatewayRouter::new());
+        router
+            .publish(
+                RouteSnapshot::new(
+                    RevisionId::new(REVISION),
+                    InstanceId::new(INSTANCE),
+                    REVISION,
+                    vec![RouteEntry {
+                        alias: model.catalog_alias.as_str().to_owned(),
+                        provider_id: provider.id.clone(),
+                        model_id: model.id.clone(),
+                        upstream_id: model.upstream_id.clone(),
+                        credential_id: credential.id.clone(),
+                        credential_version: credential.secret_version + route_policy.credential_version_offset,
+                        protocol_id: protocol_id.to_owned(),
+                        output_limit: route_policy.output_limit,
+                        reasoning_efforts: route_policy.reasoning_efforts.clone(),
+                        native_modalities: route_policy.native_modalities.clone(),
+                    }],
+                    "2026-09-18T00:00:00Z",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        let token = GatewayToken::from_raw("t".repeat(64));
+        let gateway = Arc::new(Gateway::new(
+            repository.clone(),
+            vault,
+            router,
+            GatewayConfig {
+                instance_id: InstanceId::new(INSTANCE),
+                token: token.clone(),
+                port: 0,
+                timeouts: TimeoutPolicy::default(),
+                diagnostics: Arc::new(DiagnosticLog::default()),
+            },
+        ));
+        let port = gateway.bind().unwrap();
+        gateway.spawn().unwrap();
+        Self {
+            gateway,
+            alias: model.catalog_alias.as_str().to_owned(),
+            port,
+            token,
+            upstream,
+        }
+    }
+
+    fn url(&self, suffix: &str) -> String {
+        format!("http://127.0.0.1:{}/i/{INSTANCE}/c/{REVISION}/v1/{suffix}", self.port)
+    }
+
+    fn post(&self, suffix: &str, token: Option<&str>, body: &Value) -> (u16, String) {
+        let agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .build()
+            .new_agent();
+        let mut call = agent
+            .post(&self.url(suffix))
+            .header("content-type", "application/json");
+        if let Some(token) = token {
+            call = call.header("authorization", format!("Bearer {token}"));
+        }
+        let response = call.send(body.to_string().as_bytes()).unwrap();
+        let status = response.status().as_u16();
+        let text = response.into_body().read_to_string().unwrap_or_default();
+        (status, text)
+    }
+
+    fn request_body(&self) -> Value {
+        request_body(&self.alias)
+    }
+}
+
+fn request_body(alias: &str) -> Value {
+    json!({
+        "model": alias,
+        "instructions": "你是编码助手",
+        "input": [{"type": "message", "role": "user",
+                   "content": [{"type": "input_text", "text": "你好"}]}],
+        "max_output_tokens": 1024,
+        "stream": true,
+    })
+}
+
+const CHAT_SSE: &str = concat!(
+    "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"你好\"}}]}\n\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"世界\"},\"finish_reason\":\"stop\"}]}\n\n",
+    "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2,\"total_tokens\":9}}\n\n",
+    "data: [DONE]\n\n",
+);
+
+const RESPONSES_SSE: &str = concat!(
+    "event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_1\",\"model\":\"vendor/Upstream-Model\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
+    "event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{\"id\":\"resp_1\",\"model\":\"vendor/Upstream-Model\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+);
+
+#[test]
+fn missing_or_wrong_token_is_rejected() {
+    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let body = request_body("whatever");
+
+    let (status, text) = harness.post("responses", None, &body);
+    assert_eq!(status, 401, "缺少令牌必须拒绝");
+    assert!(text.contains("UNAUTHORIZED"));
+
+    let (status, _) = harness.post("responses", Some("wrong"), &body);
+    assert_eq!(status, 401, "错误令牌必须拒绝");
+    assert_eq!(harness.upstream.requests(), 0, "认证失败绝不能触发上游请求");
+}
+
+#[test]
+fn unknown_alias_is_rejected_without_reaching_the_upstream() {
+    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let token = harness.token.expose().to_owned();
+
+    let (status, text) = harness.post("responses", Some(&token), &request_body("gs/not-published"));
+
+    assert_eq!(status, 404);
+    assert!(text.contains("ROUTE_MISMATCH"), "必须给出路由不匹配而不是通用错误：{text}");
+    assert_eq!(harness.upstream.requests(), 0);
+}
+
+#[test]
+fn unknown_catalog_revision_is_rejected() {
+    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let token = harness.token.expose().to_owned();
+    let url = format!(
+        "http://127.0.0.1:{}/i/{INSTANCE}/c/rev_missing/v1/responses",
+        harness.port
+    );
+    let response = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .build()
+        .new_agent()
+        .post(&url)
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .send(request_body("x").to_string().as_bytes())
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 404, "未发布的目录版本不能回落到最新");
+}
+
+#[test]
+fn chat_upstream_is_translated_into_responses_events() {
+    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let token = harness.token.expose().to_owned();
+
+    let (status, text) = harness.post("responses", Some(&token), &harness.request_body());
+
+    assert_eq!(status, 200);
+    for expected in [
+        "event: response.created",
+        "event: response.output_item.added",
+        "event: response.content_part.added",
+        "event: response.output_text.delta",
+        "event: response.output_text.done",
+        "event: response.output_item.done",
+        "event: response.completed",
+    ] {
+        assert!(text.contains(expected), "缺少事件 {expected}：{text}");
+    }
+    assert!(text.contains("你好"), "增量文本必须转发");
+    assert!(text.contains("世界"));
+    assert!(text.contains("\"total_tokens\":9"), "用量必须翻译成 Responses 形状：{text}");
+    assert!(text.contains(&harness.alias), "响应身份必须是 alias");
+    assert!(!text.contains("vendor/Upstream-Model"), "上游模型 ID 不得泄漏给宿主");
+
+    let upstream_body = harness.upstream.last_body();
+    assert_eq!(upstream_body["model"], "vendor/Upstream-Model");
+    assert_eq!(upstream_body["messages"][0]["role"], "system");
+    assert_eq!(upstream_body["messages"][1]["content"], "你好");
+    assert_eq!(upstream_body["max_tokens"], 1024);
+    assert_eq!(upstream_body["stream"], true);
+}
+
+#[test]
+fn responses_upstream_passes_through_and_hides_the_upstream_id() {
+    let harness = Harness::start(RESPONSES_V1, MockReply::Sse(RESPONSES_SSE), Protocol::Responses);
+    let token = harness.token.expose().to_owned();
+
+    let (status, text) = harness.post("responses", Some(&token), &harness.request_body());
+
+    assert_eq!(status, 200);
+    assert!(text.contains("event: response.created"));
+    assert!(text.contains("event: response.completed"));
+    assert!(text.contains(&harness.alias), "透传也要把身份改写回 alias");
+    assert!(!text.contains("vendor/Upstream-Model"));
+
+    let upstream_body = harness.upstream.last_body();
+    assert_eq!(upstream_body["model"], "vendor/Upstream-Model");
+    assert!(upstream_body["input"].is_array(), "透传必须保留 input 结构");
+    assert!(upstream_body.get("messages").is_none());
+}
+
+#[test]
+fn upstream_error_body_never_leaks_the_upstream_key() {
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Status {
+            code: 502,
+            body: format!("{{\"error\":{{\"message\":\"bad key {SECRET}\"}}}}"),
+        },
+        Protocol::ChatCompletions,
+    );
+    let token = harness.token.expose().to_owned();
+
+    let (status, text) = harness.post("responses", Some(&token), &harness.request_body());
+
+    assert_eq!(status, 500, "上游 5xx 映射为内部错误");
+    assert!(!text.contains(SECRET), "上游错误正文里的 Key 必须被抹掉：{text}");
+    assert!(text.contains("redacted"), "应留下脱敏痕迹，便于排查：{text}");
+    assert!(text.contains("INTERNAL"), "5xx 归类为可重试的内部错误：{text}");
+    assert!(
+        text.contains("error.upstreamFailed"),
+        "必须保留“失败来自上游”这一区分：{text}"
+    );
+}
+
+#[test]
+fn upstream_permission_error_is_classified() {
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Status { code: 401, body: "{\"error\":{\"message\":\"no permission\"}}".to_owned() },
+        Protocol::ChatCompletions,
+    );
+    let token = harness.token.expose().to_owned();
+
+    let (status, text) = harness.post("responses", Some(&token), &harness.request_body());
+
+    assert_eq!(status, 403);
+    assert!(text.contains("MODEL_PERMISSION_DENIED"), "{text}");
+}
+
+#[test]
+fn models_endpoint_lists_only_the_published_revision() {
+    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let token = harness.token.expose().to_owned();
+
+    let response = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .build()
+        .new_agent()
+        .get(&harness.url("models"))
+        .header("authorization", format!("Bearer {token}"))
+        .call()
+        .unwrap();
+    let text = response.into_body().read_to_string().unwrap();
+
+    assert!(text.contains(&harness.alias));
+    assert_eq!(harness.upstream.requests(), 0, "列模型不应触达上游");
+}
+
+#[test]
+fn health_requires_the_token_too() {
+    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let response = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .build()
+        .new_agent()
+        .get(&format!("http://127.0.0.1:{}/health", harness.port))
+        .call()
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 401, "健康检查不开放匿名访问");
+}
+
+#[test]
+fn realtime_path_reports_unsupported_instead_of_hanging() {
+    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let token = harness.token.expose().to_owned();
+
+    let (status, text) = harness.post("realtime", Some(&token), &json!({}));
+
+    assert_eq!(status, 400);
+    assert!(text.contains("CAPABILITY_UNSUPPORTED"), "必须显式告知不支持：{text}");
+}
+
+#[test]
+fn oversized_body_is_rejected_before_reading_it_all() {
+    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let token = harness.token.expose().to_owned();
+    let declared = MAX_REQUEST_BYTES + 1;
+
+    let mut stream = TcpStream::connect(("127.0.0.1", harness.port)).unwrap();
+    let head = format!(
+        "POST /i/{INSTANCE}/c/{REVISION}/v1/responses HTTP/1.1\r\nhost: 127.0.0.1\r\nauthorization: Bearer {token}\r\ncontent-type: application/json\r\ncontent-length: {declared}\r\n\r\n"
+    );
+    stream.write_all(head.as_bytes()).unwrap();
+    let mut response = String::new();
+    let _ = stream.read_to_string(&mut response);
+
+    assert!(response.starts_with("HTTP/1.1 413"), "应返回 413：{response}");
+    assert!(response.contains("REQUEST_TOO_LARGE"));
+}
+
+#[test]
+fn chunked_request_bodies_are_refused_with_a_clear_error() {
+    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let token = harness.token.expose().to_owned();
+
+    let mut stream = TcpStream::connect(("127.0.0.1", harness.port)).unwrap();
+    let head = format!(
+        "POST /i/{INSTANCE}/c/{REVISION}/v1/responses HTTP/1.1\r\nhost: 127.0.0.1\r\nauthorization: Bearer {token}\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\n\r\n"
+    );
+    stream.write_all(head.as_bytes()).unwrap();
+    let mut response = String::new();
+    let _ = stream.read_to_string(&mut response);
+
+    assert!(response.starts_with("HTTP/1.1 400"), "应返回 400：{response}");
+    assert!(response.contains("Content-Length"));
+}
+
+#[test]
+fn credential_version_change_blocks_the_request() {
+    // 路由引用的凭据版本比存储里的更旧：相当于“目录发布后又换了 Key”。
+    let harness = Harness::start_with(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+        TestPolicy { credential_version_offset: 1, ..TestPolicy::default() },
+    );
+    let token = harness.token.expose().to_owned();
+
+    let (status, text) = harness.post("responses", Some(&token), &harness.request_body());
+
+    assert_eq!(status, 409);
+    assert!(text.contains("CONTINUATION_BOUND"), "{text}");
+    assert_eq!(harness.upstream.requests(), 0, "版本不符不得触达上游");
+}
+
+#[test]
+fn binding_reports_the_actual_port_and_status_reflects_it() {
+    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let status = harness.gateway.status();
+
+    assert!(status.running);
+    assert_eq!(status.port, Some(harness.port));
+    assert_eq!(status.instance_id, INSTANCE);
+    assert_eq!(harness.upstream.requests(), 0, "网关启动本身不应发请求");
+}
+
+/// 网关必须把每次推理的结论写进诊断日志，否则界面无从定位失败。
+#[test]
+fn the_gateway_records_diagnostics_for_success_and_rejection() {
+    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let token = harness.token.expose().to_owned();
+    let log = harness.gateway.diagnostics();
+
+    harness.post("responses", Some(&token), &harness.request_body());
+    let (status, _) = harness.post("responses", None, &harness.request_body());
+    assert_eq!(status, 401);
+
+    let events = log.list(None);
+    let results: Vec<&str> = events.iter().map(|event| event.result_key.as_str()).collect();
+    assert!(
+        results.contains(&"result.upstreamAccepted"),
+        "成功请求必须留痕：{results:?}"
+    );
+    assert!(
+        results.contains(&"result.rejectedBeforeRouting"),
+        "认证失败必须留痕：{results:?}"
+    );
+    assert!(
+        events.iter().any(|event| event.level == LogLevel::Warning),
+        "拒绝类事件应为警告级别"
+    );
+
+    // 日志里不得出现网关令牌或上游 Key。
+    let rendered = serde_json::to_string(&events).unwrap();
+    assert!(!rendered.contains(&token), "诊断事件不得包含网关令牌");
+    assert!(!rendered.contains(SECRET), "诊断事件不得包含上游 Key");
+}
+
+/// GW-05：未声明图片输入的模型必须被显式拒绝，且不得触达上游。
+#[test]
+fn an_undeclared_modality_is_rejected_before_reaching_the_upstream() {
+    let harness = Harness::start_with(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+        TestPolicy::declaring(&["text"]),
+    );
+    let token = harness.token.expose().to_owned();
+    let mut body = harness.request_body();
+    body["input"] = json!([{"type": "message", "role": "user", "content": [
+        {"type": "input_text", "text": "看这张图"},
+        {"type": "input_image", "image_url": "data:image/png;base64,AAAA"}
+    ]}]);
+
+    let (status, text) = harness.post("responses", Some(&token), &body);
+
+    assert_eq!(status, 400);
+    assert!(text.contains("CAPABILITY_UNSUPPORTED"), "{text}");
+    assert!(text.contains("未声明"), "错误详情要说明是未声明模态：{text}");
+    assert_eq!(harness.upstream.requests(), 0, "拒绝必须发生在上游调用之前");
+    assert!(
+        harness
+            .gateway
+            .diagnostics()
+            .list(None)
+            .iter()
+            .any(|event| event.result_key == "result.modalityRejected"),
+        "模态拒绝必须留痕"
+    );
+}
+
+/// GW-05：声明了图片的模型可以正常收到图片输入。
+#[test]
+fn a_declared_modality_is_forwarded() {
+    let harness = Harness::start_with(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+        TestPolicy::declaring(&["text", "image"]),
+    );
+    let token = harness.token.expose().to_owned();
+    let mut body = harness.request_body();
+    body["input"] = json!([{"type": "message", "role": "user", "content": [
+        {"type": "input_text", "text": "看这张图"},
+        {"type": "input_image", "image_url": "data:image/png;base64,AAAA"}
+    ]}]);
+
+    let (status, _) = harness.post("responses", Some(&token), &body);
+
+    assert_eq!(status, 200);
+    assert_eq!(harness.upstream.requests(), 1);
+    let upstream_body = harness.upstream.last_body();
+    assert_eq!(upstream_body["messages"][1]["content"][1]["type"], "image_url");
+}
+
+/// GW-05：模型声明的输出上限必须落到真实的上游请求参数上。
+#[test]
+fn the_declared_output_limit_reaches_the_upstream_request() {
+    let harness = Harness::start_with(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+        TestPolicy { output_limit: Some(2_048), ..TestPolicy::default() },
+    );
+    let token = harness.token.expose().to_owned();
+    let mut body = harness.request_body();
+    body["max_output_tokens"] = json!(32_000);
+
+    let (status, _) = harness.post("responses", Some(&token), &body);
+
+    assert_eq!(status, 200);
+    let upstream_body = harness.upstream.last_body();
+    assert_eq!(
+        upstream_body["max_tokens"], 2048,
+        "宿主请求 32000，必须被模型声明的上限收口"
+    );
+}
+
+/// GW-03：宿主中途断开时，网关必须停止读取上游，而不是把整个流跑完。
+#[test]
+fn a_client_disconnect_stops_the_upstream_stream() {
+    // 大量且较大的分片：宿主的接收缓冲不可能全部吸收，写入必然失败。
+    let filler = "x".repeat(1_024);
+    let mut sse = String::new();
+    for _ in 0..200 {
+        sse.push_str(&format!(
+            "data: {{\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"{filler}\"}}}}]}}\n\n"
+        ));
+    }
+    sse.push_str("data: [DONE]\n\n");
+    let leaked: &'static str = Box::leak(sse.into_boxed_str());
+
+    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(leaked), Protocol::ChatCompletions);
+    let token = harness.token.expose().to_owned();
+
+    let mut stream = TcpStream::connect(("127.0.0.1", harness.port)).unwrap();
+    let body = harness.request_body().to_string();
+    let head = format!(
+        "POST /i/{INSTANCE}/c/{REVISION}/v1/responses HTTP/1.1\r\nhost: 127.0.0.1\r\nauthorization: Bearer {token}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(head.as_bytes()).unwrap();
+    // 只读一点点就断开，模拟宿主取消正在生成的任务。
+    let mut head_buffer = [0u8; 256];
+    let _ = stream.read(&mut head_buffer);
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+    drop(stream);
+
+    // 异步收尾：等网关在下一次写时发现对方已经离开。
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut observed = false;
+    while std::time::Instant::now() < deadline {
+        if harness
+            .gateway
+            .diagnostics()
+            .list(None)
+            .iter()
+            .any(|event| event.result_key == "result.clientDisconnected")
+        {
+            observed = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    assert!(
+        observed,
+        "宿主断开必须被识别为取消并留痕，实际事件：{:?}",
+        harness
+            .gateway
+            .diagnostics()
+            .list(None)
+            .iter()
+            .map(|event| event.result_key.clone())
+            .collect::<Vec<_>>()
+    );
+}
