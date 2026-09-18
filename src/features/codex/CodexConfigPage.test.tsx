@@ -31,12 +31,14 @@ async function openEmptyCodexPage() {
 
 test('提交成功只显示等待 Codex 重新加载，绝不自行宣称已加载', async () => {
   const confirmReload = vi.fn();
+  const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitRequested: true, launched: true });
   const user = await openCodexPage({
     detectInstances: vi.fn().mockResolvedValue([instance]),
     planApply: vi.fn().mockResolvedValue(plan([modelChange, providerChange])),
     executeApply: vi.fn().mockResolvedValue({ operationId: 'op_1' }),
     applyStatus: vi.fn().mockResolvedValue({ operationId: 'op_1', open: true, events: [event('prepared'), event('awaiting_reload')] }),
     confirmReload,
+    restartHost,
   });
 
   await user.click(screen.getByRole('button', { name: '应用到 Codex' }));
@@ -47,6 +49,10 @@ test('提交成功只显示等待 Codex 重新加载，绝不自行宣称已加�
   // 只有用户确认后才允许出现成功文案。
   expect(screen.queryByText('Codex 已重新加载并核验本次目录。')).not.toBeInTheDocument();
   expect(confirmReload).not.toHaveBeenCalled();
+  // 配置写完就自动重启宿主一次，用户不必再点「重启 Codex」；
+  // 但文案仍然只是「已提交 + 已重启」，不说它已经加载了新目录。
+  expect(restartHost).toHaveBeenCalledWith(instance.id);
+  expect(screen.getByRole('status')).toHaveTextContent(/配置已提交，并已重启 Codex/);
 });
 
 test('用户确认宿主已重新加载后才进入已核验', async () => {

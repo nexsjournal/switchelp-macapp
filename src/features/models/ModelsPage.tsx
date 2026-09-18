@@ -164,7 +164,7 @@ export function ModelsPage({ client, providers, models, onChanged, onViewDiff, p
   }
 
   const body = <>
-    <div className={styles.toolbar}>
+    <div className={embedded ? styles.toolbarEmbedded : styles.toolbar}>
       <div className={styles.search}><Search size={17} />
         <input aria-label={t('models.searchAria')} placeholder={t('models.searchPlaceholder')} value={query} onChange={event => setQuery(event.target.value)} />
       </div>
@@ -179,7 +179,7 @@ export function ModelsPage({ client, providers, models, onChanged, onViewDiff, p
           {(Object.keys(availabilityKeys) as Availability[]).map(key => <option key={key} value={key}>{t(availabilityKeys[key])}</option>)}
         </select></label>
       </div>
-      <button className="primary" onClick={() => setEditor('new')} disabled={!providers.length}><Plus size={17} />{t('action.addModel')}</button>
+      {!embedded && <button className="primary" onClick={() => setEditor('new')} disabled={!providers.length}><Plus size={17} />{t('action.addModel')}</button>}
     </div>
 
     {error && <div className="error-message" role="alert">{error}</div>}
@@ -210,7 +210,7 @@ export function ModelsPage({ client, providers, models, onChanged, onViewDiff, p
                   onChange={toggleAll} />
               </th>
               {sortHeader('name', t('models.columnModel'))}
-              {sortHeader('provider', t('editor.provider'))}
+              {!providerScope && sortHeader('provider', t('editor.provider'))}
               {sortHeader('context', t('models.columnLimits'))}
               <th scope="col">{t('models.columnState')}</th>
               <th scope="col"><span className="visually-hidden">{t('common.actions')}</span></th>
@@ -221,7 +221,7 @@ export function ModelsPage({ client, providers, models, onChanged, onViewDiff, p
                   checked={selected.includes(model.id)} onChange={() => toggleOne(model.id)} />
               </td>
               <td><strong>{model.displayName}</strong><span className="text-mono text-muted break-anywhere">{model.upstreamId}</span></td>
-              <td>{providerName(model.providerId)}</td>
+              {!providerScope && <td>{providerName(model.providerId)}</td>}
               <td className="text-mono">{model.policy.contextLimit?.toLocaleString() ?? t('common.undeclared')}<span className="text-muted">{model.policy.outputLimit?.toLocaleString() ?? t('common.undeclared')}</span></td>
               <td><span className={`badge ${model.hostState === 'pending_apply' ? 'warning' : ''}`}>{t(hostKeys[model.hostState])}</span></td>
               <td><div className={styles.rowActions}>

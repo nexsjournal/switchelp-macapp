@@ -1,4 +1,12 @@
 .page { display: grid; gap: 20px; }
+/*
+ * 嵌进供应商详情时的工具栏：那里的容器窄得多（右边一栏要放地址、Key、模型、连接检查）。
+ * 搜索独占一行，筛选换到下一行，避免和主按钮挤在同一行里互相压。
+ */
+.toolbarEmbedded { display: grid; gap: 12px; }
+.toolbarEmbedded .search { width: 100%; min-width: 0; }
+.toolbarEmbedded .filters { justify-content: flex-start; }
+
 .toolbar { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
 .search { display: flex; align-items: center; position: relative; flex: 1; min-width: 240px; }
 .search svg { position: absolute; left: 12px; pointer-events: none; }

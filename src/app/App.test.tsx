@@ -14,7 +14,7 @@ test('首次接入保存真实草稿调用，失败后保留表单且不宣称 C
   await user.click(screen.getAllByRole('button', { name: '添加供应商' })[0]!);
   const dialog = screen.getByRole('dialog');
   await user.type(within(dialog).getByLabelText('供应商名称'), '测试服务');
-  await user.type(within(dialog).getByLabelText('API 地址'), 'http://example.test/v1');
+  await user.type(within(dialog).getByLabelText('OpenAI 地址'), 'http://example.test/v1');
   await user.click(within(dialog).getByRole('button', { name: '保存供应商' }));
   expect(await within(dialog).findByRole('alert')).toHaveTextContent('HTTPS');
   expect(within(dialog).getByLabelText('供应商名称')).toHaveValue('测试服务');

@@ -146,8 +146,12 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
     const result = draft.kind === 'apply' ? await client.executeApply(request) : await client.executeRestore(request);
     const next = await client.applyStatus(result.operationId);
     setStatus(next);
-    if (draft.kind === 'restore') { setNotice(t('stage.restored')); setDraft(null); onApplied?.(); }
-    else onApplied?.();
+    if (draft.kind === 'restore') { setNotice(t('stage.restored')); setDraft(null); onApplied?.(); return; }
+    onApplied?.();
+    // 配置写完了，但 Codex 只在启动时读它：直接重启，省掉「再点一次重启」这一步。
+    // 重启失败不影响已经提交的配置，所以这里只降级成提示。
+    const report = await client.restartHost(instanceId).catch(() => null);
+    setNotice(report?.launched ? t('codex.appliedAndRestarted') : t('codex.restartHostFailed'));
   });
 
   /**
@@ -288,7 +292,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
           return <li key={raw}><strong>{label}</strong>{t('common.labelSeparator')}{detail}</li>;
         })}</ul>
       </div>}
-      <div className={styles.note}><ShieldAlert size={17} /><p>{t('codex.casNote')}</p></div>
+      <div className={styles.note}><ShieldAlert size={17} /><p>{t('codex.casNote')} {t('codex.applyRestartsHost')}</p></div>
       <div className={styles.actions} style={{ marginTop: 20 }}>
         <button className="primary" onClick={() => void commit()} disabled={busy === 'commit'}>
           {busy === 'commit' ? t('codex.committing') : commitLabel}
