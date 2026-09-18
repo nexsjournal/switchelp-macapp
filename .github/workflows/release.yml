@@ -13,10 +13,14 @@ on:
     tags: ['v*']
   workflow_dispatch:
     inputs:
+      tag:
+        description: '把产物附加到哪个标签（留空则用当前 ref）'
+        type: string
+        default: 'v0.1.0'
       draft:
         description: '发布为草稿'
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: write
@@ -153,6 +157,8 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          # 手动触发时可以指定要附加产物的标签；打标签时用触发它的那个标签。
+          tag_name: ${{ inputs.tag || github.ref_name }}
           # 手动触发时默认草稿，核对过再发布；打标签时直接发布。
           draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
           generate_release_notes: true
