@@ -73,10 +73,13 @@ jobs:
       - name: 归集产物
         shell: pwsh
         run: |
+          # 只取打包产物目录：整树搜索会把未打包的裸 gptswitch.exe 也带上，
+          # 那不是安装包，用户下载后会一脸问号。
           New-Item -ItemType Directory -Force -Path out | Out-Null
-          Get-ChildItem -Path target -Recurse -Include *.msi,*.exe |
-            Where-Object { $_.FullName -notmatch '\\deps\\|\\build\\' } |
+          $bundle = "target/x86_64-pc-windows-msvc/release/bundle"
+          Get-ChildItem -Path $bundle -Recurse -Include *.msi,*.exe |
             Copy-Item -Destination out
+          if (-not (Get-ChildItem out)) { throw "没有找到任何安装包：$bundle" }
           Get-ChildItem out
       - uses: actions/upload-artifact@v4
         with:
@@ -94,7 +97,7 @@ jobs:
       matrix:
         target: [aarch64-apple-darwin, x86_64-apple-darwin]
     runs-on: macos-latest
-    name: macOS (${{ matrix.target }})
+    name: macOS
     env:
       # `if` 表达式里不能直接引用 secrets，只能引用 env；所以先在 job 级转存。
       APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}

@@ -117,9 +117,7 @@ fn install_tray(app: &tauri::AppHandle, gateway_running: bool, port: Option<u16>
             }
             "open_codex" => {
                 // 只在本机打开宿主应用；不安装、不修改它的配置。
-                let _ = std::process::Command::new("open")
-                    .args(["-a", "ChatGPT"])
-                    .spawn();
+                open_host_app();
             }
             "quit" => app.exit(0),
             _ => {}
@@ -129,6 +127,18 @@ fn install_tray(app: &tauri::AppHandle, gateway_running: bool, port: Option<u16>
     }
     builder.build(app)?;
     Ok(())
+}
+
+/// 打开宿主应用。平台差异集中在这里，不在事件回调里写 `cfg`。
+fn open_host_app() {
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").args(["-a", "ChatGPT"]).spawn();
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("cmd")
+        .args(["/C", "start", "", "ChatGPT"])
+        .spawn();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let _ = std::process::Command::new("chatgpt").spawn();
 }
 
 fn main() {
