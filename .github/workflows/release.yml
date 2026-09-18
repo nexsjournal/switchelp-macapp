@@ -21,6 +21,12 @@ on:
         description: '发布为草稿'
         type: boolean
         default: false
+      with_windows:
+        # 默认只出 macOS 包：Windows 只在明确需要时打，避免每次发版都花十几分钟在
+        # 用不到的安装包上（而且它还需要 Windows 签名证书才有意义）。
+        description: '同时构建 Windows 包'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -103,6 +109,8 @@ jobs:
 
   build-windows:
     needs: [gate, test]
+    # 手动触发时看 with_windows；打标签触发时不出 Windows（需要时手动再触发一次）。
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.with_windows }}
     runs-on: windows-latest
     name: Windows (x64)
     steps:
@@ -253,9 +261,11 @@ jobs:
     permissions:
       contents: write
     # 被跳过的依赖会让下游默认也跳过，所以这里显式判断：
-    # Windows 必须成功；macOS 成功或（未配签名而）跳过都可以。
+    # 测试必须成功；Windows 与 macOS 各自「成功或跳过」都算（macOS 未配签名时跳过，
+    # Windows 默认不出；产物由本机签名后手动附上）。
     if: ${{ always() && !cancelled()
-      && needs.build-windows.result == 'success'
+      && needs.test.result == 'success'
+      && (needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped')
       && (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:

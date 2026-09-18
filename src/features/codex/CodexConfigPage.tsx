@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, FileSearch, History, RefreshCw, ShieldAler
 import type { ApplyPlan, ApplyStage, CodexInstance, FieldChange, Model } from '@/contracts/types';
 import { type AppliedSummary, type ApplyStatus, type DesktopClient, type InspectResult, toCoreError } from '@/desktop/client';
 
+import { Dialog } from '@/components/Dialog';
 import styles from './CodexConfigPage.module.css';
 
 import { t } from '@/i18n';
@@ -101,6 +102,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
   /** 核心给出的恢复动作；界面只呈现自己确实能执行的那些。 */
   const [recovery, setRecovery] = useState<string[]>([]);
   const [notice, setNotice] = useState('');
+  const [restartConfirm, setRestartConfirm] = useState(false);
 
   const fail = useCallback((thrown: unknown, fallback: string) => {
     const normalized = toCoreError(thrown);
@@ -146,6 +148,16 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
     setStatus(next);
     if (draft.kind === 'restore') { setNotice(t('stage.restored')); setDraft(null); onApplied?.(); }
     else onApplied?.();
+  });
+
+  /**
+   * 重启宿主。Codex 只在启动时读 `config.toml`：写完配置不重启，模型不会出现在它的菜单里。
+   * 命令只负责「请求退出 + 重新打开」，所以这里说的是「已请求重启」，不是「已生效」。
+   */
+  const restartHost = () => run('restart', async () => {
+    const report = await client.restartHost(instanceId);
+    setRestartConfirm(false);
+    setNotice(report.launched ? t('codex.restartHostRequested') : t('codex.restartHostFailed'));
   });
 
   const confirmReload = (loaded: boolean) => run('confirm', async () => {
@@ -235,6 +247,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
         <button onClick={loadInspect} disabled={!instanceId || busy === 'inspect'}>{t('codex.checkConfig')}</button>
         <button className="primary" onClick={() => void makePlan('apply')} disabled={!instanceId || busy === 'plan'}>{t('action.applyToCodex')}</button>
         <button onClick={() => void makePlan('restore')} disabled={!instanceId || busy === 'plan'}><History size={16} />{t('action.restorePrevious')}</button>
+        <button onClick={() => setRestartConfirm(true)} disabled={!instanceId || busy === 'restart'}><RefreshCw size={15} />{t('action.restartHost')}</button>
       </div>
     </section>
 
@@ -305,6 +318,8 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
           <span>{t('codex.awaitingReloadBody')}</span>
         </div>
         <div className={styles.actions}>
+          {/* 重启是让 Codex 真正读到新目录的可靠办法，所以放在这一格里。 */}
+          <button onClick={() => setRestartConfirm(true)} disabled={busy === 'restart'}><RefreshCw size={15} />{t('action.restartHost')}</button>
           <button className="primary" onClick={() => void confirmReload(true)} disabled={busy === 'confirm'}>{t('codex.reloaded')}</button>
           <button onClick={() => void confirmReload(false)} disabled={busy === 'confirm'}>{t('action.laterReload')}</button>
         </div>
@@ -316,5 +331,19 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
         </div>
       </div>}
     </section>}
+
+    {/* 放在页面顶层：实例卡里的按钮在没有事务时也要能打开它。 */}
+      {restartConfirm && <Dialog title={t('action.restartHost')} description={t('codex.restartHostBody')}
+        busy={busy === 'restart'} onClose={() => setRestartConfirm(false)}>
+        <div className="form-fields"><div className="form-footer">
+          <span>{t('codex.restartHostNote')}</span>
+          <div className="actions">
+            <button onClick={() => setRestartConfirm(false)} disabled={busy === 'restart'}>{t('action.cancel')}</button>
+            <button className="primary" autoFocus disabled={busy === 'restart'} onClick={() => void restartHost()}>
+              {busy === 'restart' ? t('codex.restarting') : t('action.restartHost')}
+            </button>
+          </div>
+        </div></div>
+      </Dialog>}
   </div>;
 }

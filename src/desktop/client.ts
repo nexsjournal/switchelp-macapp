@@ -103,6 +103,13 @@ export interface GatewayReport {
 }
 
 /** 当前已生效的配置摘要。`defaultModel` 为空表示历史事务没有记录，不用当前表单值顶替。 */
+/** 一次重启请求的结果。`launched` 只表示进程起来了，不表示配置已生效。 */
+export interface HostRestart {
+  appPath: string;
+  quitRequested: boolean;
+  launched: boolean;
+}
+
 export interface AppliedSummary {
   operationId: string;
   instanceId: string;
@@ -197,6 +204,13 @@ export interface DesktopClient {
   applyStatus(operationId: string): Promise<ApplyStatus>;
   /** 只有用户确认宿主已重新加载，事务才从“等待重载”前进；不得由前端自行宣称已加载。 */
   confirmReload(operationId: string, loaded: boolean): Promise<ApplyStatus>;
+  /**
+   * 重启探测到的宿主实例（Codex / ChatGPT 桌面端）。
+   *
+   * Codex 只在启动时读 `config.toml`，写完配置必须重启它，模型才会出现在它的菜单里。
+   * 返回的字段只说明「发出了什么命令」，不表示它已经加载了新配置。
+   */
+  restartHost(instanceId: string): Promise<HostRestart>;
   planRestore(instanceId: string): Promise<ApplyPlan>;
   executeRestore(request: ExecutionRequest): Promise<{ operationId: string }>;
 

@@ -124,6 +124,25 @@ test('编译警告显示可读文案，不把内部 messageKey 摆给用户', as
 });
 
 
+
+test('重启宿主：先确认，再调用一次，并把结果说成「已请求」而不是「已生效」', async () => {
+  const user = userEvent.setup();
+  const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitRequested: true, launched: true });
+  render(<App client={testClient({ detectInstances: vi.fn().mockResolvedValue([instance]), restartHost })} />);
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'Codex 配置' }));
+  await screen.findByText('Codex 实例');
+
+  await user.click(screen.getByRole('button', { name: '重启 Codex' }));
+  const dialog = await screen.findByRole('dialog');
+  // 会丢未保存的对话：必须先说清楚。
+  expect(within(dialog).getByText(/未保存的对话可能丢失/)).toBeInTheDocument();
+  expect(restartHost).not.toHaveBeenCalled();
+
+  await user.click(within(dialog).getByRole('button', { name: '重启 Codex' }));
+  expect(restartHost).toHaveBeenCalledWith(instance.id);
+  expect(await screen.findByRole('status')).toHaveTextContent(/已请求重启/);
+});
+
 test('实例检测失败要能看到原因，而不是只显示空态', async () => {
   const user = userEvent.setup();
   render(<App client={testClient({ detectInstances: vi.fn().mockRejectedValue({ code: 'INTERNAL',

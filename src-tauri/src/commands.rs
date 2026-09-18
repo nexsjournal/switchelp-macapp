@@ -315,6 +315,65 @@ pub async fn apply_execute(
     .await
 }
 
+/// 重启宿主的结果。
+///
+/// 只说明「发出了什么命令」：退出是请求式的（宿主可能弹确认框），所以这里**不**声称
+/// 它已经加载了新配置。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostRestart {
+    pub app_path: String,
+    pub quit_requested: bool,
+    pub launched: bool,
+}
+
+/// 重启探测到的宿主实例。
+///
+/// Codex 只在启动时读 `config.toml`：写完配置不重启，模型就不会出现在它的模型菜单里。
+/// 路径**只从已检测到的实例里取**，渲染层传不了任意路径。
+#[tauri::command]
+pub async fn host_restart(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    instance_id: String,
+) -> Result<HostRestart, CoreError> {
+    run(window, state, move |desktop| {
+        restart_host(desktop, &instance_id)
+    })
+    .await
+}
+
+fn restart_host(desktop: &DesktopState, instance_id: &str) -> Result<HostRestart, CoreError> {
+    let instance = desktop.instance(instance_id)?;
+    let app_path = instance
+        .app_path
+        .clone()
+        .ok_or_else(|| CoreError::validation("这个实例没有可重启的应用路径；请手动重开 Codex"))?;
+    let plan =
+        switch_core::platform::restart_plan(switch_core::platform::Platform::current(), &app_path);
+    // 不等待退出：宿主可能弹确认框，等下去会把这条命令挂住。请求退出后隔一会儿再拉起，
+    // 否则前台还是那个正在退出的旧进程。拉起的进程也不等待——它会一直活着。
+    let quit_requested = plan.quit.as_ref().is_some_and(spawn_detached);
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    let launched = spawn_detached(&plan.launch);
+    Ok(HostRestart {
+        app_path,
+        quit_requested,
+        launched,
+    })
+}
+
+/// 起一个进程就走，不等它结束。返回值表示是否成功启动。
+fn spawn_detached(spec: &switch_core::platform::CommandSpec) -> bool {
+    std::process::Command::new(&spec.program)
+        .args(&spec.args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .is_ok()
+}
+
 /// 查询事务状态。界面据此显示“等待 Codex 重载”而不是“已加载”。
 #[tauri::command]
 pub async fn apply_status(

@@ -51,6 +51,72 @@ pub struct WindowChrome {
 pub const TITLEBAR_HEIGHT: u32 = 44;
 pub const MACOS_TRAFFIC_LIGHT_RESERVE: u32 = 84;
 
+/// 一条要执行的命令。程序与参数分开存，便于断言，也避免拼字符串时被引号咬到。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandSpec {
+    pub program: String,
+    pub args: Vec<String>,
+}
+
+/// 重启宿主要执行的命令：先退出，再打开。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestartPlan {
+    /// 退出是「请求退出」：平台不支持时为空。
+    pub quit: Option<CommandSpec>,
+    pub launch: CommandSpec,
+}
+
+/// 生成重启宿主的命令。
+///
+/// 为什么需要它：Codex 只在**启动时**读 `config.toml`，写完配置不重启，模型就不会出现在
+/// 它的模型菜单里。这里只构造命令，执行由外壳负责——退出是异步的，因此调用方**不得**
+/// 据此声称宿主已经加载了新配置。
+pub fn restart_plan(platform: Platform, app_path: &str) -> RestartPlan {
+    match platform {
+        // `quit app` 接受 .app 的 POSIX 路径；`open -a` 走 Launch Services。
+        Platform::Macos => RestartPlan {
+            quit: Some(CommandSpec {
+                program: "osascript".to_owned(),
+                args: vec!["-e".to_owned(), format!("quit app \"{app_path}\"")],
+            }),
+            launch: CommandSpec {
+                program: "open".to_owned(),
+                args: vec!["-a".to_owned(), app_path.to_owned()],
+            },
+        },
+        // taskkill 按映像名结束；启动直接执行那个可执行文件，不经 `cmd /C start`——
+        // 后者会把路径交给 cmd 再解析一遍，路径里带 & 或引号时就成了注入点。
+        Platform::Windows => RestartPlan {
+            quit: Some(CommandSpec {
+                program: "taskkill".to_owned(),
+                args: vec!["/IM".to_owned(), exe_name(app_path), "/F".to_owned()],
+            }),
+            launch: CommandSpec {
+                program: app_path.to_owned(),
+                args: Vec::new(),
+            },
+        },
+        // 本仓库不发布 Linux 包，只保证编译与逻辑正确。
+        Platform::Linux => RestartPlan {
+            quit: None,
+            launch: CommandSpec {
+                program: "xdg-open".to_owned(),
+                args: vec![app_path.to_owned()],
+            },
+        },
+    }
+}
+
+/// 从路径里取出可执行文件名。两种分隔符都认：测试在 macOS 上跑，但值要在 Windows 上用。
+fn exe_name(app_path: &str) -> String {
+    app_path
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or("ChatGPT.exe")
+        .to_owned()
+}
+
 /// 各平台的窗口策略。
 ///
 /// macOS 用自绘标题栏并为交通灯预留位置；Windows 交给系统标题栏，
@@ -263,5 +329,50 @@ mod tests {
         assert!(host_executable_names(Platform::Linux)
             .iter()
             .all(|name| !name.contains('.')));
+    }
+
+    #[test]
+    fn restart_plan_quits_then_relaunches_the_same_bundle() {
+        let plan = restart_plan(Platform::Macos, "/Applications/ChatGPT.app");
+        let quit = plan.quit.expect("macOS 应能请求退出");
+        assert_eq!(quit.program, "osascript");
+        assert_eq!(quit.args[1], "quit app \"/Applications/ChatGPT.app\"");
+        assert_eq!(plan.launch.program, "open");
+        assert_eq!(plan.launch.args, vec!["-a", "/Applications/ChatGPT.app"]);
+    }
+
+    #[test]
+    fn restart_plan_ends_the_process_by_image_name_on_windows() {
+        let exe = "C:\\Program Files\\ChatGPT\\ChatGPT.exe";
+        let plan = restart_plan(Platform::Windows, exe);
+        let quit = plan.quit.expect("Windows 应能请求退出");
+        assert_eq!(quit.program, "taskkill");
+        assert_eq!(quit.args, vec!["/IM", "ChatGPT.exe", "/F"]);
+        // 启动直接执行该文件：参数为空，不会经过 cmd 再解析一次。
+        assert_eq!(plan.launch.program, exe);
+        assert!(plan.launch.args.is_empty());
+    }
+
+    #[test]
+    fn restart_plan_passes_the_app_path_verbatim_without_a_shell() {
+        // 路径含空格与 shell 元字符时，必须原样作为**一个**参数传递；任何环节都不许出现
+        // 解释器（sh / cmd / osascript 的字符串拼接）。
+        let odd = "/tmp/weird name; touch /tmp/pwned.app";
+        for platform in [Platform::Macos, Platform::Windows, Platform::Linux] {
+            let plan = restart_plan(platform, odd);
+            let argv: Vec<String> = std::iter::once(plan.launch.program.clone())
+                .chain(plan.launch.args.iter().cloned())
+                .collect();
+            assert_eq!(
+                argv.iter().filter(|part| *part == odd).count(),
+                1,
+                "{platform:?} 应把整条路径原样作为单个参数：{argv:?}"
+            );
+            if platform == Platform::Windows {
+                // Windows 直接执行该文件，不经 cmd。
+                assert_eq!(plan.launch.program, odd);
+                assert!(plan.launch.args.is_empty());
+            }
+        }
     }
 }

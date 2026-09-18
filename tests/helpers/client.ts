@@ -57,6 +57,7 @@ export function testClient(overrides: Partial<DesktopClient> = {}): DesktopClien
     executeApply: failing(),
     applyStatus: failing(),
     confirmReload: failing(),
+    restartHost: failing(),
     planRestore: failing(),
     executeRestore: failing(),
     listDiagnostics: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),

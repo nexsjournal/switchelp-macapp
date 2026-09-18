@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { ApplyPlan, CodexInstance, Credential, DiagnosticEvent, Model, ProbeResult, Provider } from '@/contracts/types';
-import type { AppliedSummary, ApplyStatus, BackupEntry, DesktopClient, GatewayReport, InspectResult, DiagnosticsPreview, PlatformReport, UpdateReport } from './client';
+import type { AppliedSummary, ApplyStatus, BackupEntry, DesktopClient, GatewayReport, HostRestart, InspectResult, DiagnosticsPreview, PlatformReport, UpdateReport } from './client';
 import type { DiscoveredModel } from './client';
 import { t } from '@/i18n';
 
@@ -58,6 +58,7 @@ export const desktopClient: DesktopClient = {
   executeApply: request => call<ExecuteResult>('apply_execute', { planId: request.planId, planHash: request.planHash, idempotencyKey: request.idempotencyKey }),
   applyStatus: operationId => call<ApplyStatus>('apply_status', { operationId }),
   confirmReload: (operationId, loaded) => call<ApplyStatus>('apply_confirm_reload', { operationId, loaded }),
+  restartHost: instanceId => call<HostRestart>('host_restart', { instanceId }),
   planRestore: instanceId => call<ApplyPlan>('restore_plan', { instanceId }),
   executeRestore: request => call<ExecuteResult>('restore_execute', { planId: request.planId, planHash: request.planHash, idempotencyKey: request.idempotencyKey }),
   async listDiagnostics(filter) {

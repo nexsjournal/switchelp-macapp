@@ -261,6 +261,7 @@ fn main() {
             commands::apply_execute,
             commands::apply_status,
             commands::apply_confirm_reload,
+            commands::host_restart,
             commands::apply_summary,
             commands::restore_plan,
             commands::restore_execute,

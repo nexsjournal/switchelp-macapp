@@ -122,6 +122,7 @@ const client: DesktopClient = {
   planApply: async () => plan,
   executeApply: async () => ({ operationId: 'op_a' }),
   applyStatus: async () => status,
+  restartHost: async () => ({ appPath: '/Applications/ChatGPT.app', quitRequested: true, launched: true }),
   confirmReload: async () => ({ operationId: 'op_a', open: false, events: [...status.events, { ...status.events[3]!, sequence: 4, phase: 'verified', messageKey: 'stage.verified' }] }),
   planRestore: async () => plan,
   executeRestore: async () => ({ operationId: 'op_r' }),
