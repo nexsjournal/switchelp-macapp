@@ -26,11 +26,11 @@ Codex  →  ~/.codex/config.toml（本工具受管字段）
 
 | 平台 | 文件 | 首次打开 |
 | --- | --- | --- |
-| macOS（Apple Silicon） | `GPTSwitch_0.1.0_aarch64.dmg` | 已用 Developer ID 签名，但**尚未公证**：首次打开需**右键 → 打开**，或执行一次 `xattr -dr com.apple.quarantine /Applications/GPTSwitch.app` |
-| macOS（Apple Silicon） | `GPTSwitch-0.1.0-arm64.zip` | 同上，解压后把 `.app` 拖进 `/Applications` |
-| Windows（x64） | `GPTSwitch_0.1.0_x64-setup.exe`（NSIS 安装器）<br>`GPTSwitch_0.1.0_x64_en-US.msi` | 未签名，SmartScreen 会提示“未知发布者”，点“仍要运行” |
+| macOS（Apple Silicon） | `Switchelp_0.1.1_aarch64.dmg` | 已用 Developer ID 签名，但**尚未公证**：首次打开需**右键 → 打开**，或执行一次 `xattr -dr com.apple.quarantine /Applications/Switchelp.app` |
+| macOS（Apple Silicon） | `Switchelp-0.1.1-arm64.zip` | 同上，解压后把 `Switchelp.app` 拖进 `/Applications` |
+| Windows（x64） | `Switchelp_0.1.1_x64-setup.exe`（NSIS 安装器）<br>`Switchelp_0.1.1_x64_en-US.msi` | 未签名，SmartScreen 会提示“未知发布者”，点“仍要运行” |
 
-0.1.0 的产物名仍是旧的 `GPTSwitch`——它们是在产品与仓库改名之前构建的。下一个带 tag 的版本起，文件名与应用包名会是 `Switchelp`。应用标识仍是 `app.gptswitch.desktop`（有意保留，让已有用户的应用数据与凭据继续可用）。
+更早的 0.1.0 产物名仍是旧的 `GPTSwitch`——它们是在产品与仓库改名之前构建的。应用标识仍是 `app.gptswitch.desktop`（有意保留，让旧版本的应用数据与凭据继续可用）。
 
 **为什么 macOS 会提示**：签名与公证是两道关卡，本项目目前只有前者。
 补齐公证需要账号所有者提供凭据，步骤见 [签名、公证与发布](docs/development/03-signing-and-release.md)；
