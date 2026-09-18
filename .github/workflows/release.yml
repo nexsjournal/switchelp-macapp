@@ -44,56 +44,76 @@ jobs:
             echo "::notice::未配置 APPLE_SIGNING_IDENTITY，跳过 macOS 构建：未签名的 macOS 包下载后会被 Gatekeeper 拦下，发布它比不发布更糟。"
           fi
 
-  build:
+  build-windows:
     needs: gate
-    # macOS 任务只在配置了签名身份时运行；Windows 任务始终运行。
-    if: ${{ !matrix.requires_signing || needs.gate.outputs.signed == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-latest
-            target: aarch64-apple-darwin
-            label: macOS (Apple Silicon)
-            requires_signing: true
-          - platform: macos-latest
-            target: x86_64-apple-darwin
-            label: macOS (Intel)
-            requires_signing: true
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            label: Windows (x64)
-            requires_signing: false
-
-    runs-on: ${{ matrix.platform }}
-    name: ${{ matrix.label }}
-
+    runs-on: windows-latest
+    name: Windows (x64)
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
         with:
           version: 9
-
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
-
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
-
+          targets: x86_64-pc-windows-msvc
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+      - name: 构建（Windows）
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: pnpm exec tauri build --target x86_64-pc-windows-msvc
+      - name: 归集产物
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Get-ChildItem -Path target -Recurse -Include *.msi,*.exe |
+            Where-Object { $_.FullName -notmatch '\\deps\\|\\build\\' } |
+            Copy-Item -Destination out
+          Get-ChildItem out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gptswitch-x86_64-pc-windows-msvc
+          path: out/*
+          if-no-files-found: error
 
+  # macOS 只在配置了签名身份时构建：未签名的 macOS 包下载后会被 Gatekeeper 拦下。
+  # job 级 `if` 不能用 `matrix`（解析期就报错），所以这里用 `needs` 判断。
+  build-macos:
+    needs: gate
+    if: ${{ needs.gate.outputs.signed == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    runs-on: macos-latest
+    name: macOS (${{ matrix.target }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
       - name: 安装前端依赖
         run: pnpm install --frozen-lockfile
 
-      # --- macOS：证书与公证凭据 -------------------------------------------
-      - name: 导入 macOS 签名证书
-        if: startsWith(matrix.platform, 'macos')
+      - name: 导入签名证书
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -106,8 +126,8 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions build.keychain
           rm certificate.p12
 
-      - name: 保存公证凭据到钥匙串
-        if: startsWith(matrix.platform, 'macos') && secrets.APPLE_API_KEY != ''
+      - name: 保存公证凭据
+        if: secrets.APPLE_API_KEY != ''
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
@@ -120,40 +140,26 @@ jobs:
             --key-id "$APPLE_API_KEY_ID" \
             --issuer "$APPLE_API_ISSUER"
 
-      - name: 构建（macOS，签名并公证）
-        if: startsWith(matrix.platform, 'macos')
+      - name: 构建（签名并公证）
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_KEYCHAIN_PROFILE: gptswitch
         run: pnpm exec tauri build --target ${{ matrix.target }}
 
-      - name: 构建（Windows）
-        if: matrix.platform == 'windows-latest'
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: pnpm exec tauri build --target ${{ matrix.target }}
+      - name: 校验签名与公证
+        run: |
+          APP="target/${{ matrix.target }}/release/bundle/macos/GPTSwitch.app"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          spctl --assess --type execute -vv "$APP" || echo "::warning::Gatekeeper 未通过：多半是还没有配置公证凭据，用户首次打开需右键打开。"
 
-      # --- 归集产物 ---------------------------------------------------------
-      - name: 归集 macOS 产物
-        if: startsWith(matrix.platform, 'macos')
+      - name: 归集产物
         run: |
           mkdir -p out
           find target -type f -name '*.dmg' -exec cp {} out/ \;
           ditto -c -k --keepParent "target/${{ matrix.target }}/release/bundle/macos/GPTSwitch.app" \
             "out/GPTSwitch-${{ matrix.target }}.zip"
           ls -la out
-
-      - name: 归集 Windows 产物
-        if: matrix.platform == 'windows-latest'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path out | Out-Null
-          Get-ChildItem -Path target -Recurse -Include *.msi,*.exe |
-            Where-Object { $_.FullName -notmatch '\\deps\\|\\build\\' } |
-            Copy-Item -Destination out
-          Get-ChildItem out
 
       - uses: actions/upload-artifact@v4
         with:
@@ -162,7 +168,12 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
+    needs: [build-windows, build-macos]
+    # 被跳过的依赖会让下游默认也跳过，所以这里显式判断：
+    # Windows 必须成功；macOS 成功或（未配签名而）跳过都可以。
+    if: ${{ always() && !cancelled()
+      && needs.build-windows.result == 'success'
+      && (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
