@@ -1,8 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect x="24" y="24" width="464" height="464" rx="112" fill="#18181b"/>
-  <rect x="25" y="25" width="462" height="462" rx="111" fill="none" stroke="#303036" stroke-width="2"/>
-  <g fill="none" stroke="#f4f4f5" stroke-width="28" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M136 190h240m-68-68 68 68-68 68"/>
-    <path d="M376 322H136m68-68-68 68 68 68"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    打包用图标源：字形取自 assets/app-logo.svg，外形按桌面图标惯例处理。
+    app-logo.svg 是满幅方块（适合做品牌资产），直接拿去打包会在 Dock 里成为一个黑方块——
+    macOS 不会替应用裁圆角。这里沿用上一版图标的做法：内缩 + 圆角，字形居中留白。
+  -->
+  <rect x="48" y="48" width="928" height="928" rx="224" fill="#0A0A0B"/>
+  <g transform="translate(512 512) scale(0.78) translate(-512 -512)">
+    <path d="M180.854 765.456L331.469 614.841L413.165 636.732L322.356 727.541L451.871 762.244L632.036 582.079L250.461 479.836L550.238 180.06L843.146 258.544L692.531 409.159L610.835 387.268L701.644 296.459L572.129 261.756L391.963 441.921L773.539 544.164L473.762 843.941L180.854 765.456Z" fill="#ffffff"/>
   </g>
 </svg>

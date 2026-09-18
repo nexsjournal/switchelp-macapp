@@ -3,9 +3,10 @@ import { ChevronLeft, CircleHelp, PanelRightClose, PanelRightOpen } from 'lucide
 import type { Model, Provider } from '@/contracts/types';
 import { type DesktopClient, isCoreError } from '@/desktop/client';
 import { Dialog } from '@/components/Dialog';
-import { defaultPolicy, inputLabels, parseTokens, policyFromForm } from './policy';
+import { defaultPolicy, inputLabel, parseTokens, policyFromForm } from './policy';
 import styles from './ModelEditorPage.module.css';
 
+import { t } from '@/i18n';
 /**
  * 模型编辑器（设计 P05）。
  *
@@ -17,20 +18,22 @@ import styles from './ModelEditorPage.module.css';
  */
 
 function SupportOptions() {
-  return <><option value="unknown">未知</option><option value="supported">支持</option><option value="unsupported">不支持</option></>;
+  return <><option value="unknown">{t('editor.unknown')}</option><option value="supported">{t('editor.supported')}</option><option value="unsupported">{t('compat.unsupported')}</option></>;
 }
 
 /** 生效位置：描述每个字段最终落到哪里，而不是重复一遍标签。 */
 function effectRows(model: Model | undefined) {
   const policy = model?.policy;
   return [
-    { label: '显示名称', effect: 'Codex 目录', note: '出现在 Codex 模型选择器里的名字' },
-    { label: '上游模型 ID', effect: '网关请求', note: '请求上游时使用的精确 ID；改动会生成新的目录身份' },
-    { label: '上下文窗口', effect: 'Codex 目录', note: '决定 Codex 何时压缩历史，不写全局覆盖' },
-    { label: '最大输出', effect: '网关请求', note: `每次请求带上限；不保证模型输出恰好这么长${policy?.outputLimit ? `（当前 ${policy.outputLimit.toLocaleString()}）` : ''}` },
-    { label: '压缩阈值', effect: '目录建议值', note: '留空时按上下文与输出自动建议' },
-    { label: '输入能力', effect: '三层交集', note: '上游声明 ∩ 网关 ∩ 宿主，任何一层不支持就不会出现在原生能力里' },
-    { label: '思考档位', effect: '目录 + 网关', note: '档位进目录；网关按已声明集合映射，未声明的不发送' },
+    { label: t('editor.displayName'), effect: t('effect.toCatalog'), note: t('effect.displayNameNote') },
+    { label: t('editor.upstreamId'), effect: t('effect.toGateway'), note: t('effect.upstreamIdNote') },
+    { label: t('effect.context'), effect: t('effect.toCatalog'), note: t('effect.contextNote') },
+    { label: t('effect.output'), effect: t('effect.toGateway'), note: policy?.outputLimit
+      ? t('effect.outputNoteWithValue', { value: policy.outputLimit.toLocaleString() })
+      : t('effect.outputNote') },
+    { label: t('editor.compact'), effect: t('effect.toSuggested'), note: t('effect.compactNote') },
+    { label: t('editor.inputs'), effect: t('effect.toIntersection'), note: t('effect.inputsNote') },
+    { label: t('editor.reasoningLevels'), effect: t('effect.toCatalogAndGateway'), note: t('effect.reasoningNote') },
   ];
 }
 
@@ -80,19 +83,19 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
       await onSaved();
       if (thenDiff) onViewDiff?.();
     } catch (thrown) {
-      setError(isCoreError(thrown) ? thrown.safeDetails.join('；') || '保存失败，请刷新后重试。' : thrown instanceof Error ? thrown.message : '填写内容无效。');
+      setError(isCoreError(thrown) ? thrown.safeDetails.join(t('common.listSeparator')) || t('providers.saveFailed') : thrown instanceof Error ? thrown.message : t('editor.invalid'));
     } finally { setBusy(false); }
   }
 
   return <div className={styles.page}>
     <header className={styles.header}>
       <div>
-        <button className="text-button" onClick={leave}><ChevronLeft size={15} />模型</button>
-        <h1 className="text-page-title">{model ? model.displayName : '新增模型'}</h1>
+        <button className="text-button" onClick={leave}><ChevronLeft size={15} />{t('diag.model')}</button>
+        <h1 className="text-page-title">{model ? model.displayName : t('editor.new')}</h1>
       </div>
       <div className="actions">
         <button onClick={() => setShowPreview(value => !value)} aria-expanded={showPreview}>
-          {showPreview ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}生效预览
+          {showPreview ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}{t('editor.preview')}
         </button>
       </div>
     </header>
@@ -103,70 +106,70 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
       <form className={styles.form} onChange={() => setDirty(true)}
         onSubmit={event => { const diff = thenDiff.current; thenDiff.current = false; void save(event, diff); }}>
         <fieldset className="form-fields" disabled={busy}>
-          <h3 className="form-section">基本信息</h3>
+          <h3 className="form-section">{t('editor.basics')}</h3>
           <div className="form-grid">
-            <label>供应商<select name="providerId" defaultValue={model?.providerId ?? providers[0]?.id} disabled={!!model} required>
+            <label>{t('editor.provider')}<select name="providerId" defaultValue={model?.providerId ?? providers[0]?.id} disabled={!!model} required>
               {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
             </select></label>
-            <label>显示名称<input name="displayName" defaultValue={model?.displayName} maxLength={96} required placeholder="在模型菜单中显示的名称" autoFocus /></label>
+            <label>{t('editor.displayName')}<input name="displayName" defaultValue={model?.displayName} maxLength={96} required placeholder={t('editor.displayNamePlaceholder')} autoFocus /></label>
           </div>
-          <label>上游模型 ID<input name="upstreamId" defaultValue={model?.upstreamId} required maxLength={256}
-            placeholder="与供应商 API 的模型 ID 完全一致（大小写与斜杠都算数）" className="text-mono" spellCheck={false} /></label>
+          <label>{t('editor.upstreamId')}<input name="upstreamId" defaultValue={model?.upstreamId} required maxLength={256}
+            placeholder={t('editor.upstreamIdPlaceholder')} className="text-mono" spellCheck={false} /></label>
 
-          <h3 className="form-section">长度限制 <span>上下包含历史、指令、工具信息与输出预留</span></h3>
+          <h3 className="form-section">{t('editor.limits')}<span>{t('editor.limitsHint')}</span></h3>
           <div className="form-grid three">
-            <label>上下文窗口（Token）<input name="contextLimit" defaultValue={policy.contextLimit ?? ''} placeholder="例如 128k 或 131072"
+            <label>{t('editor.context')}<input name="contextLimit" defaultValue={policy.contextLimit ?? ''} placeholder={t('editor.contextPlaceholder')}
               onChange={event => setLive(current => ({ ...current, context: event.target.value }))} /></label>
-            <label>最大输出（Token）<input name="outputLimit" defaultValue={policy.outputLimit ?? ''} placeholder="例如 8k 或 8192"
+            <label>{t('editor.output')}<input name="outputLimit" defaultValue={policy.outputLimit ?? ''} placeholder={t('editor.outputPlaceholder')}
               onChange={event => setLive(current => ({ ...current, output: event.target.value }))} /></label>
-            <label>压缩阈值<input name="compactLimit" defaultValue={policy.compactLimit ?? ''} placeholder="留空按建议值" /></label>
+            <label>{t('editor.compact')}<input name="compactLimit" defaultValue={policy.compactLimit ?? ''} placeholder={t('editor.compactPlaceholder')} /></label>
           </div>
-          <p className="field-hint">最大输出是请求上限，不保证模型输出恰好这么长；它由本机网关按你填的值收口。</p>
+          <p className="field-hint">{t('editor.outputHint')}</p>
 
-          <h3 className="form-section">输入能力 <span>供应商声明</span></h3>
+          <h3 className="form-section">{t('editor.inputs')}<span>{t('editor.declaredByProvider')}</span></h3>
           <div className="capability-grid">{policy.inputs.map(input => <label key={input.kind}>
-            {inputLabels[input.kind]}<select name={`input-${input.kind}`} defaultValue={input.upstream}><SupportOptions /></select>
+            {inputLabel(input.kind)}<select name={`input-${input.kind}`} defaultValue={input.upstream}><SupportOptions /></select>
           </label>)}</div>
-          <p className="field-hint">只填服务商文档里明确支持的能力。宿主与网关两层由本工具推导；PDF 与视频当前链路不可原生发送，即使声明也不会出现在原生能力里。</p>
+          <p className="field-hint">{t('editor.inputsHint')}</p>
 
-          <h3 className="form-section">思考模式</h3>
+          <h3 className="form-section">{t('editor.reasoning')}</h3>
           <div className="form-grid">
-            <label>是否支持<select name="reasoningSupport" value={reasoning} onChange={event => setReasoning(event.target.value as typeof reasoning)}>
+            <label>{t('editor.reasoningSupport')}<select name="reasoningSupport" value={reasoning} onChange={event => setReasoning(event.target.value as typeof reasoning)}>
               <SupportOptions /></select></label>
-            {reasoning === 'supported' && <label>控制方式<select name="reasoningControl" value={control} onChange={event => setControl(event.target.value as typeof control)}>
-              <option value="effort">思考档位</option><option value="toggle">开启 / 关闭</option><option value="budget">Token 预算</option>
+            {reasoning === 'supported' && <label>{t('editor.reasoningControl')}<select name="reasoningControl" value={control} onChange={event => setControl(event.target.value as typeof control)}>
+              <option value="effort">{t('editor.reasoningLevels')}</option><option value="toggle">{t('editor.reasoningToggle')}</option><option value="budget">{t('editor.reasoningBudget')}</option>
             </select></label>}
           </div>
           {reasoning === 'supported' && control !== 'toggle' && <div className="form-grid">
-            <label>支持的取值<input name="allowedValues" defaultValue={policy.reasoning.allowedValues.join(', ')}
-              placeholder={control === 'effort' ? 'low, medium, high' : '填写服务商允许的值'} /></label>
-            <label>默认取值<input name="defaultValue" defaultValue={policy.reasoning.defaultValue ?? ''} placeholder="留空表示不指定" /></label>
+            <label>{t('editor.allowedValues')}<input name="allowedValues" defaultValue={policy.reasoning.allowedValues.join(', ')}
+              placeholder={control === 'effort' ? 'low, medium, high' : t('editor.allowedValuesPlaceholderOther')} /></label>
+            <label>{t('editor.defaultValue')}<input name="defaultValue" defaultValue={policy.reasoning.defaultValue ?? ''} placeholder={t('editor.defaultValuePlaceholder')} /></label>
           </div>}
-          {reasoning === 'supported' && control === 'budget' && <label>推理预算（Token）<input name="budgetTokens" defaultValue={policy.reasoning.budgetTokens ?? ''} placeholder="例如 4k" /></label>}
-          <p className="field-hint">档位是可添加的受校验集合，不是固定下拉。未声明的档位不会被发送，只记为损失。</p>
+          {reasoning === 'supported' && control === 'budget' && <label>{t('editor.budgetTokens')}<input name="budgetTokens" defaultValue={policy.reasoning.budgetTokens ?? ''} placeholder={t('editor.budgetPlaceholder')} /></label>}
+          <p className="field-hint">{t('editor.reasoningHint')}</p>
 
-          <h3 className="form-section">工具调用</h3>
+          <h3 className="form-section">{t('editor.tools')}</h3>
           <div className="form-grid">
-            <label>函数工具<select name="functionTools" defaultValue={policy.tools.functionTools}><SupportOptions /></select></label>
-            <label>并行工具<select name="parallelTools" defaultValue={policy.tools.parallelTools}><SupportOptions /></select></label>
+            <label>{t('editor.functionTools')}<select name="functionTools" defaultValue={policy.tools.functionTools}><SupportOptions /></select></label>
+            <label>{t('editor.parallelTools')}<select name="parallelTools" defaultValue={policy.tools.parallelTools}><SupportOptions /></select></label>
           </div>
 
-          <label className="check-label"><input type="checkbox" name="inCatalog" defaultChecked={model?.inCatalog ?? true} />加入待应用的 Codex 模型目录</label>
-          <p className="field-hint">不勾选也可以保存，只是不会出现在 Codex 模型菜单里。</p>
+          <label className="check-label"><input type="checkbox" name="inCatalog" defaultChecked={model?.inCatalog ?? true} />{t('editor.inCatalog')}</label>
+          <p className="field-hint">{t('editor.inCatalogHint')}</p>
 
           <div className={styles.formFooter}>
-            <span>{dirty ? '有未保存的修改' : '尚未修改'}</span>
+            <span>{dirty ? t('editor.hasChanges') : t('editor.noChanges')}</span>
             <div className="actions">
-              <button type="button" onClick={leave} disabled={busy}>取消</button>
-              <button type="submit" disabled={busy}>{busy ? '保存中…' : '保存草稿'}</button>
-              <button type="submit" className="primary" disabled={busy} onClick={() => { thenDiff.current = true; }}>保存并查看应用差异</button>
+              <button type="button" onClick={leave} disabled={busy}>{t('action.cancel')}</button>
+              <button type="submit" disabled={busy}>{busy ? t('editor.saving') : t('action.saveDraft')}</button>
+              <button type="submit" className="primary" disabled={busy} onClick={() => { thenDiff.current = true; }}>{t('action.saveAndViewDiff')}</button>
             </div>
           </div>
         </fieldset>
       </form>
 
-      {showPreview && <aside className={styles.preview} aria-label="生效预览">
-        <h3>生效预览</h3>
+      {showPreview && <aside className={styles.preview} aria-label={t('editor.preview')}>
+        <h3>{t('editor.preview')}</h3>
         <dl>
           {rows.map(row => <div key={row.label} className={styles.effectRow}>
             <dt>{row.label}</dt>
@@ -176,20 +179,22 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
         <div className={styles.previewNote}>
           <CircleHelp size={15} />
           <p>
-            当前填写：上下文 {live.context ? `${parseTokens(live.context)?.toLocaleString() ?? '格式待确认'}` : '未填写'} ·
-            最大输出 {live.output ? `${parseTokens(live.output)?.toLocaleString() ?? '格式待确认'}` : '未填写'}
+            {t('effect.currentValues', {
+              context: live.context ? parseTokens(live.context)?.toLocaleString() ?? t('effect.unparsable') : t('effect.notFilled'),
+              output: live.output ? parseTokens(live.output)?.toLocaleString() ?? t('effect.unparsable') : t('effect.notFilled'),
+            })}
           </p>
         </div>
-        <p className={styles.previewNote}>目录类改动需要 Codex 重新加载后才会出现在菜单里；网关类改动对后续请求生效。</p>
+        <p className={styles.previewNote}>{t('effect.reloadNote')}</p>
       </aside>}
     </div>
 
-    {discard && <Dialog title="放弃修改" dirty={false} description="有尚未保存的修改，确定放弃吗？" onClose={() => setDiscard(false)}>
+    {discard && <Dialog title={t('editor.discardTitle')} dirty={false} description={t('editor.discardBody')} onClose={() => setDiscard(false)}>
       <div className="form-fields"><div className="form-footer">
-        <span>放弃后无法恢复。</span>
+        <span>{t('editor.discardIrreversible')}</span>
         <div className="actions">
-          <button onClick={() => setDiscard(false)} autoFocus>继续编辑</button>
-          <button className="danger" onClick={() => { setDiscard(false); onCancel(); }}>放弃修改</button>
+          <button onClick={() => setDiscard(false)} autoFocus>{t('editor.keepEditing')}</button>
+          <button className="danger" onClick={() => { setDiscard(false); onCancel(); }}>{t('editor.discardTitle')}</button>
         </div>
       </div></div>
     </Dialog>}

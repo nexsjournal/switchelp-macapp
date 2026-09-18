@@ -19,7 +19,7 @@ await writeFile(join(testCodexHome, 'config.toml'), [
   '[analytics]',
   'enabled = false',
   '[model_providers.gptswitch]',
-  'name = "GPTSwitch"',
+  'name = "Switchelp"',
   'base_url = "http://127.0.0.1:18765/v1"',
   'wire_api = "responses"',
   'experimental_bearer_token = "synthetic-g0-token"',

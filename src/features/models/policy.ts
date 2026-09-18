@@ -1,8 +1,17 @@
 import type { InputKind, Model, ModelPolicy, Support } from '@/contracts/types';
+import { t } from '@/i18n';
 import type { ModelDraft } from '@/desktop/client';
 
-export const inputLabels: Record<InputKind, string> = { text: '文本', image: '图像', audio: '音频', video: '视频', pdf: 'PDF', document: '其他文档' };
-export const inputKinds = Object.keys(inputLabels) as InputKind[];
+/** 输入能力只存文案键：模块只加载一次，存文案会被冻结在启动时的语言上。 */
+const inputLabelKeys: Record<InputKind, string> = {
+  text: 'capability.text', image: 'capability.image', audio: 'capability.audio',
+  video: 'capability.video', pdf: 'capability.pdf', document: 'capability.document',
+};
+export const inputKinds = Object.keys(inputLabelKeys) as InputKind[];
+
+export function inputLabel(kind: InputKind): string {
+  return t(inputLabelKeys[kind]);
+}
 
 export function defaultPolicy(): ModelPolicy {
   return { contextLimit: null, outputLimit: null, compactLimit: null,
@@ -16,10 +25,10 @@ export function parseTokens(value: string): number | null {
   const input = value.trim().replace(/[,_\s]/g, '');
   if (!input) return null;
   const match = /^(\d+)(ki|mi|k|m)?$/i.exec(input);
-  if (!match) throw new Error('Token 数值须为正整数，可使用 32k、128k 等写法。');
+  if (!match) throw new Error(t('editor.tokenPositive'));
   const multiplier = ({ k: 1000, m: 1000000, ki: 1024, mi: 1048576 } as Record<string, number>)[match[2]?.toLowerCase() ?? ''] ?? 1;
   const result = Number(match[1]) * multiplier;
-  if (!Number.isSafeInteger(result) || result <= 0 || result > 2147483647) throw new Error('Token 数值须在 1 到 2,147,483,647 之间。');
+  if (!Number.isSafeInteger(result) || result <= 0 || result > 2147483647) throw new Error(t('editor.tokenRange'));
   return result;
 }
 
@@ -39,8 +48,8 @@ export function policyFromForm(data: FormData, previous = defaultPolicy()): Mode
     tools: { functionTools: data.get('functionTools') as Support, parallelTools: data.get('parallelTools') as Support,
       customTools: 'unknown', verification: 'declared' },
   };
-  if (policy.contextLimit !== null && policy.outputLimit !== null && policy.outputLimit >= policy.contextLimit) throw new Error('最大输出必须小于上下文窗口。');
-  if (policy.reasoning.defaultValue && !allowedValues.includes(policy.reasoning.defaultValue)) throw new Error('默认思考档位必须属于支持的档位。');
+  if (policy.contextLimit !== null && policy.outputLimit !== null && policy.outputLimit >= policy.contextLimit) throw new Error(t('editor.outputExceedsContext'));
+  if (policy.reasoning.defaultValue && !allowedValues.includes(policy.reasoning.defaultValue)) throw new Error(t('editor.defaultNotAllowed'));
   return policy;
 }
 

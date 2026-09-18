@@ -21,7 +21,7 @@ import { AppServer } from './rpc.mjs';
 const binary = process.env.GPTSWITCH_CODEX_BINARY ?? '/Applications/ChatGPT.app/Contents/Resources/codex';
 const appBinary =
   process.env.GPTSWITCH_APP_BINARY ??
-  resolve('target/debug/bundle/macos/GPTSwitch.app/Contents/MacOS/gptswitch');
+  resolve('target/debug/bundle/macos/Switchelp.app/Contents/MacOS/gptswitch');
 const workdir = process.env.GPTSWITCH_E2E_DIR ?? join(tmpdir(), 'gptswitch-e2e');
 const codexHome = join(workdir, 'codex-home');
 const configPath = join(codexHome, 'config.toml');

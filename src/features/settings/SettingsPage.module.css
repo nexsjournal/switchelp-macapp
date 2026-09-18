@@ -1,6 +1,8 @@
 .page { display: grid; gap: 20px; }
 .card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
-.card h2 { margin: 0 0 16px; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+/* 这里的标题就是卡片第一个子元素，只需要上提修正量。 */
+.card > h2:first-child { margin-top: calc(-1 * var(--card-title-optical-trim)); }
+.card h2 { margin: 0 0 16px; font-size: 16px; font-weight: 600; line-height: var(--line-height-card-title); display: flex; align-items: center; gap: 10px; }
 .card h2 > svg { color: var(--text-muted); }
 .rows { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 14px 16px; margin: 0; font-size: 13px; }
 .rows dt { color: var(--text-muted); }
@@ -33,3 +35,7 @@
 .backups span { display: block; font-size: 11px; margin-top: 3px; }
 .summary { width: 100%; margin-top: 14px; padding: 14px; border-radius: 8px; background: var(--bg-input); border: 1px solid var(--border-subtle);
   color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; line-height: 20px; resize: vertical; }
+
+/* 只读标识：放在字段名旁边，避免用户以为这里可以填。 */
+.readOnly { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: var(--radius-pill);
+  background: var(--bg-selected); color: var(--text-muted); font-size: 10px; font-weight: 400; vertical-align: 1px; }

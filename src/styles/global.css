@@ -48,6 +48,20 @@ button.icon-button { width: 36px; height: 36px; padding: 0; }
 button.text-button { background: transparent; border-color: transparent; color: var(--text-secondary); padding: 0; height: 28px; font-size: 12px; }
 button.danger { color: var(--status-danger); }
 input:not([type='checkbox']), select, textarea { width: 100%; min-width: 0; height: var(--control-height); border: 1px solid var(--border-control); border-radius: var(--radius-sm); background: var(--bg-input); padding: 0 12px; font-size: 13px; }
+/*
+ * 下拉箭头自绘：各平台原生箭头位置与形状都不同（macOS 双箭头贴右边缘、
+ * Windows 单箭头），自绘才能在两个平台都留出同样的右边距。
+ */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  background-image: var(--select-arrow);
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 12px;
+}
+select::-ms-expand { display: none; }
 input::placeholder, textarea::placeholder { color: var(--text-muted); }
 textarea { height: auto; padding: 10px 12px; resize: vertical; }
 input[type='checkbox'] { accent-color: var(--text-primary); width: 16px; height: 16px; margin: 0; }

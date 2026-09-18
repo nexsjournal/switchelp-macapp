@@ -195,16 +195,12 @@ impl DiagnosticLog {
         let mut events = self.events.lock().expect("诊断锁未被污染");
         let mut bytes = self.bytes.lock().expect("诊断锁未被污染");
         let mut removed = 0;
-        // 本身事件时间戳由 `now_rfc3339()` 生成，固定为等长的 UTC 文本；
+        // 事件时间戳由 `now_rfc3339()` 生成，格式固定为等长 UTC 文本（见 `TIMESTAMP_FORMAT`）；
         // 等长 RFC3339 文本的字典序即时间序，因此不需要解析。长度不一致的
         // 外部时间戳一律不淘汰——宁可多留，不可误删。
         let cutoff_text = time::OffsetDateTime::from_unix_timestamp(cutoff)
             .ok()
-            .and_then(|stamp| {
-                stamp
-                    .format(&time::format_description::well_known::Rfc3339)
-                    .ok()
-            });
+            .and_then(format_timestamp);
         while let Some(front) = events.front() {
             let expired = cutoff_text
                 .as_deref()
@@ -326,11 +322,24 @@ fn looks_like_secret(token: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
+/// 事件时间戳格式：小数固定 3 位。
+///
+/// 不能用 `Rfc3339` 的默认格式——它会省掉小数末尾的零，长度随纳秒值变化，于是：
+/// `prune` 依赖的“等长 RFC3339 文本字典序即时间序”不再成立（长度不等的时间戳一律
+/// 不淘汰，事件会绕过保留策略），诊断包的预览体积也会因两次调用得到不同长度的
+/// 时间戳而与实际导出对不上。
+const TIMESTAMP_FORMAT: &[time::format_description::BorrowedFormatItem<'static>] =
+    time::macros::format_description!("[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z");
+
+/// 按 `TIMESTAMP_FORMAT` 格式化，供生成与比较两侧共用。
+fn format_timestamp(stamp: time::OffsetDateTime) -> Option<String> {
+    stamp.format(TIMESTAMP_FORMAT).ok()
+}
+
 /// 生成事件时间戳。
 pub fn now_rfc3339() -> String {
-    time::OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_owned())
+    format_timestamp(time::OffsetDateTime::now_utc())
+        .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".to_owned())
 }
 
 #[cfg(test)]
@@ -478,17 +487,18 @@ mod tests {
     #[test]
     fn prune_drops_events_older_than_the_retention_window() {
         let log = DiagnosticLog::new(100, MAX_RETAINED_BYTES, 7);
+        // 时间戳必须写成 `TIMESTAMP_FORMAT` 的等长形态，否则会被当成形状异常而保留。
         // 2026-09-18T00:00:00Z；保留 7 天后边界落在 2026-09-11。
         let now = 1_789_699_200;
         log.record(DiagnosticEvent::new(
-            "2026-09-01T00:00:00Z",
+            "2026-09-01T00:00:00.000Z",
             LogLevel::Info,
             "gateway",
             "old",
             "result.ok",
         ));
         log.record(DiagnosticEvent::new(
-            "2026-09-17T00:00:00Z",
+            "2026-09-17T00:00:00.000Z",
             LogLevel::Info,
             "gateway",
             "recent",

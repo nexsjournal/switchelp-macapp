@@ -7,7 +7,7 @@ export function testCatalog() {
     ].map(([slug, displayName, contextWindow, efforts], index) => ({
       slug,
       display_name: displayName,
-      description: 'GPTSwitch isolated integration fixture; no real provider credentials.',
+      description: 'Switchelp isolated integration fixture; no real provider credentials.',
       default_reasoning_level: efforts[0],
       supported_reasoning_levels: efforts.map(effort => ({ effort, description: effort })),
       shell_type: 'unified_exec',

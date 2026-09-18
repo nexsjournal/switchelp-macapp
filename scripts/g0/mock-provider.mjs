@@ -23,7 +23,7 @@ const server = http.createServer(async (req, res) => {
     await appendFile('.local/g0-requests.jsonl', JSON.stringify(record) + '\n');
     const id = `resp_gptswitch_${++serial}`;
     const itemId = `msg_gptswitch_${serial}`;
-    const text = `GPTSwitch 路由验证成功：${body.model}`;
+    const text = `Switchelp 路由验证成功：${body.model}`;
     const part = { type: 'output_text', text, annotations: [] };
     const item = { id: itemId, type: 'message', role: 'assistant', status: 'completed', content: [part] };
     const response = { id, object: 'response', created_at: Math.floor(Date.now() / 1000), model: body.model, status: 'completed', output: [item], usage: { input_tokens: 12, output_tokens: 8, total_tokens: 20, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 0 } } };

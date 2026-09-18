@@ -12,7 +12,7 @@ use toml_edit::{value, DocumentMut, Item, Table};
 /// 本工具在用户 providers 表中使用的固定 ID。占用检测以该 ID 为边界。
 pub const PROVIDER_ID: &str = "gptswitch";
 /// 本工具生成的 provider 显示名。
-pub const PROVIDER_NAME: &str = "GPTSwitch";
+pub const PROVIDER_NAME: &str = "Switchelp";
 /// 宿主调用 auth helper 时固定传入的 `--instance` 参数值。
 ///
 /// 宿主不接受参数化命令，只会照字面拼出 `["--instance", <本常量>]`。

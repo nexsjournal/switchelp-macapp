@@ -78,7 +78,7 @@ fn install_tray(app: &tauri::AppHandle, gateway_running: bool, port: Option<u16>
     // 暂停只拦新请求：在途请求继续跑完，符合“不默认中断正在生成的任务”。
     let pause = MenuItem::with_id(app, "pause", "暂停新请求", true, None::<&str>)?;
     let open_codex = MenuItem::with_id(app, "open_codex", "打开 Codex", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "退出 GPTSwitch", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "退出 Switchelp", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
@@ -177,7 +177,7 @@ fn main() {
                     app_data_dir: directory.clone(),
                     port: gateway::DEFAULT_PORT,
                     auth_helper: auth_helper(&directory),
-                    base_instructions: "通过 GPTSwitch 本机网关访问第三方模型。".to_owned(),
+                    base_instructions: "通过 Switchelp 本机网关访问第三方模型。".to_owned(),
                 },
                 Arc::new(SystemClock),
             )
@@ -186,7 +186,7 @@ fn main() {
             // 未完成事务在下一次启动时按记录判定恢复；窗口重建不新建事务。
             for report in apply.startup_recovery()? {
                 eprintln!(
-                    "GPTSwitch 启动恢复：operation={} instance={} applied={}",
+                    "Switchelp 启动恢复：operation={} instance={} applied={}",
                     report.operation_id, report.instance_id, report.applied
                 );
             }
@@ -196,7 +196,7 @@ fn main() {
             if let Err(error) = &gateway {
                 // 端口被占用时不能假装在跑：状态里保留原因，界面显示“网关未启动”。
                 eprintln!(
-                    "GPTSwitch 网关未启动：{} {:?}",
+                    "Switchelp 网关未启动：{} {:?}",
                     error.message_key, error.safe_details
                 );
             }
@@ -206,7 +206,7 @@ fn main() {
             };
             // 托盘失败不应阻止应用启动：它只是入口，不是功能本体。
             if let Err(error) = install_tray(app.handle(), tray_running, tray_port) {
-                eprintln!("GPTSwitch 托盘未创建：{error}");
+                eprintln!("Switchelp 托盘未创建：{error}");
             }
             let home = app.path().home_dir()?;
             app.manage(Arc::new(DesktopState::new(
@@ -220,7 +220,7 @@ fn main() {
             )));
             Ok(())
         })
-        // 关闭窗口隐藏到托盘而不是退出：托盘菜单里的「退出 GPTSwitch」才是出口。
+        // 关闭窗口隐藏到托盘而不是退出：托盘菜单里的「退出 Switchelp」才是出口。
         // 这是托盘应用的常规预期，但必须让用户找得到退出口，所以托盘里保留独立项。
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -246,5 +246,5 @@ fn main() {
             commands::probes_start, commands::probes_cancel,
         ])
         .run(tauri::generate_context!())
-        .expect("GPTSwitch 无法启动");
+        .expect("Switchelp 无法启动");
 }

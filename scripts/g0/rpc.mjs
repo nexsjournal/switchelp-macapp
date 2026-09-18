@@ -55,7 +55,7 @@ export class AppServer {
 
   async initialize() {
     const result = await this.call('initialize', {
-      clientInfo: { name: 'gptswitch_g0', title: 'GPTSwitch isolated probe', version: '0.1.0' },
+      clientInfo: { name: 'gptswitch_g0', title: 'Switchelp isolated probe', version: '0.1.0' },
       capabilities: { experimentalApi: true },
     });
     this.notify('initialized');

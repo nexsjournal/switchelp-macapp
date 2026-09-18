@@ -1,5 +1,5 @@
 /**
- * G0 端到端探针：把 GPTSwitch 真实管线产出的 config.toml 与模型目录交给真实 Codex。
+ * G0 端到端探针：把 Switchelp 真实管线产出的 config.toml 与模型目录交给真实 Codex。
  *
  * 与 probe-catalog.mjs 的区别：那个用手写目录验证“目录能被解析”，
  * 这个用 CatalogCompiler + apply_managed 的真实产物验证同一件事，并额外验证
@@ -53,7 +53,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   requests.push({ path: req.url, model: body.model, effort: body.reasoning?.effort, inputItems: body.input?.length });
-  emitResponses(res, body.model, `GPTSwitch 路由验证成功：${body.model}`);
+  emitResponses(res, body.model, `Switchelp 路由验证成功：${body.model}`);
 });
 await new Promise((ok, no) => server.listen(Number(base.port), '127.0.0.1', ok).on('error', no));
 

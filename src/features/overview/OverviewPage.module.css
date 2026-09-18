@@ -1,8 +1,11 @@
 .page { display: grid; gap: 24px; }
 .grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 24px; align-items: start; }
 .card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
+/* 标题块贴行顶：同一行里的按钮更高时，居中会把标题带下去（修正量见 tokens.css）。 */
+.card > .cardHeader:first-child { margin-top: calc(-1 * var(--card-title-optical-trim)); }
+.card > .cardHeader:first-child > :first-child { align-self: flex-start; }
 .cardHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
-.cardHeader h2 { margin: 0; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+.cardHeader h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: var(--line-height-card-title); display: flex; align-items: center; gap: 10px; }
 .cardHeader > svg { color: var(--text-muted); }
 .cardActions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
 .muted { color: var(--text-muted); font-size: 13px; line-height: 20px; margin: 0; display: flex; align-items: center; gap: 8px; }

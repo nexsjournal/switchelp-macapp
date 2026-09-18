@@ -1,4 +1,4 @@
-//! 显式运行的原生凭据集成测试，仅访问随机创建的 GPTSwitch 测试条目。
+//! 显式运行的原生凭据集成测试，仅访问随机创建的 Switchelp 测试条目。
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 #[test]
 #[ignore = "需在目标系统上显式验收凭据库，不在普通单元测试中访问 OS 凭据库"]

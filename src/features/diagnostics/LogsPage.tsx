@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Download, Info, RefreshCw, Save, ShieldCheck, Trash2, XCircle } from 'lucide-react';
+import { AlertTriangle, Download, Info, RefreshCw, Save, ScrollText, ShieldCheck, Trash2, XCircle } from 'lucide-react';
 import type { DiagnosticEvent, LogLevel } from '@/contracts/types';
 import { type DesktopClient, type DiagnosticsPreview, toCoreError } from '@/desktop/client';
 import { Dialog } from '@/components/Dialog';
+import { EmptyState } from '@/components/EmptyState';
 import styles from './LogsPage.module.css';
 
+import { t } from '@/i18n';
 /**
  * 日志页（设计 P08）。
  *
@@ -15,7 +17,7 @@ import styles from './LogsPage.module.css';
 
 const PAGE_SIZE = 200;
 
-const levelLabels: Record<LogLevel, string> = { info: '信息', warning: '警告', error: '错误' };
+const levelKeys: Record<LogLevel, string> = { info: 'logs.levelInfo', warning: 'logs.levelWarning', error: 'logs.levelError' };
 const levelIcons = { info: Info, warning: AlertTriangle, error: XCircle } as const;
 
 /** 类别与导出范围保持同一套前缀，避免两处各写一份。 */
@@ -23,7 +25,7 @@ const CATEGORIES = ['gateway', 'apply', 'probe', 'discovery', 'credential'] as c
 
 type TimeRange = 'all' | '15m' | '1h' | '24h';
 
-const timeLabels: Record<TimeRange, string> = { all: '全部时间', '15m': '最近 15 分钟', '1h': '最近 1 小时', '24h': '最近 24 小时' };
+const timeKeys: Record<TimeRange, string> = { all: 'logs.timeAll', '15m': 'logs.time15m', '1h': 'logs.time1h', '24h': 'logs.time24h' };
 
 const rangeSeconds: Record<Exclude<TimeRange, 'all'>, number> = { '15m': 900, '1h': 3600, '24h': 86_400 };
 
@@ -49,7 +51,7 @@ export function LogsPage({ client }: { client: DesktopClient }) {
       const result = await client.listDiagnostics(level === 'all' ? {} : { level });
       setEvents(result.items);
       setPage(0);
-    } catch (thrown) { setError(toCoreError(thrown).safeDetails.join('；') || '日志加载失败。'); }
+    } catch (thrown) { setError(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('logs.loadFailed')); }
     finally { setBusy(''); }
   }, [client, level]);
 
@@ -58,7 +60,7 @@ export function LogsPage({ client }: { client: DesktopClient }) {
   async function run(label: string, work: () => Promise<void>) {
     setBusy(label); setError(''); setNotice('');
     try { await work(); }
-    catch (thrown) { setError(toCoreError(thrown).safeDetails.join('；') || '操作失败。'); }
+    catch (thrown) { setError(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('common.failed')); }
     finally { setBusy(''); }
   }
 
@@ -100,7 +102,7 @@ export function LogsPage({ client }: { client: DesktopClient }) {
     const removed = await client.clearDiagnostics();
     setConfirmClear(false);
     setDetail(null);
-    setNotice(`已清空 ${removed} 条本工具诊断事件；Codex 历史与配置事务记录未受影响。`);
+    setNotice(t('logs.cleared', { count: removed }));
     await load();
   });
 
@@ -120,47 +122,44 @@ export function LogsPage({ client }: { client: DesktopClient }) {
 
     <section className={styles.card}>
       <div className={styles.header}>
-        <div><h2>诊断事件</h2><span className="badge">{filtered.length}{filtered.length !== events.length ? ` / ${events.length}` : ''}</span></div>
+        <div><ScrollText size={17} /><h2>{t('logs.events')}</h2><span className="badge">{filtered.length}{filtered.length !== events.length ? ` / ${events.length}` : ''}</span></div>
         <div className={styles.actions}>
-          <button onClick={() => void load()} disabled={busy === 'load'} className="icon-button" aria-label="刷新日志">
+          <button onClick={() => void load()} disabled={busy === 'load'} className="icon-button" aria-label={t('logs.refresh')}>
             <RefreshCw size={17} className={busy === 'load' ? styles.spin : ''} />
           </button>
           <button className="danger" onClick={() => setConfirmClear(true)} disabled={!events.length}>
-            <Trash2 size={16} />清空日志
-          </button>
+            <Trash2 size={16} />{t('logs.clear')}</button>
         </div>
       </div>
 
       <div className={styles.filters}>
-        <label>级别<select aria-label="日志级别" value={level} onChange={event => setLevel(event.target.value as LogLevel | 'all')}>
-          <option value="all">全部</option>
-          <option value="info">信息及以上</option>
-          <option value="warning">警告及以上</option>
-          <option value="error">仅错误</option>
+        <label>{t('logs.level')}<select aria-label={t('logs.levelAria')} value={level} onChange={event => setLevel(event.target.value as LogLevel | 'all')}>
+          <option value="all">{t('logs.levelAll')}</option>
+          <option value="info">{t('logs.levelInfoUp')}</option>
+          <option value="warning">{t('logs.levelWarningUp')}</option>
+          <option value="error">{t('logs.levelErrorOnly')}</option>
         </select></label>
-        <label>类别<select aria-label="日志类别" value={category} onChange={event => setCategory(event.target.value)}>
-          <option value="all">全部</option>
+        <label>{t('logs.category')}<select aria-label={t('logs.categoryAria')} value={category} onChange={event => setCategory(event.target.value)}>
+          <option value="all">{t('logs.levelAll')}</option>
           {CATEGORIES.map(item => <option key={item} value={item}>{item}</option>)}
         </select></label>
-        <label>时间<select aria-label="时间范围" value={range} onChange={event => setRange(event.target.value as TimeRange)}>
-          {(Object.keys(timeLabels) as TimeRange[]).map(key => <option key={key} value={key}>{timeLabels[key]}</option>)}
+        <label>{t('logs.time')}<select aria-label={t('logs.timeAria')} value={range} onChange={event => setRange(event.target.value as TimeRange)}>
+          {(Object.keys(timeKeys) as TimeRange[]).map(key => <option key={key} value={key}>{t(timeKeys[key])}</option>)}
         </select></label>
-        <label className={styles.grow}>搜索<input aria-label="搜索日志" placeholder="在脱敏字段中搜索：模型、供应商、结果、错误码"
+        <label className={styles.grow}>{t('common.search')}<input aria-label={t('logs.searchAria')} placeholder={t('logs.searchPlaceholder')}
           value={query} onChange={event => setQuery(event.target.value)} /></label>
       </div>
 
-      <p className={styles.policy}>
-        只记录时间、模型与供应商标识、阶段、HTTP 状态与耗时、错误码。prompt、completion、工具参数、
-        文件内容、Authorization 与完整 URL query 从不写入，因此搜索也只在脱敏字段里进行。
-      </p>
+      <p className={styles.policy}>{t('logs.policy')}</p>
 
       {visible.length === 0
-        ? <p className={styles.empty}>{events.length ? '当前筛选下没有事件。' : '还没有诊断事件。执行一次应用、测试连接或模型发现后，这里会出现脱敏后的记录。'}</p>
+        ? <EmptyState icon={ScrollText} title={events.length ? t('logs.noMatch') : t('logs.empty')}
+            description={events.length ? t('logs.noMatchBody') : t('logs.emptyBody')} />
         : <ul className={styles.events}>
           {visible.map((event, index) => {
             const Icon = levelIcons[event.level];
             return <li key={`${event.timestamp}-${event.resultKey}-${index}`}>
-              <button className={styles.eventRow} onClick={() => setDetail(event)} aria-label={`查看事件详情 ${event.resultKey}`}>
+              <button className={styles.eventRow} onClick={() => setDetail(event)} aria-label={t('logs.detailAria', { result: event.resultKey })}>
                 <Icon size={15} className={styles[event.level]} aria-hidden="true" />
                 <span className="text-mono text-muted">{event.timestamp}</span>
                 <span className={styles.category}>{event.categoryKey}</span>
@@ -173,21 +172,21 @@ export function LogsPage({ client }: { client: DesktopClient }) {
         </ul>}
 
       {pageCount > 1 && <div className={styles.pager}>
-        <button onClick={() => setPage(current - 1)} disabled={current === 0}>上一页</button>
-        <span>第 {current + 1} / {pageCount} 页 · 每页 {PAGE_SIZE} 条</span>
-        <button onClick={() => setPage(current + 1)} disabled={current >= pageCount - 1}>下一页</button>
+        <button onClick={() => setPage(current - 1)} disabled={current === 0}>{t('common.prevPage')}</button>
+        <span>{t('logs.pager', { page: current + 1, pages: pageCount, size: PAGE_SIZE })}</span>
+        <button onClick={() => setPage(current + 1)} disabled={current >= pageCount - 1}>{t('common.nextPage')}</button>
       </div>}
     </section>
 
     <section className={styles.card}>
       <div className={styles.header}>
-        <div><h2>诊断包</h2><ShieldCheck size={16} /></div>
+        <div><h2>{t('logs.exportPackage')}</h2><ShieldCheck size={16} /></div>
         <div className={styles.actions}>
           <button onClick={() => void makePreview()} disabled={busy === 'preview'}>
-            {busy === 'preview' ? '生成预览…' : '生成预览'}
+            {busy === 'preview' ? t('logs.previewing') : t('logs.preview')}
           </button>
           <button className="primary" onClick={() => void exportPackage()} disabled={busy === 'export' || !preview}>
-            <Save size={16} />{busy === 'export' ? '保存中…' : '保存到本地'}
+            <Save size={16} />{busy === 'export' ? t('editor.saving') : t('logs.saveLocally')}
           </button>
         </div>
       </div>
@@ -201,53 +200,53 @@ export function LogsPage({ client }: { client: DesktopClient }) {
       </div>
 
       {preview && <div className={styles.preview}>
-        <p className="text-muted">合计 {preview.totalBytes.toLocaleString()} 字节 · {preview.items.length} 项</p>
+        <p className="text-muted">{t('logs.previewSummary', { bytes: preview.totalBytes.toLocaleString(), items: preview.items.length })}</p>
         <ul>{preview.items.map(item => <li key={item.name} className={item.included ? styles.included : ''}>
           <span>{item.name}</span>
-          <span className={`badge ${item.included ? '' : 'warning'}`}>{item.included ? '包含' : '不包含'}</span>
+          <span className={`badge ${item.included ? '' : 'warning'}`}>{item.included ? t('logs.included') : t('logs.excluded')}</span>
           <span className="text-muted break-anywhere">{item.note}</span>
         </li>)}</ul>
       </div>}
 
-      {savedPath && <div className={styles.saved} role="status"><Download size={15} />已保存到 <span className="text-mono break-anywhere">{savedPath}</span></div>}
+      {savedPath && <div className={styles.saved} role="status"><Download size={15} />{t('common.savedTo')}<span className="text-mono break-anywhere">{savedPath}</span></div>}
     </section>
 
-    {detail && <Dialog title="事件详情" description={`${detail.categoryKey} · ${levelLabels[detail.level]}`} onClose={() => setDetail(null)}>
+    {detail && <Dialog title={t('logs.eventDetail')} description={`${detail.categoryKey} · ${t(levelKeys[detail.level])}`} onClose={() => setDetail(null)}>
       <div className="form-fields">
         <dl className={styles.detail}>
-          <dt>时间</dt><dd className="text-mono">{detail.timestamp}</dd>
-          <dt>结果</dt><dd>{detail.resultKey}</dd>
-          <dt>目标</dt><dd className="break-anywhere">{detail.targetLabel}</dd>
-          <dt>耗时</dt><dd>{detail.elapsedMs != null ? `${detail.elapsedMs} ms` : '—'}</dd>
+          <dt>{t('logs.time')}</dt><dd className="text-mono">{detail.timestamp}</dd>
+          <dt>{t('logs.resultField')}</dt><dd>{detail.resultKey}</dd>
+          <dt>{t('logs.targetField')}</dt><dd className="break-anywhere">{detail.targetLabel}</dd>
+          <dt>{t('logs.elapsedField')}</dt><dd>{detail.elapsedMs != null ? `${detail.elapsedMs} ms` : '—'}</dd>
         </dl>
-        <h3 className="form-section">安全元数据</h3>
+        <h3 className="form-section">{t('logs.safeMetadata')}</h3>
         {Object.keys(detail.safeMetadata ?? {}).length === 0
-          ? <p className="text-muted">该事件没有附加元数据。</p>
+          ? <p className="text-muted">{t('logs.noMetadata')}</p>
           : <dl className={styles.detail}>{Object.entries(detail.safeMetadata).map(([key, value]) => <span key={key} className={styles.kv}>
             <dt className="text-mono">{key}</dt><dd className="text-mono break-anywhere">{String(value)}</dd>
           </span>)}</dl>}
-        <h3 className="form-section">关联事件 <span>同一目标或同一事务</span></h3>
+        <h3 className="form-section">{t('logs.related')}<span>{t('logs.relatedScope')}</span></h3>
         {related.length === 0
-          ? <p className="text-muted">没有找到同一目标或同一事务的其他事件。</p>
+          ? <p className="text-muted">{t('logs.noRelated')}</p>
           : <ul className={styles.related}>{related.map((event, index) => <li key={index}>
             <span className="text-mono text-muted">{event.timestamp}</span>
             <span className="break-anywhere">{event.resultKey}</span>
           </li>)}</ul>}
         <div className="actions" style={{ justifyContent: 'flex-end' }}>
-          <button onClick={() => setDetail(null)} autoFocus>关闭</button>
+          <button onClick={() => setDetail(null)} autoFocus>{t('common.close')}</button>
         </div>
       </div>
     </Dialog>}
 
-    {confirmClear && <Dialog title="清空日志" busy={busy === 'clear'}
-      description={`将清空本工具记录的 ${events.length} 条诊断事件。这不影响 Codex 会话历史，也不影响配置事务与备份记录。`}
+    {confirmClear && <Dialog title={t('logs.clear')} busy={busy === 'clear'}
+      description={t('logs.clearBody', { count: events.length })}
       onClose={() => setConfirmClear(false)}>
       <div className="form-fields"><div className="form-footer">
-        <span>清空后无法恢复。</span>
+        <span>{t('logs.clearIrreversible')}</span>
         <div className="actions">
-          <button onClick={() => setConfirmClear(false)} disabled={busy === 'clear'}>取消</button>
+          <button onClick={() => setConfirmClear(false)} disabled={busy === 'clear'}>{t('action.cancel')}</button>
           <button className="danger" autoFocus disabled={busy === 'clear'} onClick={() => void clear()}>
-            {busy === 'clear' ? '清空中…' : '清空日志'}
+            {busy === 'clear' ? t('logs.clearing') : t('logs.clear')}
           </button>
         </div>
       </div></div>

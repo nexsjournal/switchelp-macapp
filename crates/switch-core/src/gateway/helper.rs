@@ -91,7 +91,7 @@ fn restrict(path: &Path, unix_mode: u32) -> Result<(), CoreError> {
 fn script(instance_id: &str) -> String {
     format!(
         r#"#!/bin/sh
-# GPTSwitch 本机网关凭据 helper。
+# Switchelp 本机网关凭据 helper。
 # 由宿主以 `--instance <id>` 调用；只输出本机访问令牌，不接触上游 Key。
 set -eu
 instance=""

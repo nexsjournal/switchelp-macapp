@@ -1,4 +1,4 @@
-/* GPTSwitch 设计 token。数值来源：docs/design/01-foundations.md */
+/* Switchelp 设计 token。数值来源：docs/design/01-foundations.md */
 /*
  * 主题通过 `data-theme` 切换，变量名在两套主题里完全一致——
  * 组件只引用变量，不写 `data-theme` 分支，避免两套样式各自漂移。
@@ -45,6 +45,8 @@
   --status-warning-bg: #2a2413;
   --status-danger-bg: #2c171d;
   --status-info-bg: #14242d;
+
+  --select-arrow: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%238d8d99' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><path d='M3 4.6 6 1.8l3 2.8'/><path d='M3 7.4 6 10.2l3-2.8'/></svg>");
 
   --overlay: rgba(0, 0, 0, 0.56);
   --shadow-color: rgba(0, 0, 0, 0.28);
@@ -100,6 +102,7 @@
 
   --overlay: rgba(24, 24, 27, 0.32);
   --shadow-color: rgba(24, 24, 27, 0.12);
+  --select-arrow: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%237c7c88' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><path d='M3 4.6 6 1.8l3 2.8'/><path d='M3 7.4 6 10.2l3-2.8'/></svg>");
 }
 
 :root {
@@ -155,6 +158,14 @@
 
   --card-padding: 24px;
   --card-padding-compact: 16px;
+  /*
+   * 卡片标题的视觉修正量。
+   *
+   * 行框上方的半行距与字体自带的字面上缘空隙都不算排版判断：不扣掉时标题看上去
+   * 比左边低一截。扣掉之后标题的视觉上边距与左边距一致（同行的按钮比标题高时，
+   * 被居中带下去的那部分是靠“标题块贴行顶”消掉的，不占这个值）。
+   */
+  --card-title-optical-trim: 4px;
 
   /* ---- 圆角 ---- */
   --radius-xs: 4px;

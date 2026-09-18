@@ -2,11 +2,12 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { ApplyPlan, CodexInstance, Credential, DiagnosticEvent, Model, ProbeResult, Provider } from '@/contracts/types';
 import type { AppliedSummary, ApplyStatus, BackupEntry, DesktopClient, GatewayReport, InspectResult, DiagnosticsPreview, PlatformReport, UpdateReport } from './client';
 import type { DiscoveredModel } from './client';
+import { t } from '@/i18n';
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!isTauri()) {
     throw { code: 'INTERNAL', messageKey: 'error.desktopRequired',
-      safeDetails: ['请使用桌面应用运行。浏览器预览不会保存数据或读取 API Key。'], retryable: false, recoveryActions: [] };
+      safeDetails: [t('error.desktopRequired')], retryable: false, recoveryActions: [] };
   }
   return invoke<T>(command, args);
 }

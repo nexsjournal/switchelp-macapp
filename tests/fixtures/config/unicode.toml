@@ -1,6 +1,6 @@
 model = "gpt-5-codex"
 model_provider = "openai"
-model_catalog_json = "/Users/example/Library/Application Support/GPTSwitch/目录/catalog.json"
+model_catalog_json = "/Users/example/Library/Application Support/Switchelp/目录/catalog.json"
 
 [projects."/Users/example/项目 中文"]
 trust_level = "可信"

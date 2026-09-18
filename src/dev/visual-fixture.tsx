@@ -102,7 +102,7 @@ const client: DesktopClient = {
   createBackup: async () => ({ id: 'b_2', sourcePath: '/Users/me/.codex/config.toml', createdAt: '2026-09-18T04:00:00Z', contentHash: 'e5f6a7b8', bytes: 420, mayContainSecrets: true }),
   previewBackup: async () => 'model = "gpt-5-codex"\nmodel_provider = "••••••••"\n',
   restoreBackup: async () => '/Users/me/.codex/config.toml',
-  checkUpdate: async () => ({ current: '0.1.0', latest: '0.2.0', hasUpdate: true, releaseUrl: 'https://github.com/nexsjournal/gptswitch-macapp/releases', publishedAt: '2026-09-18T00:00:00Z', error: null }),
+  checkUpdate: async () => ({ current: '0.1.0', latest: '0.2.0', hasUpdate: true, releaseUrl: 'https://github.com/nexsjournal/switchelp-macapp/releases', publishedAt: '2026-09-18T00:00:00Z', error: null }),
   listProviders: async () => ({ items: providers, nextCursor: null }),
   saveProvider: async draft => provider('p_new', draft.name, draft.endpoint, null),
   listPresets: async () => [],

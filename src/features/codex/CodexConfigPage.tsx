@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, FileSearch, History, RefreshCw, ShieldAlert, SlidersHorizontal } from 'lucide-react';
 import type { ApplyPlan, ApplyStage, CodexInstance, FieldChange, Model } from '@/contracts/types';
 import { type AppliedSummary, type ApplyStatus, type DesktopClient, type InspectResult, toCoreError } from '@/desktop/client';
-import { t } from '@/locales/zh-CN';
+
 import styles from './CodexConfigPage.module.css';
 
+import { t } from '@/i18n';
 /**
  * “Codex 配置”页：检测实例 → 查看差异 → 应用 → 等待 Codex 重新加载 → 还原。
  *
@@ -102,7 +103,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
 
   const fail = useCallback((thrown: unknown, fallback: string) => {
     const normalized = toCoreError(thrown);
-    setError(normalized.safeDetails.join('；') || fallback);
+    setError(normalized.safeDetails.join(t('common.listSeparator')) || fallback);
     setRecovery(normalized.recoveryActions.map(action => action.action));
   }, []);
 
@@ -113,7 +114,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
       setInstances(found);
       setInstanceId(current => found.some(instance => instance.id === current) ? current : found[0]?.id ?? '');
       setInspect(null); setDraft(null); setStatus(null);
-    } catch (thrown) { fail(thrown, '实例检测失败。'); }
+    } catch (thrown) { fail(thrown, t('codex.detectFailed')); }
     finally { setBusy(''); }
   }, [client, fail]);
 
@@ -126,14 +127,14 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
   async function run(label: string, work: () => Promise<void>) {
     setBusy(label); setError(''); setRecovery([]); setNotice('');
     try { await work(); }
-    catch (thrown) { fail(thrown, '操作失败。'); }
+    catch (thrown) { fail(thrown, t('common.failed')); }
     finally { setBusy(''); }
   }
 
   const makePlan = (kind: 'apply' | 'restore') => run('plan', async () => {
     const plan = kind === 'apply' ? await client.planApply({ instanceId, draftRevision: '' }) : await client.planRestore(instanceId);
     setDraft({ kind, plan }); setStatus(null);
-    setNotice(kind === 'apply' ? '已生成差异预览。确认后才会写入 Codex 配置。' : '已生成还原预览。');
+    setNotice(kind === 'apply' ? t('codex.diffPreviewed') : t('codex.restorePreviewed'));
   });
 
   const commit = () => run('commit', async () => {
@@ -159,7 +160,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
 
   const diff = useMemo(() => (draft ? groups(draft.plan.changes) : []), [draft]);
   // 主按钮文案由核心的 reloadScope 决定：需要宿主重载时不写成“应用”。
-  const commitLabel = draft?.kind === 'restore' ? '确认恢复'
+  const commitLabel = draft?.kind === 'restore' ? t('codex.confirmRestore')
     : draft?.plan.reloadScope === 'host_reload' ? t('action.applyAndReload') : t('action.applyToCodex');
 
   if (!instances.length && busy !== 'detect') {
@@ -170,11 +171,11 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
         <p>{t('empty.noInstanceBody')}</p>
       </div>
       <div className={styles.row} style={{ justifyContent: 'center' }}>
-        <label className={styles.field}>应用或 CLI 路径
-          <input aria-label="Codex 应用路径" placeholder="/Applications/ChatGPT.app" value={manualPath} onChange={event => setManualPath(event.target.value)} />
+        <label className={styles.field}>{t('codex.appPath')}
+          <input aria-label={t('codex.appPathLabel')} placeholder="/Applications/ChatGPT.app" value={manualPath} onChange={event => setManualPath(event.target.value)} />
         </label>
         <button onClick={() => void detect(manualPath.trim() || undefined)} disabled={busy === 'detect'}>
-          <RefreshCw size={16} />{busy === 'detect' ? '检测中…' : '检测 Codex'}
+          <RefreshCw size={16} />{busy === 'detect' ? t('codex.detecting') : t('codex.detect')}
         </button>
       </div>
     </section>;
@@ -184,7 +185,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
     {error && <div className="error-message" role="alert">{error}</div>}
     {recovery.includes('recompare') && <div className={styles.card}>
       <div className={styles.awaiting} style={{ marginTop: 0 }}>
-        <div><strong>{t('stage.conflict')}</strong><span>{t('copy.conflict')} 差异需要按当前文件重新生成。</span></div>
+        <div><strong>{t('stage.conflict')}</strong><span>{t('copy.conflict')}</span></div>
         <div className={styles.actions}>
           <button className="primary" onClick={() => void makePlan('apply')} disabled={busy === 'plan'}>{t('action.recompare')}</button>
         </div>
@@ -194,96 +195,94 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
 
     <section className={styles.card}>
       <div className={styles.header}>
-        <div><SlidersHorizontal size={18} /><h2>Codex 实例</h2></div>
-        <button className="text-button" onClick={() => void detect()} disabled={busy === 'detect'}><RefreshCw size={15} />重新检测</button>
+        <div><SlidersHorizontal size={18} /><h2>{t('codex.instances')}</h2></div>
+        <button className="text-button" onClick={() => void detect()} disabled={busy === 'detect'}><RefreshCw size={15} />{t('codex.recheck')}</button>
       </div>
       {instances.length > 1 && <div className={styles.row} style={{ marginBottom: 20 }}>
-        <label className={styles.field}>选择实例
-          <select aria-label="选择实例" value={instanceId} onChange={event => { setInstanceId(event.target.value); setInspect(null); setDraft(null); setStatus(null); }}>
+        <label className={styles.field}>{t('codex.selectInstance')}<select aria-label={t('codex.selectInstance')} value={instanceId} onChange={event => { setInstanceId(event.target.value); setInspect(null); setDraft(null); setStatus(null); }}>
             {instances.map(instance => <option key={instance.id} value={instance.id}>{instance.configFile}</option>)}
           </select>
         </label>
       </div>}
       {selected && <dl className={styles.details}>
-        <dt>配置目录</dt><dd className="text-mono break-anywhere">{selected.configRoot}</dd>
-        <dt>配置文件</dt><dd className="text-mono break-anywhere">{selected.configFile}</dd>
-        <dt>CLI</dt><dd className="text-mono break-anywhere">{selected.cliPath ?? '未检测到'}</dd>
-        <dt>兼容性</dt><dd>{t(`compat.${selected.compatibility}`)}{selected.blockedReasonKey ? ` · ${selected.blockedReasonKey}` : ''}</dd>
+        <dt>{t('codex.configDir')}</dt><dd className="text-mono break-anywhere">{selected.configRoot}</dd>
+        <dt>{t('codex.configFile')}</dt><dd className="text-mono break-anywhere">{selected.configFile}</dd>
+        <dt>CLI</dt><dd className="text-mono break-anywhere">{selected.cliPath ?? t('codex.notDetected')}</dd>
+        <dt>{t('codex.compatibility')}</dt><dd>{t(`compat.${selected.compatibility}`)}{selected.blockedReasonKey ? ` · ${selected.blockedReasonKey}` : ''}</dd>
       </dl>}
-      <ul className={styles.versions} aria-label="版本状态">
+      <ul className={styles.versions} aria-label={t('codex.versions')}>
         <li>
-          <span>已保存版本</span>
-          <strong>{models.filter(model => model.inCatalog).length} 个模型在待应用目录</strong>
-          <small>本工具内的当前配置；共 {models.length} 个已保存模型</small>
+          <span>{t('codex.savedVersion')}</span>
+          <strong>{t('codex.savedVersionValue', { count: models.filter(model => model.inCatalog).length })}</strong>
+          <small>{t('codex.savedVersionNote', { total: models.length })}</small>
         </li>
         <li>
-          <span>已发布版本</span>
-          <strong>{summary ? summary.catalogRevision : '尚未发布'}</strong>
-          <small>{summary ? `${summary.aliasCount} 个模型 · ${stageLabelOf(summary.stage)}` : '应用成功后发布到本机网关'}</small>
+          <span>{t('codex.publishedVersion')}</span>
+          <strong>{summary ? summary.catalogRevision : t('codex.publishedNever')}</strong>
+          <small>{summary ? t('codex.publishedSummary', { count: summary.aliasCount, stage: stageLabelOf(summary.stage) }) : t('codex.publishedNeverNote')}</small>
         </li>
         <li>
-          <span>Codex 已观测版本</span>
-          <strong>未观测</strong>
-          <small>本工具不读取 Codex 的运行状态；请在 Codex 里重新加载后确认</small>
+          <span>{t('codex.observedVersion')}</span>
+          <strong>{t('codex.observedNever')}</strong>
+          <small>{t('codex.observedNote')}</small>
         </li>
       </ul>
 
       <div className={styles.actions} style={{ marginTop: 20 }}>
-        <button onClick={loadInspect} disabled={!instanceId || busy === 'inspect'}>检查当前配置</button>
+        <button onClick={loadInspect} disabled={!instanceId || busy === 'inspect'}>{t('codex.checkConfig')}</button>
         <button className="primary" onClick={() => void makePlan('apply')} disabled={!instanceId || busy === 'plan'}>{t('action.applyToCodex')}</button>
         <button onClick={() => void makePlan('restore')} disabled={!instanceId || busy === 'plan'}><History size={16} />{t('action.restorePrevious')}</button>
       </div>
     </section>
 
     {inspect && <section className={styles.card}>
-      <div className={styles.header}><div><FileSearch size={18} /><h2>当前配置</h2></div>
-        <button className="text-button" onClick={() => setShowPreview(value => !value)}>{showPreview ? '隐藏预览' : '查看脱敏预览'}</button></div>
+      <div className={styles.header}><div><FileSearch size={18} /><h2>{t('codex.inspectTitle')}</h2></div>
+        <button className="text-button" onClick={() => setShowPreview(value => !value)}>{showPreview ? t('shell.hidePreview') : t('shell.showPreview')}</button></div>
       <dl className={styles.details}>
-        <dt>受管字段</dt><dd className="text-mono break-anywhere">{inspect.managedFields.join('、') || '尚未写入'}</dd>
-        <dt>其他工具</dt><dd>{inspect.conflicts.length ? inspect.conflicts.join('、') : '未检测到冲突工具'}</dd>
+        <dt>{t('codex.managedFields')}</dt><dd className="text-mono break-anywhere">{inspect.managedFields.join(t('common.itemSeparator')) || t('codex.nothingWritten')}</dd>
+        <dt>{t('codex.otherTools')}</dt><dd>{inspect.conflicts.length ? inspect.conflicts.join(t('common.itemSeparator')) : t('codex.noConflictTool')}</dd>
       </dl>
-      {showPreview && <pre className={styles.preview} aria-label="脱敏配置预览">{inspect.redactedPreview}</pre>}
+      {showPreview && <pre className={styles.preview} aria-label={t('codex.redactedPreview')}>{inspect.redactedPreview}</pre>}
     </section>}
 
     {draft && <section className={styles.card}>
       <div className={styles.header}>
         <div>{draft.kind === 'apply' ? <SlidersHorizontal size={18} /> : <History size={18} />}
-          <h2>{draft.kind === 'apply' ? '应用差异' : '还原差异'}</h2></div>
-        <span className="badge">{draft.plan.changes.length} 项变更</span>
+          <h2>{draft.kind === 'apply' ? t('codex.diffTitleApply') : t('codex.diffTitleRestore')}</h2></div>
+        <span className="badge">{t('codex.changeCount', { count: draft.plan.changes.length })}</span>
       </div>
-      <p className={styles.subtle}>目标文件 <span className="text-mono break-anywhere">{draft.plan.configPath}</span></p>
+      <p className={styles.subtle}>{t('codex.targetFile')}<span className="text-mono break-anywhere">{draft.plan.configPath}</span></p>
       {draft.plan.changes.length === 0
-        ? <p className={styles.subtle} style={{ marginTop: 16 }}>计划中没有字段差异。</p>
+        ? <p className={styles.subtle} style={{ marginTop: 16 }}>{t('codex.noFieldDiff')}</p>
         : diff.map(group => <div key={group.key} className={styles.group}>
           <h3>{t(`group.${group.key}`)}<span className="badge">{group.changes.length}</span></h3>
           <table className={styles.changes}>
-            <thead><tr><th>字段</th><th>当前值</th><th>应用后</th><th>原因</th></tr></thead>
+            <thead><tr><th>{t('codex.changeField')}</th><th>{t('codex.changeBefore')}</th><th>{t('codex.changeAfter')}</th><th>{t('codex.changeReason')}</th></tr></thead>
             <tbody>{group.changes.map(change => <tr key={change.keyPath}>
               <td className="text-mono">{change.keyPath}</td>
-              <td><code className="text-muted break-anywhere">{change.before ?? '未设置'}</code></td>
-              <td><code className="break-anywhere">{change.after ?? '将被删除'}</code></td>
+              <td><code className="text-muted break-anywhere">{change.before ?? t('codex.notSet')}</code></td>
+              <td><code className="break-anywhere">{change.after ?? t('codex.willBeDeleted')}</code></td>
               <td className="text-muted">{reasonLabel(change.reasonKey)}</td>
             </tr>)}</tbody>
           </table>
         </div>)}
       {draft.plan.warnings.length > 0 && <div className={styles.warnings}>
-        <AlertTriangle size={15} /> 编译警告
-        <ul>{draft.plan.warnings.map(raw => {
+        <AlertTriangle size={15} />{t('codex.compileWarnings')}<ul>{draft.plan.warnings.map(raw => {
           const { label, detail } = warningParts(raw);
-          return <li key={raw}><strong>{label}</strong>：{detail}</li>;
+          return <li key={raw}><strong>{label}</strong>{t('common.labelSeparator')}{detail}</li>;
         })}</ul>
       </div>}
-      <div className={styles.note}><ShieldAlert size={17} /><p>应用前会比对配置文件摘要；如果其他工具在此期间修改了配置，本次提交会被拒绝并要求重新比较。</p></div>
+      <div className={styles.note}><ShieldAlert size={17} /><p>{t('codex.casNote')}</p></div>
       <div className={styles.actions} style={{ marginTop: 20 }}>
         <button className="primary" onClick={() => void commit()} disabled={busy === 'commit'}>
-          {busy === 'commit' ? '提交中…' : commitLabel}
+          {busy === 'commit' ? t('codex.committing') : commitLabel}
         </button>
-        <button onClick={() => { setDraft(null); setError(''); }}>取消</button>
+        <button onClick={() => { setDraft(null); setError(''); }}>{t('action.cancel')}</button>
       </div>
     </section>}
 
     {status && <section className={styles.card}>
-      <div className={styles.header}><div><CheckCircle2 size={18} /><h2>事务状态</h2></div>
+      <div className={styles.header}><div><CheckCircle2 size={18} /><h2>{t('codex.txState')}</h2></div>
         <span className={`badge ${status.open ? 'warning' : ''}`}>{stage ? t(stageKey(stage)) : '—'}</span></div>
       <ol className={styles.stages}>
         {timeline.map(item => {
@@ -295,10 +294,10 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
       {awaitingReload && <div className={styles.awaiting}>
         <div>
           <strong>{t('stage.awaitingReload')}</strong>
-          <span>{t('copy.hostUnobservable')} 请在 Codex 中重新加载或重开窗口后再确认。</span>
+          <span>{t('codex.awaitingReloadBody')}</span>
         </div>
         <div className={styles.actions}>
-          <button className="primary" onClick={() => void confirmReload(true)} disabled={busy === 'confirm'}>Codex 已重新加载</button>
+          <button className="primary" onClick={() => void confirmReload(true)} disabled={busy === 'confirm'}>{t('codex.reloaded')}</button>
           <button onClick={() => void confirmReload(false)} disabled={busy === 'confirm'}>{t('action.laterReload')}</button>
         </div>
       </div>}

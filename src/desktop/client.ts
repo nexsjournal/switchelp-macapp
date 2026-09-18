@@ -16,6 +16,8 @@ import type {
   ProviderPreset,
 } from '@/contracts/types';
 
+import { t } from '@/i18n';
+
 export interface ListResult<T> {
   items: T[];
   nextCursor: string | null;
@@ -219,7 +221,7 @@ export function toCoreError(value: unknown): CoreError {
   return {
     code: 'INTERNAL',
     messageKey: 'error.internal',
-    safeDetails: ['操作失败，请重试或查看诊断。'],
+    safeDetails: [t('error.generic')],
     retryable: false,
     recoveryActions: [],
   };

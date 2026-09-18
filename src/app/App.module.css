@@ -5,10 +5,10 @@
 .brand strong { display: block; font-size: 19px; letter-spacing: -.7px; }
 .brand span { display: block; font-size: 11px; color: var(--text-muted); margin-top: 3px; }
 .sidebar nav { display: grid; gap: 8px; }
-.sidebar nav button { justify-content: flex-start; border: 0; height: 44px; padding: 0 16px; background: transparent; color: var(--text-secondary); border-radius: var(--radius-nav); }
+.sidebar nav button { justify-content: flex-start; border: 1px solid transparent; height: 44px; padding: 0 16px; background: transparent; color: var(--text-secondary); border-radius: var(--radius-nav); }
 .sidebar nav button:hover { background: var(--bg-hover); color: var(--text-primary); }
 /* 当前页用强调色淡底 + 强调色文字：灰阶下“选中”太不显眼。 */
-.sidebar nav button.active { background: var(--accent-subtle); color: var(--accent); border: 1px solid var(--accent-border); }
+.sidebar nav button.active { background: var(--accent-subtle); color: var(--accent); border-color: var(--accent-border); }
 .sidebarBottom { border-top: 1px solid var(--border-subtle); padding: 20px 8px 12px; margin-top: auto; display: flex; gap: 12px; align-items: center; color: var(--text-secondary); }
 .sidebarBottom strong { font-size: 12px; font-weight: 500; display: block; }
 .sidebarBottom span { font-size: 10px; color: var(--text-muted); }
@@ -27,9 +27,12 @@
 /* 顶对齐、各自贴合内容：两张卡内容量不同，拉伸会在短的一侧留出大片空白。 */
 .overviewGrid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 24px; margin-bottom: 24px; align-items: start; }
 .card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
+/* 标题块贴行顶：同一行里的按钮更高时，居中会把标题带下去（修正量见 tokens.css）。 */
+.card > .cardHeader:first-child { margin-top: calc(-1 * var(--card-title-optical-trim)); }
+.card > .cardHeader:first-child > :first-child { align-self: flex-start; }
 .cardHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
-.cardHeader h2, .cardHeader h3 { margin: 0; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
-.cardHeader h3 { font-size: 14px; }
+.cardHeader h2, .cardHeader h3 { margin: 0; font-size: 16px; font-weight: 600; line-height: var(--line-height-card-title); display: flex; align-items: center; gap: 10px; }
+.cardHeader h3 { font-size: 14px; line-height: var(--line-height-control); }
 .cardHeader > svg { color: var(--text-muted); }
 .providerSummary { width: 100%; padding: 12px; height: auto; text-align: left; justify-content: flex-start; margin-top: 12px; background: var(--bg-input); }
 .providerSummary > div:nth-child(2) { flex: 1; overflow: hidden; }
@@ -62,7 +65,7 @@
 .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-bottom: 20px; color: var(--text-muted); font-size: 12px; }
 .search { display: flex; align-items: center; position: relative; width: min(420px, 75%); }
 .search svg { position: absolute; left: 12px; pointer-events: none; }
-.search input { padding-left: 38px; }
+.search input:not([type='checkbox']) { padding-left: 38px; }
 .providerLayout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 24px; align-items: start; }
 .providerList { display: grid; gap: 10px; }
 /* 每行直接给出状态与操作入口，而不是只留一个箭头。 */
@@ -100,8 +103,10 @@
 @keyframes rotate { to { transform: rotate(360deg); } }
 @media (max-width: 1120px) { .sidebar { width: 184px; } .main { padding: 24px; } .overviewGrid { gap: 16px; } .providerLayout { grid-template-columns: 230px minmax(0, 1fr); gap: 16px; } .card { padding: 20px; } }
 
-/* 侧栏底部的设置入口：与主导航同样的交互，但位置上分开。 */
-.settingsEntry { width: 100%; justify-content: flex-start; border: 0; height: 40px; padding: 0 16px; margin-bottom: 4px;
-  background: transparent; color: var(--text-secondary); border-radius: var(--radius-nav); }
+/* 侧栏底部的设置入口：位置上与导航分开，但尺寸与间距必须与导航项一致。 */
+.settingsEntry { width: 100%; justify-content: flex-start; height: 44px; padding: 0 16px; margin-top: 8px;
+  background: transparent; color: var(--text-secondary); border-radius: var(--radius-nav);
+  /* 常态也给透明边框，选中时加边框才不会让高度发生 2px 变化。 */
+  border: 1px solid transparent; }
 .settingsEntry:hover { background: var(--bg-hover); color: var(--text-primary); }
-.settingsEntry.active { background: var(--accent-subtle); color: var(--accent); border: 1px solid var(--accent-border); }
+.settingsEntry.active { background: var(--accent-subtle); color: var(--accent); border-color: var(--accent-border); }

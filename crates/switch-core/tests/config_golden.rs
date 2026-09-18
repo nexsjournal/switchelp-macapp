@@ -24,7 +24,7 @@ fn gateway_provider() -> ManagedProvider {
         base_url: "http://127.0.0.1:18765/i/local-main/c/rev_0007/v1".to_owned(),
         wire_api: "responses".to_owned(),
         auth: ProviderAuth::Command {
-            command: "/Applications/GPTSwitch.app/Contents/MacOS/gptswitch-auth".to_owned(),
+            command: "/Applications/Switchelp.app/Contents/MacOS/gptswitch-auth".to_owned(),
             timeout_ms: 5000,
             refresh_interval_ms: 300_000,
         },
@@ -35,7 +35,7 @@ fn managed() -> ManagedConfig {
     ManagedConfig {
         model: Some("gs/p_a/m_1".to_owned()),
         model_provider: Some("gptswitch".to_owned()),
-        model_catalog_json: Some("/Users/example/Library/Application Support/GPTSwitch/catalogs/rev_0007/models.json".to_owned()),
+        model_catalog_json: Some("/Users/example/Library/Application Support/Switchelp/catalogs/rev_0007/models.json".to_owned()),
         provider: Some(gateway_provider()),
         model_context_window: None,
         model_reasoning_effort: None,
@@ -108,7 +108,7 @@ fn preserves_unicode_paths_and_values() {
     let reparsed = ConfigSnapshot::parse(fixture("unicode.toml"), &text).unwrap();
     assert_eq!(
         reparsed.managed_value("model_catalog_json").as_deref(),
-        Some("/Users/example/Library/Application Support/GPTSwitch/catalogs/rev_0007/models.json")
+        Some("/Users/example/Library/Application Support/Switchelp/catalogs/rev_0007/models.json")
     );
 }
 

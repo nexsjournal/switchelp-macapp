@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "GPTSwitch",
+  "productName": "Switchelp",
   "version": "0.1.0",
   "identifier": "app.gptswitch.desktop",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [{
       "label": "main",
-      "title": "GPTSwitch",
+      "title": "Switchelp",
       "width": 1280,
       "height": 840,
       "minWidth": 960,

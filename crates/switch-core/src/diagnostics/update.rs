@@ -26,7 +26,7 @@ pub struct UpdateStatus {
 
 /// 默认查询地址：本项目的公开 Release。
 pub const DEFAULT_ENDPOINT: &str =
-    "https://api.github.com/repos/nexsjournal/gptswitch-macapp/releases/latest";
+    "https://api.github.com/repos/nexsjournal/switchelp-macapp/releases/latest";
 
 /// 查询最新发布。`current` 是当前版本（不带 `v` 前缀）。
 pub fn check(current: &str, endpoint: &str) -> UpdateStatus {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, ArrowLeftRight, Boxes, Check, ChevronRight, KeyRound, LayoutDashboard, ListChecks, Plus, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Settings as SettingsIcon } from 'lucide-react';
+import { Activity, Boxes, Check, ChevronRight, KeyRound, LayoutDashboard, ListChecks, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, SlidersHorizontal, Settings as SettingsIcon } from 'lucide-react';
 import type { Credential, Model, Provider } from '@/contracts/types';
 import { type AppliedSummary, type DesktopClient, type GatewayReport, type PlatformReport, toCoreError } from '@/desktop/client';
 import { desktopClient } from '@/desktop/transport';
@@ -10,14 +10,17 @@ import { OnboardingPage } from '@/features/onboarding/OnboardingPage';
 import { OverviewPage } from '@/features/overview/OverviewPage';
 import { ModelsPage } from '@/features/models/ModelsPage';
 import { Dialog } from '@/components/Dialog';
+import { EmptyState } from '@/components/EmptyState';
+import { AppLogo } from '@/components/AppLogo';
 import { CodexConfigPage } from '@/features/codex/CodexConfigPage';
 import { ProbePanel } from '@/features/providers/ProbePanel';
 import { ConnectionPage } from '@/features/diagnostics/ConnectionPage';
 import { LogsPage } from '@/features/diagnostics/LogsPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
-import { t } from '@/locales/zh-CN';
+
 import styles from './App.module.css';
 
+import { useLocale, t } from '@/i18n';
 type Page = 'overview' | 'providers' | 'models' | 'codexConfig' | 'diagnostics' | 'logs' | 'settings';
 const navigation = [
   { id: 'overview', icon: LayoutDashboard }, { id: 'providers', icon: Server },
@@ -29,10 +32,13 @@ const navigation = [
  * `served` 是本进程已处理的推理请求数，用来区分“起来了但没人用”和“根本没起来”。
  */
 function gatewayText(gateway: GatewayReport | null): string {
-  if (!gateway) return '正在读取网关状态…';
-  if (!gateway.running) return gateway.error ? `网关未启动：${gateway.error}` : '网关未启动';
+  if (!gateway) return t('shell.loadingGateway');
+  if (!gateway.running) return gateway.error ? t('overview.gatewayDownDetail', { reason: gateway.error }) : t('overview.loadStateGatewayDown');
   const revisions = gateway.revisions.length;
-  return `网关运行中 · 127.0.0.1:${gateway.port} · ${revisions ? `${revisions} 个目录版本` : '尚未发布目录'}`;
+  return t('overview.gatewayRunningDetail', {
+    port: gateway.port ?? '—',
+    revisions: revisions ? t('overview.catalogRevisions', { count: revisions }) : t('overview.noCatalogPublished'),
+  });
 }
 
 
@@ -64,16 +70,21 @@ function applyPlatform(report: PlatformReport) {
  * 判定只依据本工具自己保存的 Key 元数据，不猜测连接是否可用。
  */
 function providerStatus(provider: Provider, credentials: Credential[]): { tone: 'success' | 'warning' | 'muted'; label: string; action: string } {
-  if (!credentials.length) return { tone: 'muted', label: '待填写 Key', action: '配置' };
+  if (!credentials.length) return { tone: 'muted', label: t('overview.keysMissing'), action: t('overview.configure') };
   const active = credentials.find(credential => credential.id === provider.activeCredentialId);
-  if (!active) return { tone: 'warning', label: `${credentials.length} 个 Key · 未选择`, action: '管理' };
-  if (active.status === 'verified') return { tone: 'success', label: `${active.label} · 已验证`, action: '管理' };
-  if (active.status === 'auth_failed') return { tone: 'warning', label: `${active.label} · 认证失败`, action: '管理' };
-  return { tone: 'muted', label: `${active.label} · 未检测`, action: '管理' };
+  if (!active) return { tone: 'warning', label: t('overview.keysNoSelection', { count: credentials.length }), action: t('overview.manage') };
+  if (active.status === 'verified') return { tone: 'success', label: t('overview.keyVerified', { label: active.label }), action: t('overview.manage') };
+  if (active.status === 'auth_failed') return { tone: 'warning', label: t('overview.keyAuthFailed', { label: active.label }), action: t('overview.manage') };
+  return { tone: 'muted', label: t('overview.keyUntested', { label: active.label }), action: t('overview.manage') };
 }
 
 export function App({ client = desktopClient, initialPage = 'overview' }: { client?: DesktopClient; initialPage?: Page }) {
   const [page, setPage] = useState<Page>(initialPage);
+  /**
+   * 订阅语言状态：切换语言必须重渲染整棵树，只更新设置页会让侧栏和导航留在旧语言。
+   * `data-locale` 同时把解析后的语言暴露给 CSS，和 `data-platform` 一样。
+   */
+  const locale = useLocale();
   const [providers, setProviders] = useState<Provider[]>([]);
   const [models, setModels] = useState<Model[]>([]);
   /** 每个供应商各自的 Key 列表：供应商页每行都要显示状态，不能只加载当前选中的。 */
@@ -115,7 +126,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
         client.listProviders(), client.listModels(), client.gatewayStatus(), client.applySummary()]);
       setProviders(providerResult.items); setModels(modelResult); setGateway(gatewayResult); setSummary(summaryResult);
       setSelectedProviderId(current => providerResult.items.some(p => p.id === current) ? current : providerResult.items[0]?.id ?? '');
-    } catch (e) { setError(toCoreError(e).safeDetails.join('；') || '数据加载失败。'); }
+    } catch (e) { setError(toCoreError(e).safeDetails.join(t('common.listSeparator')) || t('shell.loadFailed')); }
     finally { setLoading(false); setLoaded(true); }
   }, [client]);
   useEffect(() => { void refresh(); }, [refresh]);
@@ -134,7 +145,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
       .then(items => [provider.id, items] as const)
       .catch(() => [provider.id, [] as Credential[]] as const)))
       .then(pairs => { if (current) setCredentialsByProvider(Object.fromEntries(pairs)); })
-      .catch(e => { if (current) setError(toCoreError(e).safeDetails.join('；') || 'Key 列表加载失败。'); })
+      .catch(e => { if (current) setError(toCoreError(e).safeDetails.join(t('common.listSeparator')) || t('shell.keysLoadFailed')); })
       .finally(() => { if (current) setKeyLoading(false); });
     return () => { current = false; };
   }, [client, providers, keyVersion]);
@@ -142,7 +153,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
   function navigate(next: Page) { setPage(next); setQuery(''); setNotice(''); }
   function saved(kind: 'provider' | 'model' | 'key') {
     setProviderEditor(null); setModelEditor(null); setKeyEditor(null);
-    setNotice(kind === 'key' ? 'Key 已安全保存。可以在列表中设为当前 Key。' : t('copy.draftSaved'));
+    setNotice(kind === 'key' ? t('providers.keySaved') : t('copy.draftSaved'));
     setKeyVersion(version => version + 1); void refresh();
   }
   async function selectKey(credential: Credential) {
@@ -150,43 +161,43 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
     setSwitching(true); setError('');
     try {
       await client.selectCredential(selectedProvider.id, credential.id);
-      setNotice(`已选择「${credential.label}」。模型应用后将使用此 Key。`);
+      setNotice(t('providers.keySelectedBody', { label: credential.label }));
       await refresh();
-    } catch (e) { setError(toCoreError(e).safeDetails.join('；') || '切换 Key 失败。'); }
+    } catch (e) { setError(toCoreError(e).safeDetails.join(t('common.listSeparator')) || t('providers.switchKeyFailed')); }
     finally { setSwitching(false); }
   }
   const pending = models.filter(m => m.inCatalog && m.hostState !== 'loaded');
   const search = query.trim().toLocaleLowerCase();
   const visibleProviders = providers.filter(p => `${p.name} ${p.endpoint}`.toLocaleLowerCase().includes(search));
 
-  return <div className={styles.shell}>
+  return <div className={styles.shell} data-locale={locale}>
     {/* 显式把焦点交给主内容：部分引擎不会为片段链接移动焦点。 */}
-    <a className="skip-link" href="#main-content" onClick={() => document.getElementById('main-content')?.focus()}>跳到主要内容</a>
+    <a className="skip-link" href="#main-content" onClick={() => document.getElementById('main-content')?.focus()}>{t('common.skipToContent')}</a>
     <aside className={styles.sidebar}>
-      <div className={styles.brand}><div className={styles.brandIcon}><ArrowLeftRight size={22} /></div><div><strong>GPTSwitch</strong><span>{t('app.subtitle')}</span></div></div>
-      <nav aria-label="主导航">{navigation.map(({ id, icon: Icon }) => <button key={id} className={page === id ? styles.active : ''} aria-current={page === id ? 'page' : undefined} onClick={() => navigate(id)}><Icon size={18} />{t(`nav.${id}`)}</button>)}</nav>
+      <div className={styles.brand}><div className={styles.brandIcon}><AppLogo size={20} /></div><div><strong>{t('app.name')}</strong><span>{t('app.subtitle')}</span></div></div>
+      <nav aria-label={t('shell.navLabel')}>{navigation.map(({ id, icon: Icon }) => <button key={id} className={page === id ? styles.active : ''} aria-current={page === id ? 'page' : undefined} onClick={() => navigate(id)}><Icon size={18} />{t(`nav.${id}`)}</button>)}</nav>
       {/* 设置按设计放在侧栏底部，与日常导航分开。 */}
       <button className={`${styles.settingsEntry} ${page === 'settings' ? styles.active : ''}`}
         aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}>
         <SettingsIcon size={18} />{t('nav.settings')}
       </button>
-      <div className={styles.sidebarBottom}><ShieldCheck size={18} /><div><strong>本地配置</strong><span>凭据使用系统安全存储</span></div></div>
-      <div className={styles.version}>GPTSwitch <span>{__APP_VERSION__} · 开发中</span></div>
+      <div className={styles.sidebarBottom}><ShieldCheck size={18} /><div><strong>{t('shell.localConfig')}</strong><span>{t('shell.credentialsInSecureStore')}</span></div></div>
+      <div className={styles.version}>{t('app.name')} <span>{__APP_VERSION__} · {t('app.inDevelopment')}</span></div>
     </aside>
     <div className={styles.workspace}>
-      <div className={styles.topbar}><span>工作空间 <ChevronRight size={14} /> {t(`nav.${page}`)}</span>{gateway && !gateway.running ? <span className="badge warning">网关未启动</span> : pending.length ? <span className="badge warning">{pending.length} 个模型待应用</span> : gateway?.revisions.length ? <span className="badge">已应用到 Codex</span> : <span className="badge">尚未应用到 Codex</span>}</div>
+      <div className={styles.topbar}><span>{t('common.workspace')}<ChevronRight size={14} /> {t(`nav.${page}`)}</span>{gateway && !gateway.running ? <span className="badge warning">{t('overview.loadStateGatewayDown')}</span> : pending.length ? <span className="badge warning">{t('shell.pendingCountBadge', { count: pending.length })}</span> : gateway?.revisions.length ? <span className="badge">{t('shell.applied')}</span> : <span className="badge">{t('shell.notApplied')}</span>}</div>
       <main className={styles.main} id="main-content" tabIndex={-1}>
         {modelEditor ? <ModelEditorPage client={client} providers={providers}
           model={modelEditor === 'new' ? undefined : modelEditor}
           onCancel={() => setModelEditor(null)}
           onViewDiff={() => { setModelEditor(null); navigate('codexConfig'); }}
           onSaved={async () => { setModelEditor(null); setNotice(t('copy.draftSaved')); await refresh(); }} /> : <>
-        {!showOnboarding && <header className={styles.pageHeader}><div><h1 className="text-page-title">{t(`nav.${page}`)}</h1><p>{({ overview: '管理供应商与模型，让每一次切换都有清楚的状态。', providers: '服务地址、API Key 和模型，按供应商集中管理。', models: '定义模型身份、上下文、输入能力与思考选项。', codexConfig: '将保存的模型应用到 Codex 原生模型菜单。', diagnostics: '逐阶段检查供应商连通性与模型权限。', logs: '查看脱敏后的运行记录，定位失败原因。', settings: '外观、网关、日志保留与危险操作。' })[page]}</p></div>
-          <div className="actions"><button className="icon-button" aria-label="刷新数据" disabled={loading} onClick={() => void refresh()}><RefreshCw size={17} className={loading ? styles.spin : ''} /></button>
-            {page !== 'codexConfig' && page !== 'logs' && page !== 'diagnostics' && page !== 'settings' && <button className="primary" disabled={loading || (page === 'models' && !providers.length)} onClick={() => page === 'models' ? setModelEditor('new') : setProviderEditor('new')}><Plus size={17} />{page === 'models' ? '添加模型' : '添加供应商'}</button>}</div></header>}
+        {!showOnboarding && <header className={styles.pageHeader}><div><h1 className="text-page-title">{t(`nav.${page}`)}</h1><p>{({ overview: t('page.overviewHint'), providers: t('page.providersHint'), models: t('page.modelsHint'), codexConfig: t('page.codexHint'), diagnostics: t('page.diagnosticsHint'), logs: t('page.logsHint'), settings: t('page.settingsHint') })[page]}</p></div>
+          <div className="actions"><button className="icon-button" aria-label={t('common.reload')} disabled={loading} onClick={() => void refresh()}><RefreshCw size={17} className={loading ? styles.spin : ''} /></button>
+            {page !== 'codexConfig' && page !== 'logs' && page !== 'diagnostics' && page !== 'settings' && <button className="primary" disabled={loading || (page === 'models' && !providers.length)} onClick={() => page === 'models' ? setModelEditor('new') : setProviderEditor('new')}><Plus size={17} />{page === 'models' ? t('action.addModel') : t('action.addProvider')}</button>}</div></header>}
         {error && <div className="error-message" role="alert">{error}</div>}
         {notice && <div className={styles.notice} role="status"><Check size={16} />{notice}</div>}
-        {!loaded && !error ? <div className={styles.empty} role="status" aria-live="polite">正在读取本地配置…</div> : <>
+        {!loaded && !error ? <div className={styles.empty} role="status" aria-live="polite">{t('shell.loading')}</div> : <>
           {showOnboarding && <OnboardingPage client={client} providers={providers} models={models}
             credentialsByProvider={credentialsByProvider}
             onOpenProviderForm={() => setProviderEditor('new')}
@@ -200,14 +211,20 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
           {page === 'overview' && !showOnboarding && <OverviewPage providers={providers} models={models}
             credentialsByProvider={credentialsByProvider} gateway={gateway} summary={summary}
             pendingCount={pending.length} onNavigate={navigate} onAddProvider={() => setProviderEditor('new')} />}
-          {page === 'providers' && <div className={styles.providerLayout}><section className={styles.providerList} aria-label="供应商列表">
+          {page === 'providers' && !providers.length && <section className={styles.card}>
+            <EmptyState icon={Server} title={t('empty.addFirstProviderTitle')}
+              description={t('providers.addFirstBody')}
+              action={<button className="primary" onClick={() => setProviderEditor('new')}><Plus size={17} />{t('action.addProvider')}</button>} />
+          </section>}
+          {page === 'providers' && providers.length > 0 && <div className={styles.providerLayout}><section className={styles.providerList} aria-label={t('providers.list')}>
             {visibleProviders.map(provider => {
               const status = providerStatus(provider, credentialsByProvider[provider.id] ?? []);
+              const modelCount = models.filter(m => m.providerId === provider.id).length;
               const selected = selectedProviderId === provider.id;
               return <div key={provider.id} className={`${styles.providerItem} ${selected ? styles.selected : ''}`}>
                 <button className={styles.providerSelect} onClick={() => setSelectedProviderId(provider.id)} aria-current={selected ? 'true' : undefined}>
                   <div className={styles.monogram}>{provider.name.slice(0, 1)}</div>
-                  <div className={styles.providerName}><strong>{provider.name}</strong><span>{provider.enabled ? '已启用' : '已停用'} · {models.filter(m => m.providerId === provider.id).length} 个模型</span></div>
+                  <div className={styles.providerName}><strong>{provider.name}</strong><span>{provider.enabled ? t('providers.modelCount', { count: modelCount }) : t('providers.disabledModelCount', { count: modelCount })}</span></div>
                 </button>
                 <div className={styles.providerStatus}>
                   <span className={`${styles.statusDot} ${styles[status.tone]}`} aria-hidden="true" />
@@ -216,33 +233,33 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
                 </div>
               </div>;
             })}
-            {!visibleProviders.length && <div className={styles.empty}><Server size={26} /><h3>{providers.length ? '没有匹配的供应商' : '还没有供应商'}</h3><p>点击右上角添加，开始配置。</p></div>}
+            {!visibleProviders.length && <EmptyState icon={Search} title={t('providers.noMatch')} description={t('providers.noMatchBody')} />}
           </section>{selectedProvider ? <section className={styles.card}>
             <div className={styles.cardHeader}><h2>{selectedProvider.name}</h2><div className="actions">
-              <button onClick={() => setProviderEditor(selectedProvider)}>编辑配置</button>
-              <button className="danger" aria-label={`删除供应商 ${selectedProvider.name}`}
+              <button onClick={() => setProviderEditor(selectedProvider)}>{t('providers.editConfig')}</button>
+              <button className="danger" aria-label={t('providers.deleteProviderAria', { name: selectedProvider.name })}
                 onClick={() => setConfirm({
-                  title: '删除供应商',
-                  body: `将删除「${selectedProvider.name}」。若它还有 Key 或模型，删除会被拒绝——请先删除它们。此操作不可撤销。`,
-                  confirmLabel: '删除供应商',
+                  title: t('providers.deleteProvider'),
+                  body: t('providers.deleteProviderBody', { name: selectedProvider.name }),
+                  confirmLabel: t('providers.deleteProvider'),
                   run: async () => { await client.deleteProvider(selectedProvider.id); },
-                })}>删除供应商</button>
+                })}>{t('providers.deleteProvider')}</button>
             </div></div>
-            <dl className={styles.details}><dt>API 地址</dt><dd className="text-mono break-anywhere">{selectedProvider.endpoint}</dd><dt>接口协议</dt><dd>{selectedProvider.protocol === 'responses' ? 'Responses' : 'Chat Completions · 待验证'}</dd><dt>认证方式</dt><dd>{selectedProvider.authKind === 'api_key' ? 'API Key' : '本机无认证'}</dd></dl>
-            <div className={styles.cardHeader}><h3><KeyRound size={17} /> API Key</h3><button onClick={() => setKeyEditor('new')}><Plus size={16} />添加 Key</button></div>
-            {keyLoading ? <p role="status">正在读取 Key 元数据…</p> : credentials.length ? <ul className={styles.keyList}>{credentials.map(credential => <li key={credential.id}><div><strong>{credential.label}</strong><span className="text-mono text-muted">{credential.maskedSuffix}</span></div><div className="actions"><button disabled={switching || selectedProvider.activeCredentialId === credential.id} onClick={() => void selectKey(credential)}>{selectedProvider.activeCredentialId === credential.id ? '当前 Key' : '设为当前'}</button><button onClick={() => setKeyEditor(credential)} aria-label={`替换 ${credential.label}`}>替换</button>
+            <dl className={styles.details}><dt>{t('providers.endpoint')}</dt><dd className="text-mono break-anywhere">{selectedProvider.endpoint}</dd><dt>{t('providers.protocol')}</dt><dd>{selectedProvider.protocol === 'responses' ? 'Responses' : t('providers.chatPending')}</dd><dt>{t('providers.authKind')}</dt><dd>{selectedProvider.authKind === 'api_key' ? t('auth.apiKey') : t('providers.noAuth')}</dd></dl>
+            <div className={styles.cardHeader}><h3><KeyRound size={17} />{t('auth.apiKey')}</h3><button onClick={() => setKeyEditor('new')}><Plus size={16} />{t('action.addKey')}</button></div>
+            {keyLoading ? <p role="status">{t('providers.loadingKeys')}</p> : credentials.length ? <ul className={styles.keyList}>{credentials.map(credential => <li key={credential.id}><div><strong>{credential.label}</strong><span className="text-mono text-muted">{credential.maskedSuffix}</span></div><div className="actions"><button disabled={switching || selectedProvider.activeCredentialId === credential.id} onClick={() => void selectKey(credential)}>{selectedProvider.activeCredentialId === credential.id ? t('providers.currentKey') : t('providers.selectKey')}</button><button onClick={() => setKeyEditor(credential)} aria-label={t('providers.replaceAria', { label: credential.label })}>{t('providers.replaceKey')}</button>
               <button className="danger" disabled={selectedProvider.activeCredentialId === credential.id}
-                title={selectedProvider.activeCredentialId === credential.id ? '正在使用的 Key 不能删除' : undefined}
-                aria-label={`删除 ${credential.label}`}
+                title={selectedProvider.activeCredentialId === credential.id ? t('providers.keyInUse') : undefined}
+                aria-label={t('providers.deleteKeyAria', { label: credential.label })}
                 onClick={() => setConfirm({
-                  title: '删除 Key',
-                  body: `将删除「${credential.label}」并撤销系统凭据库里的条目。正在使用的 Key 必须先切换到别的 Key。此操作不可撤销。`,
-                  confirmLabel: '删除 Key',
+                  title: t('providers.deleteKey'),
+                  body: t('providers.deleteKeyBody', { label: credential.label }),
+                  confirmLabel: t('providers.deleteKey'),
                   run: async () => { await client.deleteCredential(credential.id); },
-                })}>删除</button></div></li>)}</ul> : <div className={styles.empty}><KeyRound size={24} /><h3>还没有 API Key</h3><p>Key 按供应商独立保存，界面仅显示备注和掩码。</p></div>}
-            <div className={styles.note}><ShieldCheck size={17} /><p>服务地址或 Key 已保存不代表连接成功。连接状态需要通过实际请求确认。</p></div>
+                })}>{t('action.delete')}</button></div></li>)}</ul> : <div className={styles.empty}><KeyRound size={24} /><h3>{t('empty.noKeyTitle')}</h3><p>{t('providers.noKeysBody')}</p></div>}
+            <div className={styles.note}><ShieldCheck size={17} /><p>{t('providers.keyHint')}</p></div>
             <ProbePanel client={client} provider={selectedProvider} credentialId={selectedProvider.activeCredentialId ?? null} />
-          </section> : <section className={`${styles.card} ${styles.empty}`}><Settings2 size={28} /><p>选择供应商以管理它的配置和 Key。</p></section>}</div>}
+          </section> : <section className={styles.card}><EmptyState icon={Settings2} title={t('providers.noneSelected')} description={t('providers.noneSelectedBody')} /></section>}</div>}
           {page === 'models' && <ModelsPage client={client} providers={providers} models={models} onChanged={refresh} onViewDiff={() => navigate('codexConfig')} />}
           {page === 'codexConfig' && <CodexConfigPage client={client} models={models} summary={summary} onApplied={() => void refresh()} />}
           {page === 'diagnostics' && <ConnectionPage client={client} providers={providers} />}
@@ -251,25 +268,25 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
         </>}
       </>}
       </main>
-      <footer className={styles.statusbar}><span><span className={`${styles.dot} ${gateway?.running ? styles.online : styles.offline}`} />{gatewayText(gateway)}</span><span>{pending.length} 个模型待应用 <span className={styles.separator}>/</span> 配置保存在本机</span></footer>
+      <footer className={styles.statusbar}><span><span className={`${styles.dot} ${gateway?.running ? styles.online : styles.offline}`} />{gatewayText(gateway)}</span><span>{t('shell.pendingModels', { count: pending.length })} <span className={styles.separator}>/</span>{t('shell.configOnDevice')}</span></footer>
     </div>
     {providerEditor && <ProviderForm client={client} provider={providerEditor === 'new' ? undefined : providerEditor} onSaved={() => saved('provider')} onClose={() => setProviderEditor(null)} />}
     {confirm && <Dialog title={confirm.title} description={confirm.body} onClose={() => setConfirm(null)} busy={confirmBusy}>
       <div className="form-fields">
         <div className="form-footer">
-          <span>此操作不可撤销。</span>
+          <span>{t('common.irreversible')}</span>
           <div className="actions">
-            <button onClick={() => setConfirm(null)} disabled={confirmBusy}>取消</button>
+            <button onClick={() => setConfirm(null)} disabled={confirmBusy}>{t('action.cancel')}</button>
             <button className="danger" disabled={confirmBusy} autoFocus onClick={async () => {
               setConfirmBusy(true); setError('');
               try {
                 await confirm.run();
-                setNotice('已完成。');
+                setNotice(t('common.done'));
                 setConfirm(null);
                 await refresh();
-              } catch (e) { setError(toCoreError(e).safeDetails.join('；') || '操作失败。'); }
+              } catch (e) { setError(toCoreError(e).safeDetails.join(t('common.listSeparator')) || t('common.failed')); }
               finally { setConfirmBusy(false); }
-            }}>{confirmBusy ? '处理中…' : confirm.confirmLabel}</button>
+            }}>{confirmBusy ? t('common.busy') : confirm.confirmLabel}</button>
           </div>
         </div>
       </div>

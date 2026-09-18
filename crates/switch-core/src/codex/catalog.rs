@@ -293,7 +293,7 @@ impl CatalogCompiler {
             slug: model.catalog_alias.as_str().to_owned(),
             display_name: model.display_name.clone(),
             description: format!(
-                "由 GPTSwitch 管理；上游模型 ID：{}",
+                "由 Switchelp 管理；上游模型 ID：{}",
                 model.upstream_id
             ),
             default_reasoning_level: default_level,

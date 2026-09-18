@@ -83,7 +83,7 @@ jobs:
           Get-ChildItem out
       - uses: actions/upload-artifact@v4
         with:
-          name: gptswitch-x86_64-pc-windows-msvc
+          name: switchelp-x86_64-pc-windows-msvc
           path: out/*
           if-no-files-found: error
 
@@ -154,7 +154,7 @@ jobs:
 
       - name: 校验签名与公证
         run: |
-          APP="target/${{ matrix.target }}/release/bundle/macos/GPTSwitch.app"
+          APP="target/${{ matrix.target }}/release/bundle/macos/Switchelp.app"
           codesign --verify --deep --strict --verbose=2 "$APP"
           spctl --assess --type execute -vv "$APP" || echo "::warning::Gatekeeper 未通过：多半是还没有配置公证凭据，用户首次打开需右键打开。"
 
@@ -162,13 +162,13 @@ jobs:
         run: |
           mkdir -p out
           find target -type f -name '*.dmg' -exec cp {} out/ \;
-          ditto -c -k --keepParent "target/${{ matrix.target }}/release/bundle/macos/GPTSwitch.app" \
-            "out/GPTSwitch-${{ matrix.target }}.zip"
+          ditto -c -k --keepParent "target/${{ matrix.target }}/release/bundle/macos/Switchelp.app" \
+            "out/Switchelp-${{ matrix.target }}.zip"
           ls -la out
 
       - uses: actions/upload-artifact@v4
         with:
-          name: gptswitch-${{ matrix.target }}
+          name: switchelp-${{ matrix.target }}
           path: out/*
           if-no-files-found: error
 
