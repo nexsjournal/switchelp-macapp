@@ -51,7 +51,10 @@
 .mark { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border-control); font-size: 11px; color: var(--text-muted); }
 .checklist li.ok .mark { border-color: var(--status-success); color: var(--status-success); }
 .checklist strong { display: block; font-size: 13px; font-weight: 500; }
-.checklist span { display: block; font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+/* 只作用于说明行（标题下面那句）。写成 `.checklist span` 会把 .mark 一起选中：
+   它的 display 被改成 block、又被加上 margin-top，于是编号圆点里的数字不在圆心。
+   编号圆点自己用 place-items: center 居中。 */
+.checklist strong + span { display: block; font-size: 11px; color: var(--text-muted); margin-top: 3px; }
 
 .testRow { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle); }
 .testRow strong { display: block; font-size: 13px; font-weight: 500; }
