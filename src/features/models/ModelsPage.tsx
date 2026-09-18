@@ -35,14 +35,18 @@ const hostKeys: Record<Model['hostState'], string> = {
  * 行操作按规范分成主操作、次操作与菜单：三个按钮并排会把操作列撑到比数据列还宽。
  * 「测试」只做只读探测，不会产生供应商费用。
  */
-export function ModelsPage({ client, providers, models, onChanged, onViewDiff }: {
+export function ModelsPage({ client, providers, models, onChanged, onViewDiff, providerScope, embedded }: {
   client: DesktopClient; providers: Provider[]; models: Model[];
   onChanged: () => Promise<void> | void;
   /** 编辑器里的「保存并查看应用差异」需要跳到 Codex 配置页，这里只上报意图。 */
   onViewDiff?: () => void;
+  /** 限定到某个供应商：供应商页把这一段嵌进它的详情里，不再提供跨供应商的筛选。 */
+  providerScope?: string;
+  /** 嵌进别的卡片时不再自带卡片外框，避免卡片套卡片。 */
+  embedded?: boolean;
 }) {
   const [query, setQuery] = useState('');
-  const [providerFilter, setProviderFilter] = useState('all');
+  const [providerFilter, setProviderFilter] = useState(providerScope ?? 'all');
   const [availability, setAvailability] = useState<Availability>('all');
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'name', desc: false });
   const [selected, setSelected] = useState<string[]>([]);
@@ -159,17 +163,18 @@ export function ModelsPage({ client, providers, models, onChanged, onViewDiff }:
       onSaved={async () => { setEditor(null); await finish(t('models.draftSaved')); }} />;
   }
 
-  return <div className={styles.page}>
+  const body = <>
     <div className={styles.toolbar}>
       <div className={styles.search}><Search size={17} />
         <input aria-label={t('models.searchAria')} placeholder={t('models.searchPlaceholder')} value={query} onChange={event => setQuery(event.target.value)} />
       </div>
       <div className={styles.filters}>
         <Filter size={15} aria-hidden="true" />
-        <label>{t('editor.provider')}<select aria-label={t('models.providerFilter')} value={providerFilter} onChange={event => setProviderFilter(event.target.value)}>
+        {/* 嵌进供应商详情时已经限定了供应商，就不再多给一个筛选。 */}
+        {!providerScope && <label>{t('editor.provider')}<select aria-label={t('models.providerFilter')} value={providerFilter} onChange={event => setProviderFilter(event.target.value)}>
           <option value="all">{t('logs.levelAll')}</option>
           {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
-        </select></label>
+        </select></label>}
         <label>{t('models.catalog')}<select aria-label={t('models.catalogFilter')} value={availability} onChange={event => setAvailability(event.target.value as Availability)}>
           {(Object.keys(availabilityKeys) as Availability[]).map(key => <option key={key} value={key}>{t(availabilityKeys[key])}</option>)}
         </select></label>
@@ -195,7 +200,7 @@ export function ModelsPage({ client, providers, models, onChanged, onViewDiff }:
           title={models.length ? t('models.noMatch') : t('empty.noModelTitle')}
           description={models.length ? t('models.noMatchBody') : t('models.emptyBody')}
           action={!models.length && <button className="primary" onClick={() => setEditor('new')} disabled={!providers.length}><Plus size={16} />{t('action.addModel')}</button>} /></section>
-      : <section className={styles.card}>
+      : <section className={embedded ? styles.plain : styles.card}>
         <div className={styles.tableWrap}>
           <table>
             <thead><tr>
@@ -278,5 +283,8 @@ export function ModelsPage({ client, providers, models, onChanged, onViewDiff }:
         </div>
       </div></div>
     </Dialog>}
-  </div>;
+  </>;
+
+  // 内嵌时不再自带页面级间距；表格那张卡本身就够当外框了。
+  return embedded ? body : <div className={styles.page}>{body}</div>;
 }

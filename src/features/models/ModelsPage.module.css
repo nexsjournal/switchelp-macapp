@@ -9,6 +9,8 @@
 .filters > svg { transform: translateY(-10px); }
 .filters label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-secondary); }
 
+/* 嵌进别的卡片时用：不要外框，只要不塌陷。 */
+.plain { min-width: 0; }
 .card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
 .tableWrap { overflow-x: auto; }
 .tableWrap table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }

@@ -45,7 +45,7 @@ export function OverviewPage({ providers, models, credentialsByProvider, gateway
   gateway: GatewayReport | null;
   summary: AppliedSummary | null;
   pendingCount: number;
-  onNavigate: (page: 'providers' | 'models' | 'codexConfig' | 'diagnostics' | 'settings') => void;
+  onNavigate: (page: 'providers' | 'codexConfig' | 'diagnostics' | 'settings') => void;
   onAddProvider: () => void;
 }) {
   /** 后续请求会用哪个 Key：取已发布默认模型所属供应商的当前 Key。 */
@@ -98,7 +98,7 @@ export function OverviewPage({ providers, models, credentialsByProvider, gateway
           {t('overview.noAppliedConfig', { count: pendingCount })}
         </p>}
         <div className={styles.cardActions}>
-          <button onClick={() => onNavigate('models')}>{t('action.viewModels')}</button>
+          <button onClick={() => onNavigate('providers')}>{t('action.viewModels')}</button>
           <button className="primary" onClick={() => onNavigate('codexConfig')}>{t('nav.codexConfig')}</button>
         </div>
         {/* 外层 flex 只放图标与文字块；文字必须包在同一个子元素里，
@@ -157,7 +157,7 @@ export function OverviewPage({ providers, models, credentialsByProvider, gateway
 
     <section className={styles.card}>
       <div className={styles.cardHeader}><h2>{t('overview.pendingModels')}<span className="badge">{pendingCount}</span></h2>
-        <button className="text-button" onClick={() => onNavigate('models')}>{t('overview.viewAll')}<ArrowRight size={14} /></button></div>
+        <button className="text-button" onClick={() => onNavigate('providers')}>{t('overview.viewAll')}<ArrowRight size={14} /></button></div>
       {pendingCount === 0
         ? <p className={styles.muted}><Boxes size={15} />{t('overview.nothingPending')}</p>
         : <ul className={styles.pending}>{models.filter(model => model.inCatalog && model.hostState !== 'loaded').slice(0, 5).map(model => <li key={model.id}>
@@ -170,7 +170,7 @@ export function OverviewPage({ providers, models, credentialsByProvider, gateway
     {pendingCount > 0 && <div className={styles.applyBar} role="region" aria-label={t('overview.pendingChanges')}>
       <span><KeyRound size={16} />{t('overview.pendingBar', { count: pendingCount })}</span>
       <div className="actions">
-        <button onClick={() => onNavigate('models')}><CircleHelp size={15} />{t('overview.whereToChange')}</button>
+        <button onClick={() => onNavigate('providers')}><CircleHelp size={15} />{t('overview.whereToChange')}</button>
         <button className="primary" onClick={() => onNavigate('codexConfig')}>{t('overview.viewDiffAndApply')}</button>
       </div>
     </div>}

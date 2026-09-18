@@ -47,7 +47,7 @@ test('保存 Key 只通过专用调用传递并清空密码框，不自动切换
   const client = testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }), addCredential });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
   await user.click(screen.getByRole('button', { name: '添加 Key' }));
   await user.type(screen.getByLabelText('Key 备注'), '日常');
   await user.type(screen.getByLabelText('API Key'), 'synthetic-secret');
@@ -94,7 +94,7 @@ test('纳入目录的模型不能直接删除，必须先移出', async () => {
   const user = userEvent.setup();
   render(<App client={client} />);
   await screen.findByText('目录中的模型');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
   await user.click(await screen.findByRole('button', { name: '更多操作 目录中的模型' }));
 
   // 菜单里能看到删除，但已纳入目录时禁用。
@@ -116,7 +116,7 @@ test('移出目录要确认，并按版本号提交 inCatalog=false', async () =
     listModels: vi.fn().mockResolvedValue([model]), saveModel });
   render(<App client={client} />);
   await screen.findByText('目录中的模型');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
   await user.click(await screen.findByRole('button', { name: '更多操作 目录中的模型' }));
   await user.click(screen.getByRole('menuitem', { name: '移出 Codex 目录' }));
   const dialog = await screen.findByRole('dialog');
@@ -137,7 +137,7 @@ test('删除 Key 会说明撤销凭据库条目，并只在确认后调用', asy
     listCredentials: vi.fn().mockResolvedValue([credential]), deleteCredential });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
   await user.click(await screen.findByRole('button', { name: '删除 备用' }));
 
   const dialog = await screen.findByRole('dialog');

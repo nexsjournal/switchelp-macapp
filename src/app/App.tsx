@@ -21,10 +21,10 @@ import { SettingsPage } from '@/features/settings/SettingsPage';
 import styles from './App.module.css';
 
 import { useLocale, t } from '@/i18n';
-type Page = 'overview' | 'providers' | 'models' | 'codexConfig' | 'diagnostics' | 'logs' | 'settings';
+type Page = 'overview' | 'providers' | 'codexConfig' | 'diagnostics' | 'logs' | 'settings';
 const navigation = [
   { id: 'overview', icon: LayoutDashboard }, { id: 'providers', icon: Server },
-  { id: 'models', icon: Boxes }, { id: 'codexConfig', icon: SlidersHorizontal },
+  { id: 'codexConfig', icon: SlidersHorizontal },
   { id: 'diagnostics', icon: Activity }, { id: 'logs', icon: ListChecks },
 ] as const;
 /**
@@ -199,9 +199,9 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
           onCancel={() => setModelEditor(null)}
           onViewDiff={() => { setModelEditor(null); navigate('codexConfig'); }}
           onSaved={async () => { setModelEditor(null); setNotice(t('copy.draftSaved')); await refresh(); }} /> : <>
-        {!showOnboarding && <header className={styles.pageHeader}><div><h1 className="text-page-title">{t(`nav.${page}`)}</h1><p>{({ overview: t('page.overviewHint'), providers: t('page.providersHint'), models: t('page.modelsHint'), codexConfig: t('page.codexHint'), diagnostics: t('page.diagnosticsHint'), logs: t('page.logsHint'), settings: t('page.settingsHint') })[page]}</p></div>
+        {!showOnboarding && <header className={styles.pageHeader}><div><h1 className="text-page-title">{t(`nav.${page}`)}</h1><p>{({ overview: t('page.overviewHint'), providers: t('page.providersHint'), codexConfig: t('page.codexHint'), diagnostics: t('page.diagnosticsHint'), logs: t('page.logsHint'), settings: t('page.settingsHint') })[page]}</p></div>
           <div className="actions"><button className="icon-button" aria-label={t('common.reload')} disabled={loading} onClick={() => void refresh()}><RefreshCw size={17} className={loading ? styles.spin : ''} /></button>
-            {page !== 'codexConfig' && page !== 'logs' && page !== 'diagnostics' && page !== 'settings' && <button className="primary" disabled={loading || (page === 'models' && !providers.length)} onClick={() => page === 'models' ? setModelEditor('new') : setProviderEditor('new')}><Plus size={17} />{page === 'models' ? t('action.addModel') : t('action.addProvider')}</button>}</div></header>}
+            {page !== 'codexConfig' && page !== 'logs' && page !== 'diagnostics' && page !== 'settings' && <button className="primary" disabled={loading} onClick={() => setProviderEditor('new')}><Plus size={17} />{t('action.addProvider')}</button>}</div></header>}
         {error && <div className="error-message" role="alert">{error}</div>}
         {notice && <div className={styles.notice} role="status"><Check size={16} />{notice}</div>}
         {!loaded && !error ? <div className={styles.empty} role="status" aria-live="polite">{t('shell.loading')}</div> : <>
@@ -266,8 +266,13 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
                 })}>{t('action.delete')}</button></div></li>)}</ul> : <div className={styles.empty}><KeyRound size={24} /><h3>{t('empty.noKeyTitle')}</h3><p>{t('providers.noKeysBody')}</p></div>}
             <div className={styles.note}><ShieldCheck size={17} /><p>{t('providers.keyHint')}</p></div>
             <ProbePanel key={selectedProvider.id} client={client} provider={selectedProvider} credentialId={selectedProvider.activeCredentialId ?? null} />
+
+            {/* 供应商与它的模型在同一页：它们本来就是一件事（Key → 地址 → 模型 → 应用）。 */}
+            <div className={styles.cardHeader}><h3><Boxes size={17} />{t('models.title')}</h3>
+              <button onClick={() => setModelEditor('new')} disabled={!selectedProvider}><Plus size={16} />{t('action.addModel')}</button></div>
+            <ModelsPage client={client} providers={providers} models={models} onChanged={refresh}
+              onViewDiff={() => navigate('codexConfig')} providerScope={selectedProvider.id} embedded />
           </section> : <section className={styles.card}><EmptyState icon={Settings2} title={t('providers.noneSelected')} description={t('providers.noneSelectedBody')} /></section>}</div>}
-          {page === 'models' && <ModelsPage client={client} providers={providers} models={models} onChanged={refresh} onViewDiff={() => navigate('codexConfig')} />}
           {page === 'codexConfig' && <CodexConfigPage client={client} models={models} summary={summary} onApplied={() => void refresh()} />}
           {page === 'diagnostics' && <ConnectionPage client={client} providers={providers} />}
           {page === 'logs' && <LogsPage client={client} />}
