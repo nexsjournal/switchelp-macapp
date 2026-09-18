@@ -20,7 +20,7 @@ pub fn mask_secret(secret: &str) -> String {
         .into_iter()
         .rev()
         .collect();
-    format!("••••••••{}", suffix)
+    format!("••••••••{suffix}")
 }
 
 /// 凭据可用状态。Keychain 记录缺失与 API 401 是两个不同状态。
@@ -114,7 +114,11 @@ impl Credential {
     }
 
     /// 替换秘密：创建新 secret_version，不覆写在途版本。
-    pub fn replace_secret(&mut self, secret: &str, now: impl Into<String>) -> Result<(), CoreError> {
+    pub fn replace_secret(
+        &mut self,
+        secret: &str,
+        now: impl Into<String>,
+    ) -> Result<(), CoreError> {
         validate_secret(secret)?;
         self.secret_version += 1;
         self.masked_suffix = mask_secret(secret);
@@ -148,9 +152,7 @@ impl Credential {
     /// 删除前检查：仍被续接绑定时只能进入“停用并等待释放”。
     pub fn deletion_plan(&self, active_bindings: usize) -> DeletionPlan {
         if active_bindings > 0 {
-            DeletionPlan::DeactivateAndWait {
-                active_bindings,
-            }
+            DeletionPlan::DeactivateAndWait { active_bindings }
         } else {
             DeletionPlan::DeleteNow
         }

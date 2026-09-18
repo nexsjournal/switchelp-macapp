@@ -151,7 +151,14 @@ impl ApplyService {
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
-            backups: None, repository, operations, router, layout, clock, commits: Mutex::new(()) }
+            backups: None,
+            repository,
+            operations,
+            router,
+            layout,
+            clock,
+            commits: Mutex::new(()),
+        }
     }
 
     pub fn layout(&self) -> &GatewayLayout {
@@ -223,7 +230,9 @@ impl ApplyService {
         let compiled = CatalogCompiler::compile(&selected, &options)?;
         let catalog_bytes = compiled.to_json_bytes()?;
         let catalog_hash = hash(&String::from_utf8_lossy(&catalog_bytes));
-        let catalog_revision = self.layout.catalog_revision(&hash(&format!("{}:{}", instance.id, catalog_hash)));
+        let catalog_revision = self
+            .layout
+            .catalog_revision(&hash(&format!("{}:{}", instance.id, catalog_hash)));
         let catalog_path = self.layout.catalog_path(&catalog_revision);
 
         let aliases: Vec<String> = compiled
@@ -242,7 +251,8 @@ impl ApplyService {
             None => aliases[0].clone(),
         };
 
-        let managed = self.managed_config(instance, &default_alias, &catalog_path, &catalog_revision);
+        let managed =
+            self.managed_config(instance, &default_alias, &catalog_path, &catalog_revision);
         let snapshot = crate::codex::config::ConfigSnapshot::read(&instance.config_file)?;
         let changes = diff_managed(&snapshot, &managed);
         let warnings: Vec<String> = compiled
@@ -300,18 +310,27 @@ impl ApplyService {
         plan_hash: &str,
         idempotency_key: &str,
     ) -> Result<String, CoreError> {
-        let _commit_guard = self.commits.lock().map_err(|_| CoreError::internal("提交锁不可用"))?;
+        let _commit_guard = self
+            .commits
+            .lock()
+            .map_err(|_| CoreError::internal("提交锁不可用"))?;
         let mut state = self.plan_state(plan_id, plan_hash)?;
         if state.kind != OperationKind::Apply {
             return Err(CoreError::validation("该计划不是应用计划"));
         }
-        if let Some(id) = self.check_execution(&state, idempotency_key)? { return Ok(id); }
+        if let Some(id) = self.check_execution(&state, idempotency_key)? {
+            return Ok(id);
+        }
         if state.plan.is_expired(self.clock.now_unix()) {
-            state.operation.transition(ApplyStage::Blocked, self.clock.now())?;
+            state
+                .operation
+                .transition(ApplyStage::Blocked, self.clock.now())?;
             self.operations.save(state)?;
-            return Err(CoreError::new(ErrorCode::ConfigChanged, "error.planExpired")
-                .with_detail("计划已过期，需要重新生成差异".to_owned())
-                .with_recovery("replan", "action.replan"));
+            return Err(
+                CoreError::new(ErrorCode::ConfigChanged, "error.planExpired")
+                    .with_detail("计划已过期，需要重新生成差异".to_owned())
+                    .with_recovery("replan", "action.replan"),
+            );
         }
 
         let snapshot = crate::codex::config::ConfigSnapshot::read(&state.plan.config_path)?;
@@ -322,22 +341,32 @@ impl ApplyService {
             snapshot.existed,
         );
         if !cas.is_match() {
-            state.operation.transition(ApplyStage::Blocked, self.clock.now())?;
+            state
+                .operation
+                .transition(ApplyStage::Blocked, self.clock.now())?;
             state.operation.stage = ApplyStage::Conflict;
-            state.operation.push_event(ApplyStage::Conflict, HashMap::new(), self.clock.now());
+            state
+                .operation
+                .push_event(ApplyStage::Conflict, HashMap::new(), self.clock.now());
             self.operations.save(state)?;
             return Err(describe_cas_failure(cas));
         }
 
-        let prepared = state.prepared.clone().ok_or_else(|| CoreError::conflict("error.planRequiresRefresh")
-            .with_detail("该计划缺少冻结的模型与路由，请重新预览".to_owned()))?;
+        let prepared = state.prepared.clone().ok_or_else(|| {
+            CoreError::conflict("error.planRequiresRefresh")
+                .with_detail("该计划缺少冻结的模型与路由，请重新预览".to_owned())
+        })?;
         if self.current_source_hash()? != prepared.source_hash {
-            return Err(CoreError::new(ErrorCode::ConfigChanged, "error.modelChanged")
-                .with_detail("预览后供应商、Key 或模型已变化，请重新生成差异".to_owned()));
+            return Err(
+                CoreError::new(ErrorCode::ConfigChanged, "error.modelChanged")
+                    .with_detail("预览后供应商、Key 或模型已变化，请重新生成差异".to_owned()),
+            );
         }
-        let bytes = std::fs::read(&state.catalog_path).map_err(|_| CoreError::internal("目录文件在提交前不可读取"))?;
+        let bytes = std::fs::read(&state.catalog_path)
+            .map_err(|_| CoreError::internal("目录文件在提交前不可读取"))?;
         if hash(&String::from_utf8_lossy(&bytes)) != state.catalog_hash {
-            return Err(CoreError::conflict("error.catalogChanged").with_detail("目录文件在预览后被修改".to_owned()));
+            return Err(CoreError::conflict("error.catalogChanged")
+                .with_detail("目录文件在预览后被修改".to_owned()));
         }
         let (text, ownership) = apply_managed(&snapshot, &prepared.managed, &state.ownership)?;
         // 路由发布失败必须发生在修改 Codex 之前；发布的是冻结输入，不读取当前表单值。
@@ -346,9 +375,11 @@ impl ApplyService {
         state.operation.written_hash = Some(hash(&text));
         state.ownership = ownership;
         state.publication = Some(self.publication_for(&state, &prepared.managed)?);
-        state.operation.transition(ApplyStage::Committing, self.clock.now())?;
+        state
+            .operation
+            .transition(ApplyStage::Committing, self.clock.now())?;
         self.operations.save(state.clone())?; // 写前日志：崩溃后可根据目标摘要补记。
-        // 写之前先备份原文件。备份失败就不写：宁可不提交，也不能在没有退路时改用户配置。
+                                              // 写之前先备份原文件。备份失败就不写：宁可不提交，也不能在没有退路时改用户配置。
         if let Some(backups) = &self.backups {
             if Path::new(&state.plan.config_path).exists() {
                 backups.create(
@@ -359,7 +390,9 @@ impl ApplyService {
             }
         }
         write_atomic(Path::new(&state.plan.config_path), &text)?;
-        state.operation.transition(ApplyStage::AwaitingReload, self.clock.now())?;
+        state
+            .operation
+            .transition(ApplyStage::AwaitingReload, self.clock.now())?;
         let operation_id = state.operation.id.as_str().to_owned();
         self.operations.save(state)?;
         self.mark_models_awaiting_reload(&prepared.models)?;
@@ -367,9 +400,17 @@ impl ApplyService {
     }
 
     /// 宿主加载回执。没有回执时最多停在 `Pending`，不能自称 `Loaded`。
-    pub fn confirm_reload(&self, operation_id: &str, loaded: bool) -> Result<OperationState, CoreError> {
+    pub fn confirm_reload(
+        &self,
+        operation_id: &str,
+        loaded: bool,
+    ) -> Result<OperationState, CoreError> {
         let mut state = self.status(operation_id)?;
-        let next = if loaded { ApplyStage::Verified } else { ApplyStage::Pending };
+        let next = if loaded {
+            ApplyStage::Verified
+        } else {
+            ApplyStage::Pending
+        };
         state.operation.transition(next, self.clock.now())?;
         if loaded {
             self.mark_models_loaded(&self.repository.list_models()?)?;
@@ -382,7 +423,9 @@ impl ApplyService {
     pub fn plan_restore(&self, instance: &CodexInstance) -> Result<ApplyPlan, CoreError> {
         let ownership = self.operations.ownership(&instance.id)?;
         if ownership.is_empty() {
-            return Err(CoreError::validation("本工具尚未写入过该实例的配置，无需还原"));
+            return Err(CoreError::validation(
+                "本工具尚未写入过该实例的配置，无需还原",
+            ));
         }
         let snapshot = crate::codex::config::ConfigSnapshot::read(&instance.config_file)?;
         let outcomes = plan_restore(&snapshot, &ownership);
@@ -393,7 +436,9 @@ impl ApplyService {
             .map(|outcome| format!("{} 已被外部修改，将保留当前值", outcome.key_path()))
             .collect();
         if changes.is_empty() {
-            return Err(CoreError::validation("当前配置与本工具写入值一致，无需还原"));
+            return Err(CoreError::validation(
+                "当前配置与本工具写入值一致，无需还原",
+            ));
         }
         let plan = build_plan(
             PlanId::generate(),
@@ -409,7 +454,8 @@ impl ApplyService {
             self.clock.now_unix(),
             DEFAULT_PLAN_TTL_SECS,
         );
-        let mut operation = ApplyOperation::new(OperationId::generate(), &plan, "", self.clock.now());
+        let mut operation =
+            ApplyOperation::new(OperationId::generate(), &plan, "", self.clock.now());
         let now = self.clock.now();
         operation.transition(ApplyStage::Validating, now.clone())?;
         operation.transition(ApplyStage::Prepared, now)?;
@@ -433,15 +479,22 @@ impl ApplyService {
         plan_hash: &str,
         idempotency_key: &str,
     ) -> Result<String, CoreError> {
-        let _commit_guard = self.commits.lock().map_err(|_| CoreError::internal("提交锁不可用"))?;
+        let _commit_guard = self
+            .commits
+            .lock()
+            .map_err(|_| CoreError::internal("提交锁不可用"))?;
         let mut state = self.plan_state(plan_id, plan_hash)?;
         if state.kind != OperationKind::Restore {
             return Err(CoreError::validation("该计划不是还原计划"));
         }
-        if let Some(id) = self.check_execution(&state, idempotency_key)? { return Ok(id); }
+        if let Some(id) = self.check_execution(&state, idempotency_key)? {
+            return Ok(id);
+        }
         if state.plan.is_expired(self.clock.now_unix()) {
-            return Err(CoreError::new(ErrorCode::ConfigChanged, "error.planExpired")
-                .with_detail("还原计划已过期，请重新比较".to_owned()));
+            return Err(
+                CoreError::new(ErrorCode::ConfigChanged, "error.planExpired")
+                    .with_detail("还原计划已过期，请重新比较".to_owned()),
+            );
         }
         let snapshot = crate::codex::config::ConfigSnapshot::read(&state.plan.config_path)?;
         let cas = check_cas(
@@ -451,14 +504,20 @@ impl ApplyService {
             snapshot.existed,
         );
         if !cas.is_match() {
-            state.operation.transition(ApplyStage::Blocked, self.clock.now())?;
+            state
+                .operation
+                .transition(ApplyStage::Blocked, self.clock.now())?;
             state.operation.stage = ApplyStage::Conflict;
-            state.operation.push_event(ApplyStage::Conflict, HashMap::new(), self.clock.now());
+            state
+                .operation
+                .push_event(ApplyStage::Conflict, HashMap::new(), self.clock.now());
             self.operations.save(state)?;
             return Err(describe_cas_failure(cas));
         }
 
-        state.operation.transition(ApplyStage::Committing, self.clock.now())?;
+        state
+            .operation
+            .transition(ApplyStage::Committing, self.clock.now())?;
         let (text, _) = execute_restore(&snapshot, &state.ownership)?;
         state.operation.idempotency_key = idempotency_key.to_owned();
         state.operation.written_hash = Some(hash(&text));
@@ -466,8 +525,12 @@ impl ApplyService {
         write_atomic(Path::new(&state.plan.config_path), &text)?;
         // 还原后本工具不再拥有任何受管字段。
         state.ownership = Vec::new();
-        state.operation.transition(ApplyStage::AwaitingReload, self.clock.now())?;
-        state.operation.transition(ApplyStage::Verified, self.clock.now())?;
+        state
+            .operation
+            .transition(ApplyStage::AwaitingReload, self.clock.now())?;
+        state
+            .operation
+            .transition(ApplyStage::Verified, self.clock.now())?;
         let operation_id = state.operation.id.as_str().to_owned();
         self.operations.save(state)?;
         // 还原后宿主状态回落到未纳入目录，避免界面继续显示“等待重载”。
@@ -526,7 +589,10 @@ impl ApplyService {
 
     /// 启动恢复：只处理本工具未完成的事务，不覆盖外部修改。
     pub fn startup_recovery(&self) -> Result<Vec<RecoveryReport>, CoreError> {
-        let _commit_guard = self.commits.lock().map_err(|_| CoreError::internal("提交锁不可用"))?;
+        let _commit_guard = self
+            .commits
+            .lock()
+            .map_err(|_| CoreError::internal("提交锁不可用"))?;
         let mut reports = Vec::new();
         for mut state in self.operations.unfinished()? {
             let snapshot = crate::codex::config::ConfigSnapshot::read(&state.plan.config_path)?;
@@ -534,29 +600,44 @@ impl ApplyService {
             let applied = match &decision {
                 RecoveryDecision::RecordCommitFromFile { written_hash } => {
                     state.operation.written_hash = Some(written_hash.clone());
-                    state.operation.transition(ApplyStage::AwaitingReload, self.clock.now())?;
+                    state
+                        .operation
+                        .transition(ApplyStage::AwaitingReload, self.clock.now())?;
                     if state.kind == OperationKind::Restore {
                         state.ownership.clear();
-                        state.operation.transition(ApplyStage::Verified, self.clock.now())?;
+                        state
+                            .operation
+                            .transition(ApplyStage::Verified, self.clock.now())?;
                     }
                     true
                 }
                 RecoveryDecision::RollBackToBaseline { .. } => {
                     let (text, _) = execute_restore(&snapshot, &state.ownership)?;
                     write_atomic(Path::new(&state.plan.config_path), &text)?;
-                    state.operation.transition(ApplyStage::RollingBack, self.clock.now())?;
-                    state.operation.transition(ApplyStage::Restored, self.clock.now())?;
+                    state
+                        .operation
+                        .transition(ApplyStage::RollingBack, self.clock.now())?;
+                    state
+                        .operation
+                        .transition(ApplyStage::Restored, self.clock.now())?;
                     state.ownership = Vec::new();
                     true
                 }
                 RecoveryDecision::ConflictWithExternalChange => {
-                    state.operation.transition(ApplyStage::RollingBack, self.clock.now())?;
-                    state.operation.transition(ApplyStage::Conflict, self.clock.now())?;
+                    state
+                        .operation
+                        .transition(ApplyStage::RollingBack, self.clock.now())?;
+                    state
+                        .operation
+                        .transition(ApplyStage::Conflict, self.clock.now())?;
                     true
                 }
                 RecoveryDecision::NoAction if state.operation.stage == ApplyStage::Committing => {
-                    state.operation.transition(ApplyStage::Failed, self.clock.now())?;
-                    state.operation.error = Some(CoreError::internal("上次提交未写入配置，请重新预览"));
+                    state
+                        .operation
+                        .transition(ApplyStage::Failed, self.clock.now())?;
+                    state.operation.error =
+                        Some(CoreError::internal("上次提交未写入配置，请重新预览"));
                     true
                 }
                 RecoveryDecision::AwaitHostReload
@@ -576,28 +657,52 @@ impl ApplyService {
         }
         // 已完成事务也需要恢复路由；只扫描 unfinished 会使应用重启后目录全部失联。
         for state in self.operations.list()? {
-            if state.kind != OperationKind::Apply || state.publication.is_none() || !matches!(state.operation.stage,
-                ApplyStage::AwaitingReload | ApplyStage::Pending | ApplyStage::Verified) { continue; }
+            if state.kind != OperationKind::Apply
+                || state.publication.is_none()
+                || !matches!(
+                    state.operation.stage,
+                    ApplyStage::AwaitingReload | ApplyStage::Pending | ApplyStage::Verified
+                )
+            {
+                continue;
+            }
             if let Some(prepared) = &state.prepared {
                 let intact = std::fs::read_to_string(&state.catalog_path)
-                    .map(|text| hash(&text) == state.catalog_hash).unwrap_or(false);
-                if intact { self.router.publish(prepared.routes.clone())?; }
-                else {
-                    reports.push(RecoveryReport { operation_id: state.operation.id.to_string(), instance_id: state.operation.instance_id.to_string(),
-                        decision: RecoveryDecision::ConflictWithExternalChange, applied: false });
+                    .map(|text| hash(&text) == state.catalog_hash)
+                    .unwrap_or(false);
+                if intact {
+                    self.router.publish(prepared.routes.clone())?;
+                } else {
+                    reports.push(RecoveryReport {
+                        operation_id: state.operation.id.to_string(),
+                        instance_id: state.operation.instance_id.to_string(),
+                        decision: RecoveryDecision::ConflictWithExternalChange,
+                        applied: false,
+                    });
                 }
             }
         }
         Ok(reports)
     }
 
-    fn check_execution(&self, state: &OperationState, key: &str) -> Result<Option<String>, CoreError> {
-        if key.trim().is_empty() || key.len() > 128 { return Err(CoreError::validation("幂等键为空或过长")); }
-        if self.operations.list()?.iter().any(|other| other.operation.id != state.operation.id && other.operation.idempotency_key == key) {
+    fn check_execution(
+        &self,
+        state: &OperationState,
+        key: &str,
+    ) -> Result<Option<String>, CoreError> {
+        if key.trim().is_empty() || key.len() > 128 {
+            return Err(CoreError::validation("幂等键为空或过长"));
+        }
+        if self.operations.list()?.iter().any(|other| {
+            other.operation.id != state.operation.id && other.operation.idempotency_key == key
+        }) {
             return Err(CoreError::conflict("error.idempotencyKeyReused"));
         }
         match state.operation.stage {
-            ApplyStage::AwaitingReload | ApplyStage::Pending | ApplyStage::Verified | ApplyStage::Restored => Ok(Some(state.operation.id.to_string())),
+            ApplyStage::AwaitingReload
+            | ApplyStage::Pending
+            | ApplyStage::Verified
+            | ApplyStage::Restored => Ok(Some(state.operation.id.to_string())),
             ApplyStage::Prepared => Ok(None),
             _ => Err(CoreError::conflict("error.operationNotExecutable")
                 .with_detail("该计划已经失败、冲突或正在恢复，请重新比较".to_owned())),
@@ -605,9 +710,18 @@ impl ApplyService {
     }
 
     fn current_source_hash(&self) -> Result<String, CoreError> {
-        let models: Vec<Model> = self.repository.list_models()?.into_iter()
-            .filter(|m| m.in_catalog && m.lifecycle != ModelLifecycle::Disabled).collect();
-        let providers = self.repository.list_providers()?.into_iter().map(|p| (p.id.to_string(), p)).collect();
+        let models: Vec<Model> = self
+            .repository
+            .list_models()?
+            .into_iter()
+            .filter(|m| m.in_catalog && m.lifecycle != ModelLifecycle::Disabled)
+            .collect();
+        let providers = self
+            .repository
+            .list_providers()?
+            .into_iter()
+            .map(|p| (p.id.to_string(), p))
+            .collect();
         source_hash(&models, &providers, &self.credentials_by_id()?)
     }
 
@@ -656,12 +770,17 @@ impl ApplyService {
             match &provider.active_credential_id {
                 None => blockers.push(format!("供应商「{}」尚未选择 API Key", provider.name)),
                 Some(id) => match credentials.get(id.as_str()) {
-                    None => blockers.push(format!("供应商「{}」当前 Key 的安全记录不存在", provider.name)),
-                    Some(credential) if !credential.status.is_selectable() => blockers.push(format!(
-                        "供应商「{}」当前 Key 状态为 {}，不能用于新请求",
-                        provider.name,
-                        credential.status.label_key()
+                    None => blockers.push(format!(
+                        "供应商「{}」当前 Key 的安全记录不存在",
+                        provider.name
                     )),
+                    Some(credential) if !credential.status.is_selectable() => {
+                        blockers.push(format!(
+                            "供应商「{}」当前 Key 状态为 {}，不能用于新请求",
+                            provider.name,
+                            credential.status.label_key()
+                        ))
+                    }
                     Some(_) => {}
                 },
             }
@@ -747,10 +866,17 @@ impl ApplyService {
         )
     }
 
-    fn publication_for(&self, state: &OperationState, managed: &ManagedConfig) -> Result<RuntimePublication, CoreError> {
+    fn publication_for(
+        &self,
+        state: &OperationState,
+        managed: &ManagedConfig,
+    ) -> Result<RuntimePublication, CoreError> {
         let policy_revision = RevisionId::new(format!(
             "pol_{}",
-            &hash(&serde_json::to_string(managed).map_err(|_| CoreError::internal("策略序列化失败"))?)
+            hash(
+                &serde_json::to_string(managed)
+                    .map_err(|_| CoreError::internal("策略序列化失败"))?
+            )
         ));
         Ok(RuntimePublication {
             instance_id: state.plan.instance_id.clone(),
@@ -766,9 +892,13 @@ impl ApplyService {
 
     fn mark_models_awaiting_reload(&self, models: &[Model]) -> Result<(), CoreError> {
         for model in models.iter().filter(|m| m.in_catalog) {
-            let Some(current) = self.repository.get_model(&model.id)? else { continue; };
+            let Some(current) = self.repository.get_model(&model.id)? else {
+                continue;
+            };
             // 提交途中编辑过的草稿仍然待应用，不用旧版本状态覆盖。
-            if current.version != model.version { continue; }
+            if current.version != model.version {
+                continue;
+            }
             let mut next = model.clone();
             next.host_state = CatalogCompiler::host_state_after_publish(model.host_state);
             let version = model.version;
@@ -788,14 +918,19 @@ impl ApplyService {
     }
 }
 
-fn source_hash(models: &[Model], providers: &HashMap<String, Provider>, credentials: &HashMap<String, Credential>) -> Result<String, CoreError> {
+fn source_hash(
+    models: &[Model],
+    providers: &HashMap<String, Provider>,
+    credentials: &HashMap<String, Credential>,
+) -> Result<String, CoreError> {
     let mut models: Vec<_> = models.iter().collect();
     models.sort_by(|a, b| a.id.cmp(&b.id));
     let mut providers: Vec<_> = providers.values().collect();
     providers.sort_by(|a, b| a.id.cmp(&b.id));
     let mut credentials: Vec<_> = credentials.values().collect();
     credentials.sort_by(|a, b| a.id.cmp(&b.id));
-    let json = serde_json::to_string(&(models, providers, credentials)).map_err(|_| CoreError::internal("计划输入编码失败"))?;
+    let json = serde_json::to_string(&(models, providers, credentials))
+        .map_err(|_| CoreError::internal("计划输入编码失败"))?;
     Ok(hash(&json))
 }
 
@@ -834,9 +969,11 @@ fn protocol_id(protocol: Protocol) -> String {
 
 fn describe_cas_failure(cas: CasOutcome) -> CoreError {
     match cas {
-        CasOutcome::Changed { .. } => CoreError::new(ErrorCode::ConfigChanged, "error.configChanged")
-            .with_detail("配置文件在计划生成后被其他程序修改".to_owned())
-            .with_recovery("recompare", "action.recompare"),
+        CasOutcome::Changed { .. } => {
+            CoreError::new(ErrorCode::ConfigChanged, "error.configChanged")
+                .with_detail("配置文件在计划生成后被其他程序修改".to_owned())
+                .with_recovery("recompare", "action.recompare")
+        }
         CasOutcome::IdentityChanged { detail } => {
             CoreError::new(ErrorCode::ConfigChanged, "error.configChanged")
                 .with_detail(detail)
@@ -855,7 +992,10 @@ fn restore_changes(
     outcomes
         .iter()
         .filter(|outcome| {
-            !matches!(outcome, crate::codex::config::RestoreOutcome::Unchanged { .. })
+            !matches!(
+                outcome,
+                crate::codex::config::RestoreOutcome::Unchanged { .. }
+            )
         })
         .filter(|outcome| !outcome.is_conflict())
         .map(|outcome| {
@@ -865,11 +1005,19 @@ fn restore_changes(
                 .iter()
                 .find(|record| record.key_path == key_path)
                 .and_then(|record| {
-                    matches!(outcome, crate::codex::config::RestoreOutcome::Restore { .. })
-                        .then(|| record.baseline_value.clone())
-                        .flatten()
+                    matches!(
+                        outcome,
+                        crate::codex::config::RestoreOutcome::Restore { .. }
+                    )
+                    .then(|| record.baseline_value.clone())
+                    .flatten()
                 });
-            FieldChange { key_path, before, after, reason_key: "reason.restore".to_owned() }
+            FieldChange {
+                key_path,
+                before,
+                after,
+                reason_key: "reason.restore".to_owned(),
+            }
         })
         .collect()
 }

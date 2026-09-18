@@ -66,8 +66,7 @@ impl TimeoutPolicy {
         ] {
             if value == 0 {
                 return Err(crate::domain::error::CoreError::validation(format!(
-                    "{}必须是正整数",
-                    name
+                    "{name}必须是正整数"
                 )));
             }
         }
@@ -77,7 +76,12 @@ impl TimeoutPolicy {
     /// 给定已流逝时间，判断触发了哪一层超时。
     ///
     /// `streaming` 为 true 表示已经进入流式阶段，此时首事件预算不再适用。
-    pub fn check(&self, elapsed_ms: u64, since_last_event_ms: u64, streaming: bool) -> Option<TimeoutKind> {
+    pub fn check(
+        &self,
+        elapsed_ms: u64,
+        since_last_event_ms: u64,
+        streaming: bool,
+    ) -> Option<TimeoutKind> {
         if !streaming && elapsed_ms > self.first_event_ms {
             return Some(TimeoutKind::FirstEvent);
         }
@@ -109,7 +113,10 @@ mod tests {
     fn first_event_budget_applies_before_streaming_only() {
         let policy = TimeoutPolicy::default();
         assert_eq!(policy.check(89_000, 0, false), None);
-        assert_eq!(policy.check(91_000, 0, false), Some(TimeoutKind::FirstEvent));
+        assert_eq!(
+            policy.check(91_000, 0, false),
+            Some(TimeoutKind::FirstEvent)
+        );
         // 已进入流式后，首事件预算不再适用。
         assert_eq!(policy.check(200_000, 5_000, true), None);
     }

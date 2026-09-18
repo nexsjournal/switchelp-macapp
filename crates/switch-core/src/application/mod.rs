@@ -1,9 +1,8 @@
 //! 壳无关用例。桌面端不能用完整实体覆盖宿主状态、版本或验证结果。
 
 pub mod apply;
-pub use apply::{AppliedSummary, ApplyService, Clock, GatewayLayout, RecoveryReport, SystemClock};
 use crate::{
-    credentials::{CredentialResolver, ResolvedSecret, SecretVault, secret_ref},
+    credentials::{secret_ref, CredentialResolver, ResolvedSecret, SecretVault},
     domain::{
         capability::{InputCapability, InputKind, Support, Verification},
         credential::Credential,
@@ -15,6 +14,7 @@ use crate::{
     },
     storage::Repository,
 };
+pub use apply::{AppliedSummary, ApplyService, Clock, GatewayLayout, RecoveryReport, SystemClock};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use zeroize::Zeroizing;
@@ -53,28 +53,56 @@ pub struct WorkspaceService {
 }
 
 fn now() -> String {
-    time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339)
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
         .expect("UTC 可表示为 RFC3339")
 }
 
 impl WorkspaceService {
     pub fn new(repository: Arc<dyn Repository>, vault: Arc<dyn SecretVault>) -> Self {
-        Self { repository, vault, mutations: Mutex::new(()) }
+        Self {
+            repository,
+            vault,
+            mutations: Mutex::new(()),
+        }
     }
 
-    pub fn list_providers(&self) -> Result<Vec<Provider>, CoreError> { self.repository.list_providers() }
-    pub fn list_models(&self) -> Result<Vec<Model>, CoreError> { self.repository.list_models() }
+    pub fn list_providers(&self) -> Result<Vec<Provider>, CoreError> {
+        self.repository.list_providers()
+    }
+    pub fn list_models(&self) -> Result<Vec<Model>, CoreError> {
+        self.repository.list_models()
+    }
     pub fn list_credentials(&self, provider_id: &str) -> Result<Vec<Credential>, CoreError> {
-        self.repository.list_credentials(&ProviderId::new(provider_id))
+        self.repository
+            .list_credentials(&ProviderId::new(provider_id))
     }
 
-    pub fn save_provider(&self, draft: ProviderDraft, expected_version: u64) -> Result<Provider, CoreError> {
-        let _guard = self.mutations.lock().map_err(|_| CoreError::internal("写入锁不可用"))?;
+    pub fn save_provider(
+        &self,
+        draft: ProviderDraft,
+        expected_version: u64,
+    ) -> Result<Provider, CoreError> {
+        let _guard = self
+            .mutations
+            .lock()
+            .map_err(|_| CoreError::internal("写入锁不可用"))?;
         let mut provider = if let Some(id) = draft.id {
-            self.repository.get_provider(&ProviderId::new(id))?.ok_or_else(|| CoreError::not_found("供应商"))?
+            self.repository
+                .get_provider(&ProviderId::new(id))?
+                .ok_or_else(|| CoreError::not_found("供应商"))?
         } else {
-            if expected_version != 0 { return Err(CoreError::conflict("error.providerVersionConflict")); }
-            Provider::draft(ProviderId::generate(), &draft.name, &draft.endpoint, draft.protocol, draft.auth_kind, now())?
+            if expected_version != 0 {
+                return Err(CoreError::conflict("error.providerVersionConflict"));
+            }
+            Provider::draft(
+                ProviderId::generate(),
+                &draft.name,
+                &draft.endpoint,
+                draft.protocol,
+                draft.auth_kind,
+                now(),
+            )?
         };
         provider.name = draft.name;
         provider.endpoint = draft.endpoint;
@@ -87,47 +115,103 @@ impl WorkspaceService {
         self.repository.save_provider(provider, expected_version)
     }
 
-    pub fn add_credential(&self, provider_id: &str, label: &str, secret: String) -> Result<Credential, CoreError> {
+    pub fn add_credential(
+        &self,
+        provider_id: &str,
+        label: &str,
+        secret: String,
+    ) -> Result<Credential, CoreError> {
         let secret = Zeroizing::new(secret);
-        let _guard = self.mutations.lock().map_err(|_| CoreError::internal("写入锁不可用"))?;
+        let _guard = self
+            .mutations
+            .lock()
+            .map_err(|_| CoreError::internal("写入锁不可用"))?;
         let provider_id = ProviderId::new(provider_id);
-        self.repository.get_provider(&provider_id)?.ok_or_else(|| CoreError::not_found("供应商"))?;
-        let credential = Credential::create(CredentialId::generate(), provider_id, label, &secret, now())?;
+        self.repository
+            .get_provider(&provider_id)?
+            .ok_or_else(|| CoreError::not_found("供应商"))?;
+        let credential =
+            Credential::create(CredentialId::generate(), provider_id, label, &secret, now())?;
         self.persist_secret(credential, secret.trim())
     }
 
-    pub fn replace_credential(&self, id: &str, secret: String, expected_version: u64) -> Result<Credential, CoreError> {
+    pub fn replace_credential(
+        &self,
+        id: &str,
+        secret: String,
+        expected_version: u64,
+    ) -> Result<Credential, CoreError> {
         let secret = Zeroizing::new(secret);
-        let _guard = self.mutations.lock().map_err(|_| CoreError::internal("写入锁不可用"))?;
-        let mut credential = self.repository.get_credential(&CredentialId::new(id))?.ok_or_else(|| CoreError::not_found("Key"))?;
-        if credential.version != expected_version { return Err(CoreError::conflict("error.credentialVersionConflict")); }
+        let _guard = self
+            .mutations
+            .lock()
+            .map_err(|_| CoreError::internal("写入锁不可用"))?;
+        let mut credential = self
+            .repository
+            .get_credential(&CredentialId::new(id))?
+            .ok_or_else(|| CoreError::not_found("Key"))?;
+        if credential.version != expected_version {
+            return Err(CoreError::conflict("error.credentialVersionConflict"));
+        }
         credential.replace_secret(&secret, now())?;
         self.persist_secret(credential, secret.trim())
     }
 
-    fn persist_secret(&self, mut credential: Credential, secret: &str) -> Result<Credential, CoreError> {
+    fn persist_secret(
+        &self,
+        mut credential: Credential,
+        secret: &str,
+    ) -> Result<Credential, CoreError> {
         // 写入尝试拥有独立条目，跨进程 CAS 失败不能覆盖或删除另一写入者的秘密。
-        credential.secret_ref = format!("{}/{}", secret_ref(credential.provider_id.as_str(), credential.id.as_str(), credential.secret_version), uuid::Uuid::new_v4());
+        credential.secret_ref = format!(
+            "{}/{}",
+            secret_ref(
+                credential.provider_id.as_str(),
+                credential.id.as_str(),
+                credential.secret_version
+            ),
+            uuid::Uuid::new_v4()
+        );
         self.vault.store(&credential.secret_ref, secret)?;
         match self.repository.save_credential(credential.clone()) {
             Ok(saved) => Ok(saved),
             Err(mut error) => {
                 if self.vault.delete(&credential.secret_ref).is_err() {
-                    error.safe_details.push("未引用的安全条目清理失败；原 Key 保持不变".to_owned());
+                    error
+                        .safe_details
+                        .push("未引用的安全条目清理失败；原 Key 保持不变".to_owned());
                 }
                 Err(error)
             }
         }
     }
 
-    pub fn select_credential(&self, provider_id: &str, credential_id: &str) -> Result<(), CoreError> {
-        let _guard = self.mutations.lock().map_err(|_| CoreError::internal("写入锁不可用"))?;
-        let mut provider = self.repository.get_provider(&ProviderId::new(provider_id))?.ok_or_else(|| CoreError::not_found("供应商"))?;
-        let credential = self.repository.get_credential(&CredentialId::new(credential_id))?.ok_or_else(|| CoreError::not_found("Key"))?;
-        if credential.provider_id != provider.id { return Err(CoreError::validation("不能选择其他供应商的 Key")); }
+    pub fn select_credential(
+        &self,
+        provider_id: &str,
+        credential_id: &str,
+    ) -> Result<(), CoreError> {
+        let _guard = self
+            .mutations
+            .lock()
+            .map_err(|_| CoreError::internal("写入锁不可用"))?;
+        let mut provider = self
+            .repository
+            .get_provider(&ProviderId::new(provider_id))?
+            .ok_or_else(|| CoreError::not_found("供应商"))?;
+        let credential = self
+            .repository
+            .get_credential(&CredentialId::new(credential_id))?
+            .ok_or_else(|| CoreError::not_found("Key"))?;
+        if credential.provider_id != provider.id {
+            return Err(CoreError::validation("不能选择其他供应商的 Key"));
+        }
         credential.mark_active()?;
         if !self.vault.exists(&credential.secret_ref)? {
-            return Err(CoreError::new(crate::domain::error::ErrorCode::CredentialMissing, "error.credentialMissing"));
+            return Err(CoreError::new(
+                crate::domain::error::ErrorCode::CredentialMissing,
+                "error.credentialMissing",
+            ));
         }
         provider.active_credential_id = Some(credential.id);
         provider.updated_at = now();
@@ -137,26 +221,58 @@ impl WorkspaceService {
     }
 
     pub fn save_model(&self, draft: ModelDraft, expected_version: u64) -> Result<Model, CoreError> {
-        let _guard = self.mutations.lock().map_err(|_| CoreError::internal("写入锁不可用"))?;
-        self.repository.get_provider(&ProviderId::new(&draft.provider_id))?.ok_or_else(|| CoreError::not_found("供应商"))?;
-        let previous = draft.id.as_ref().map(|id| self.repository.get_model(&ModelId::new(id))).transpose()?.flatten();
-        if draft.id.is_some() && previous.is_none() { return Err(CoreError::not_found("模型")); }
-        let id = previous.as_ref().map(|m| m.id.clone()).unwrap_or_else(ModelId::generate);
+        let _guard = self
+            .mutations
+            .lock()
+            .map_err(|_| CoreError::internal("写入锁不可用"))?;
+        self.repository
+            .get_provider(&ProviderId::new(&draft.provider_id))?
+            .ok_or_else(|| CoreError::not_found("供应商"))?;
+        let previous = draft
+            .id
+            .as_ref()
+            .map(|id| self.repository.get_model(&ModelId::new(id)))
+            .transpose()?
+            .flatten();
+        if draft.id.is_some() && previous.is_none() {
+            return Err(CoreError::not_found("模型"));
+        }
+        let id = previous
+            .as_ref()
+            .map(|m| m.id.clone())
+            .unwrap_or_else(ModelId::generate);
         let alias = if draft.catalog_alias.is_empty() {
             // 修改上游身份会生成新 alias；不改变已有会话所用的旧身份。
-            previous.as_ref().filter(|m| m.upstream_id == draft.upstream_id).map(|m| Ok(m.catalog_alias.clone()))
-                .unwrap_or_else(|| CatalogAlias::from_parts(&draft.provider_id, &uuid::Uuid::new_v4().to_string()))?
-        } else { CatalogAlias::parse(&draft.catalog_alias)? };
-        let mut model = previous.clone().unwrap_or(Model::draft(id, ProviderId::new(&draft.provider_id), &draft.upstream_id,
-            &draft.display_name, alias.clone(), now())?);
-        if model.provider_id.as_str() != draft.provider_id { return Err(CoreError::validation("已有模型不能更换供应商")); }
+            previous
+                .as_ref()
+                .filter(|m| m.upstream_id == draft.upstream_id)
+                .map(|m| Ok(m.catalog_alias.clone()))
+                .unwrap_or_else(|| {
+                    CatalogAlias::from_parts(&draft.provider_id, &uuid::Uuid::new_v4().to_string())
+                })?
+        } else {
+            CatalogAlias::parse(&draft.catalog_alias)?
+        };
+        let mut model = previous.clone().unwrap_or(Model::draft(
+            id,
+            ProviderId::new(&draft.provider_id),
+            &draft.upstream_id,
+            &draft.display_name,
+            alias.clone(),
+            now(),
+        )?);
+        if model.provider_id.as_str() != draft.provider_id {
+            return Err(CoreError::validation("已有模型不能更换供应商"));
+        }
         model.upstream_id = draft.upstream_id;
         model.catalog_alias = alias;
         model.display_name = draft.display_name.trim().to_owned();
         // 只有用户确实改过名字才算覆盖层。否则显示名应当跟随上游发现值，
         // 否则一次发现刷新永远覆盖不了“上游官方名”这个更准确的值。
         if draft.display_name_overridden {
-            model.display_name_layer.override_with(model.display_name.clone());
+            model
+                .display_name_layer
+                .override_with(model.display_name.clone());
         } else {
             model.display_name_layer.clear_override();
         }
@@ -164,12 +280,21 @@ impl WorkspaceService {
         model.policy = normalize_policy(draft.policy)?;
         model.in_catalog = draft.in_catalog;
         model.lifecycle = ModelLifecycle::Saved;
-        model.host_state = if model.in_catalog { HostState::PendingApply } else { HostState::NotInCatalog };
+        model.host_state = if model.in_catalog {
+            HostState::PendingApply
+        } else {
+            HostState::NotInCatalog
+        };
         if let Some(previous) = previous {
-            let catalog_changed = previous.policy != model.policy || previous.display_name != model.display_name
-                || previous.catalog_alias != model.catalog_alias || previous.in_catalog != model.in_catalog;
-            if catalog_changed { model.capability_revision = previous.capability_revision + 1; }
-            else { model.host_state = previous.host_state; }
+            let catalog_changed = previous.policy != model.policy
+                || previous.display_name != model.display_name
+                || previous.catalog_alias != model.catalog_alias
+                || previous.in_catalog != model.in_catalog;
+            if catalog_changed {
+                model.capability_revision = previous.capability_revision + 1;
+            } else {
+                model.host_state = previous.host_state;
+            }
         }
         model.updated_at = now();
         self.repository.save_model(model, expected_version)
@@ -180,7 +305,10 @@ impl WorkspaceService {
     /// 已纳入目录的模型必须先移出：原生菜单里还挂着它的身份，
     /// 直接删会让宿主指向一个不存在的条目。
     pub fn delete_model(&self, id: &str, expected_version: u64) -> Result<(), CoreError> {
-        let _guard = self.mutations.lock().map_err(|_| CoreError::internal("写入锁不可用"))?;
+        let _guard = self
+            .mutations
+            .lock()
+            .map_err(|_| CoreError::internal("写入锁不可用"))?;
         let model = self
             .repository
             .get_model(&ModelId::new(id))?
@@ -202,7 +330,10 @@ impl WorkspaceService {
     /// 正在使用的 Key 不能直接删；并且**先撤销安全条目再删元数据**——
     /// 反过来一旦中途失败，会留下“元数据已删但秘密还在凭据库”的组合。
     pub fn delete_credential(&self, id: &str) -> Result<(), CoreError> {
-        let _guard = self.mutations.lock().map_err(|_| CoreError::internal("写入锁不可用"))?;
+        let _guard = self
+            .mutations
+            .lock()
+            .map_err(|_| CoreError::internal("写入锁不可用"))?;
         let credential = self
             .repository
             .get_credential(&CredentialId::new(id))?
@@ -223,7 +354,9 @@ impl WorkspaceService {
                 // 秘密已经撤销，元数据还在：状态是“此 Key 的安全记录不存在”，
                 // 界面按 credentialMissing 处理，用户可重试删除。
                 let mut error = error;
-                error.safe_details.push("安全条目已撤销，但元数据未删除，请重试".to_owned());
+                error
+                    .safe_details
+                    .push("安全条目已撤销，但元数据未删除，请重试".to_owned());
                 Err(error)
             }
         }
@@ -231,7 +364,10 @@ impl WorkspaceService {
 
     /// 删除供应商。还有 Key 或模型时明确拒绝，不做静默级联删除。
     pub fn delete_provider(&self, id: &str) -> Result<(), CoreError> {
-        let _guard = self.mutations.lock().map_err(|_| CoreError::internal("写入锁不可用"))?;
+        let _guard = self
+            .mutations
+            .lock()
+            .map_err(|_| CoreError::internal("写入锁不可用"))?;
         let provider_id = ProviderId::new(id);
         let provider = self
             .repository
@@ -246,8 +382,7 @@ impl WorkspaceService {
             .count();
         if credentials > 0 || models > 0 {
             return Err(CoreError::validation(format!(
-                "该供应商还有 {} 个 Key、{} 个模型；请先删除它们再删除供应商",
-                credentials, models
+                "该供应商还有 {credentials} 个 Key、{models} 个模型；请先删除它们再删除供应商"
             )));
         }
         let _ = provider;
@@ -275,7 +410,10 @@ impl WorkspaceService {
         provider_id: &str,
         discovered: &[(String, String)],
     ) -> Result<usize, CoreError> {
-        let _guard = self.mutations.lock().map_err(|_| CoreError::internal("写入锁不可用"))?;
+        let _guard = self
+            .mutations
+            .lock()
+            .map_err(|_| CoreError::internal("写入锁不可用"))?;
         let mut updated = 0;
         for mut model in self.repository.list_models()? {
             if model.provider_id.as_str() != provider_id {
@@ -307,26 +445,45 @@ impl WorkspaceService {
 }
 
 fn normalize_policy(mut policy: ModelPolicy) -> Result<ModelPolicy, CoreError> {
-    for value in [policy.context_limit, policy.output_limit, policy.compact_limit].into_iter().flatten() {
+    for value in [
+        policy.context_limit,
+        policy.output_limit,
+        policy.compact_limit,
+    ]
+    .into_iter()
+    .flatten()
+    {
         TokenCount::new(value.value())?;
-        if value.value() == 0 { return Err(CoreError::validation("Token 上限必须大于 0；未知时请留空")); }
+        if value.value() == 0 {
+            return Err(CoreError::validation("Token 上限必须大于 0；未知时请留空"));
+        }
     }
     let mut inputs = Vec::new();
     for kind in InputKind::ALL {
         let matching: Vec<_> = policy.inputs.iter().filter(|i| i.kind == kind).collect();
-        if matching.len() > 1 { return Err(CoreError::validation("输入能力类别重复")); }
+        if matching.len() > 1 {
+            return Err(CoreError::validation("输入能力类别重复"));
+        }
         let upstream = matching.first().map_or(Support::Unknown, |i| i.upstream);
         let (gateway, host) = match kind {
             InputKind::Text | InputKind::Image => (Support::Supported, Support::Supported),
             InputKind::Audio => (Support::Unknown, Support::Unknown),
             _ => (Support::Unsupported, Support::Unsupported),
         };
-        inputs.push(InputCapability::new(kind, upstream, gateway, host, Verification::Declared));
+        inputs.push(InputCapability::new(
+            kind,
+            upstream,
+            gateway,
+            host,
+            Verification::Declared,
+        ));
     }
     policy.inputs = inputs;
     policy.tools.verification = Verification::Declared;
     policy.reasoning.mapping_id = match policy.reasoning.control {
-        crate::domain::reasoning::ReasoningControl::Effort => Some("reasoning.effort.v1".to_owned()),
+        crate::domain::reasoning::ReasoningControl::Effort => {
+            Some("reasoning.effort.v1".to_owned())
+        }
         _ => None,
     };
     policy.validate(false)?;

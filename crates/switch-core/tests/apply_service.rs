@@ -12,7 +12,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 use switch_core::{
-    application::{ApplyService, Clock, GatewayLayout, ModelDraft, ProviderDraft, WorkspaceService},
+    application::{
+        ApplyService, Clock, GatewayLayout, ModelDraft, ProviderDraft, WorkspaceService,
+    },
     codex::{
         config,
         detect::{CodexInstance, StartupMode},
@@ -40,7 +42,9 @@ struct TestClock {
 
 impl TestClock {
     fn new(now: i64) -> Self {
-        Self { now: Mutex::new(now) }
+        Self {
+            now: Mutex::new(now),
+        }
     }
 
     fn advance_to(&self, now: i64) {
@@ -83,9 +87,11 @@ fn provider_draft() -> ProviderDraft {
 
 /// 声明了上下文的可应用模型；未声明上下文的模型由 `unready_model` 单独构造。
 fn ready_model(provider_id: &str) -> ModelDraft {
-    let mut policy = ModelPolicy::default();
-    policy.context_limit = Some(TokenCount::new(128_000).unwrap());
-    policy.output_limit = Some(TokenCount::new(8_192).unwrap());
+    let policy = ModelPolicy {
+        context_limit: Some(TokenCount::new(128_000).unwrap()),
+        output_limit: Some(TokenCount::new(8_192).unwrap()),
+        ..Default::default()
+    };
     ModelDraft {
         id: None,
         provider_id: provider_id.to_owned(),
@@ -137,14 +143,25 @@ fn harness(existing_config: Option<&str>) -> Harness {
         conflicting_managers: Vec::new(),
         blocked_reason_key: None,
     };
-    Harness { _dir: dir, instance, config_path, service, workspace, store, clock }
+    Harness {
+        _dir: dir,
+        instance,
+        config_path,
+        service,
+        workspace,
+        store,
+        clock,
+    }
 }
 
 impl Harness {
     /// 建立可应用的完整数据：供应商 + 已选 Key + 已声明上下文的模型。
     fn with_ready_model(existing_config: Option<&str>) -> Self {
         let harness = harness(existing_config);
-        let provider = harness.workspace.save_provider(provider_draft(), 0).unwrap();
+        let provider = harness
+            .workspace
+            .save_provider(provider_draft(), 0)
+            .unwrap();
         let credential = harness
             .workspace
             .add_credential(provider.id.as_str(), "日常", SYNTHETIC_SECRET.into())
@@ -199,7 +216,10 @@ fn plan_stage_never_touches_codex_config_but_writes_the_catalog() {
     let harness = Harness::with_ready_model(None);
     let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
 
-    assert!(!harness.config_path.exists(), "计划阶段不得创建或改写 Codex 配置");
+    assert!(
+        !harness.config_path.exists(),
+        "计划阶段不得创建或改写 Codex 配置"
+    );
     assert!(!plan.changes.is_empty());
     assert!(!plan.catalog_aliases.is_empty());
     assert!(harness
@@ -241,7 +261,10 @@ fn plan_refuses_models_without_declared_context() {
         )
         .unwrap();
 
-    let error = harness.service.plan_apply(&harness.instance, None).unwrap_err();
+    let error = harness
+        .service
+        .plan_apply(&harness.instance, None)
+        .unwrap_err();
     assert_eq!(error.code, ErrorCode::ValidationFailed);
     assert_eq!(error.message_key, "error.contextRequired");
     assert!(!harness.config_path.exists(), "计划被拒绝后不得写入配置");
@@ -250,7 +273,10 @@ fn plan_refuses_models_without_declared_context() {
 #[test]
 fn plan_refuses_provider_without_a_selected_key() {
     let harness = harness(None);
-    let provider = harness.workspace.save_provider(provider_draft(), 0).unwrap();
+    let provider = harness
+        .workspace
+        .save_provider(provider_draft(), 0)
+        .unwrap();
     let credential = harness
         .workspace
         .add_credential(provider.id.as_str(), "日常", SYNTHETIC_SECRET.into())
@@ -262,9 +288,15 @@ fn plan_refuses_provider_without_a_selected_key() {
         .save_model(ready_model(provider.id.as_str()), 0)
         .unwrap();
 
-    let error = harness.service.plan_apply(&harness.instance, None).unwrap_err();
+    let error = harness
+        .service
+        .plan_apply(&harness.instance, None)
+        .unwrap_err();
     assert_eq!(error.code, ErrorCode::ValidationFailed);
-    assert!(error.safe_details.iter().any(|detail| detail.contains("尚未选择 API Key")));
+    assert!(error
+        .safe_details
+        .iter()
+        .any(|detail| detail.contains("尚未选择 API Key")));
 }
 
 #[test]
@@ -286,9 +318,15 @@ fn plan_refuses_a_disabled_provider() {
         .save_model(ready_model(provider.id.as_str()), 0)
         .unwrap();
 
-    let error = harness.service.plan_apply(&harness.instance, None).unwrap_err();
+    let error = harness
+        .service
+        .plan_apply(&harness.instance, None)
+        .unwrap_err();
     assert_eq!(error.code, ErrorCode::ValidationFailed);
-    assert!(error.safe_details.iter().any(|detail| detail.contains("已停用")));
+    assert!(error
+        .safe_details
+        .iter()
+        .any(|detail| detail.contains("已停用")));
 }
 
 #[test]
@@ -306,7 +344,11 @@ fn external_config_change_blocks_the_commit_and_keeps_the_foreign_content() {
     assert_eq!(error.code, ErrorCode::ConfigChanged);
     assert_eq!(error.message_key, "error.configChanged");
     assert_eq!(harness.stage(&operation_id), ApplyStage::Conflict);
-    assert_eq!(harness.read_config(), "# 外部程序写入的内容\n", "冲突后不得覆盖外部修改");
+    assert_eq!(
+        harness.read_config(),
+        "# 外部程序写入的内容\n",
+        "冲突后不得覆盖外部修改"
+    );
 }
 
 #[test]
@@ -327,25 +369,48 @@ fn commit_awaits_host_reload_and_never_writes_upstream_secrets() {
     );
 
     let text = harness.read_config();
-    assert!(text.contains("[model_providers.gptswitch]"), "必须写入本机网关 provider");
-    assert!(text.contains("model_catalog_json"), "必须指向编译后的目录文件");
-    assert!(text.contains("base_url"), "必须指向本机网关地址");
-    assert!(!text.contains(SYNTHETIC_SECRET), "上游 Key 绝不能写入 Codex 配置");
     assert!(
-        text.contains(&format!("http://127.0.0.1:18765/i/{}/", harness.instance.id.as_str())),
+        text.contains("[model_providers.gptswitch]"),
+        "必须写入本机网关 provider"
+    );
+    assert!(
+        text.contains("model_catalog_json"),
+        "必须指向编译后的目录文件"
+    );
+    assert!(text.contains("base_url"), "必须指向本机网关地址");
+    assert!(
+        !text.contains(SYNTHETIC_SECRET),
+        "上游 Key 绝不能写入 Codex 配置"
+    );
+    assert!(
+        text.contains(&format!(
+            "http://127.0.0.1:18765/i/{}/",
+            harness.instance.id.as_str()
+        )),
         "base_url 必须带实例前缀，网关按前缀做目录版本准入：\n{text}"
     );
 
     // 生效摘要里的时间必须是时间，不是事务 id（界面用它显示「当前生效时间」）。
-    let summary = harness.service.applied_summary().unwrap().expect("提交后应有生效摘要");
+    let summary = harness
+        .service
+        .applied_summary()
+        .unwrap()
+        .expect("提交后应有生效摘要");
     assert_eq!(summary.operation_id, operation_id);
-    assert_ne!(summary.applied_at, summary.operation_id, "applied_at 不能是事务 id");
+    assert_ne!(
+        summary.applied_at, summary.operation_id,
+        "applied_at 不能是事务 id"
+    );
     assert!(
         summary.applied_at.contains('T') && summary.applied_at.ends_with('Z'),
         "applied_at 应是 RFC3339 时刻：{}",
         summary.applied_at
     );
-    assert_eq!(summary.stage, ApplyStage::AwaitingReload, "提交成功不等于宿主已加载");
+    assert_eq!(
+        summary.stage,
+        ApplyStage::AwaitingReload,
+        "提交成功不等于宿主已加载"
+    );
 
     let publication = harness.service.publication(&operation_id).unwrap();
     let publication = publication.expect("提交后必须发布运行快照");
@@ -376,7 +441,10 @@ fn unconfirmed_reload_stops_at_pending_instead_of_claiming_loaded() {
         .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-pending")
         .unwrap();
 
-    let state = harness.service.confirm_reload(&operation_id, false).unwrap();
+    let state = harness
+        .service
+        .confirm_reload(&operation_id, false)
+        .unwrap();
     assert_eq!(state.operation.stage, ApplyStage::Pending);
     assert_ne!(harness.host_states(), vec![HostState::Loaded]);
 }
@@ -398,7 +466,11 @@ fn repeating_the_same_idempotency_key_reuses_the_same_operation() {
         .unwrap();
 
     assert_eq!(first, second, "同一计划与幂等键必须复用同一事务");
-    assert_eq!(harness.read_config(), after_first, "重复执行不得再写一次配置");
+    assert_eq!(
+        harness.read_config(),
+        after_first,
+        "重复执行不得再写一次配置"
+    );
     assert_eq!(harness.stage(&first), ApplyStage::AwaitingReload);
 }
 
@@ -472,10 +544,15 @@ fn recovery_records_commit_when_the_file_matches_the_written_hash() {
     harness.write_config("# 已提交但未记账\n");
 
     let reports = harness.service.startup_recovery().unwrap();
-    let report = reports.iter().find(|r| r.operation_id == operation_id).unwrap();
+    let report = reports
+        .iter()
+        .find(|r| r.operation_id == operation_id)
+        .unwrap();
     assert_eq!(
         report.decision,
-        RecoveryDecision::RecordCommitFromFile { written_hash: config::hash("# 已提交但未记账\n") }
+        RecoveryDecision::RecordCommitFromFile {
+            written_hash: config::hash("# 已提交但未记账\n")
+        }
     );
     assert!(report.applied);
     assert_eq!(harness.stage(&operation_id), ApplyStage::AwaitingReload);
@@ -494,12 +571,22 @@ fn recovery_enters_conflict_when_an_external_change_diverges_from_the_plan() {
     harness.write_config("# 外部程序抢先写入\n");
 
     let reports = harness.service.startup_recovery().unwrap();
-    let report = reports.iter().find(|r| r.operation_id == operation_id).unwrap();
-    assert_eq!(report.decision, RecoveryDecision::ConflictWithExternalChange);
+    let report = reports
+        .iter()
+        .find(|r| r.operation_id == operation_id)
+        .unwrap();
+    assert_eq!(
+        report.decision,
+        RecoveryDecision::ConflictWithExternalChange
+    );
     assert!(report.applied);
     assert_eq!(harness.stage(&operation_id), ApplyStage::Conflict);
-    assert_eq!(harness.read_config(), "# 外部程序抢先写入\n", "恢复不得覆盖外部修改");
-    assert_eq!(plan.expected_config_hash.is_empty(), false);
+    assert_eq!(
+        harness.read_config(),
+        "# 外部程序抢先写入\n",
+        "恢复不得覆盖外部修改"
+    );
+    assert!(!plan.expected_config_hash.is_empty());
 }
 
 /// 还原后本工具写入的受管字段必须撤销，但被外部改过的那条要保留当前值。
@@ -528,12 +615,18 @@ fn restore_drops_managed_keys_but_keeps_an_externally_modified_field() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(tampered.contains("外部改过的模型"), "夹具必须真的改到 model 行");
+    assert!(
+        tampered.contains("外部改过的模型"),
+        "夹具必须真的改到 model 行"
+    );
     harness.write_config(&tampered);
 
     let restore = harness.service.plan_restore(&harness.instance).unwrap();
     assert!(
-        restore.warnings.iter().any(|warning| warning.contains("已被外部修改，将保留当前值")),
+        restore
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("已被外部修改，将保留当前值")),
         "还原计划必须标出被外部修改的字段，实际警告：{:?}",
         restore.warnings
     );
@@ -553,15 +646,27 @@ fn restore_drops_managed_keys_but_keeps_an_externally_modified_field() {
         .unwrap();
 
     let text = harness.read_config();
-    assert!(text.contains("model = \"外部改过的模型\""), "冲突字段必须保留外部值");
-    assert!(!text.contains("model_catalog_json"), "本工具写入的目录字段必须被撤销");
+    assert!(
+        text.contains("model = \"外部改过的模型\""),
+        "冲突字段必须保留外部值"
+    );
+    assert!(
+        !text.contains("model_catalog_json"),
+        "本工具写入的目录字段必须被撤销"
+    );
     assert!(
         !text.contains("[model_providers.gptswitch]"),
         "本工具写入的 provider 必须被撤销"
     );
-    assert!(text.contains("approval_policy = \"on-request\""), "无关字段必须原样保留");
+    assert!(
+        text.contains("approval_policy = \"on-request\""),
+        "无关字段必须原样保留"
+    );
     assert!(text.contains("# 用户自己的注释"), "用户注释必须保留");
-    assert!(!text.contains(SYNTHETIC_SECRET), "还原后的配置不得含上游 Key");
+    assert!(
+        !text.contains(SYNTHETIC_SECRET),
+        "还原后的配置不得含上游 Key"
+    );
     assert_eq!(harness.stage(&restore_id), ApplyStage::Verified);
     assert_eq!(
         harness.host_states(),
@@ -579,7 +684,10 @@ fn restore_is_refused_before_anything_was_written() {
 
     assert_eq!(error.code, ErrorCode::ValidationFailed);
     assert!(
-        error.safe_details.iter().any(|detail| detail.contains("尚未写入过该实例的配置")),
+        error
+            .safe_details
+            .iter()
+            .any(|detail| detail.contains("尚未写入过该实例的配置")),
         "错误详情应说明无需还原，实际：{:?}",
         error.safe_details
     );

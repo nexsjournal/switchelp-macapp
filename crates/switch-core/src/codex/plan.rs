@@ -174,15 +174,20 @@ impl ApplyPlan {
             };
             groups.entry(key).or_default().push(change.clone());
         }
-        let mut ordered: Vec<DiffGroup> = ["group.route", "group.catalog", "group.policy", "group.other"]
-            .iter()
-            .filter_map(|key| {
-                groups.remove(*key).map(|changes| DiffGroup {
-                    group_key: (*key).to_owned(),
-                    changes,
-                })
+        let mut ordered: Vec<DiffGroup> = [
+            "group.route",
+            "group.catalog",
+            "group.policy",
+            "group.other",
+        ]
+        .iter()
+        .filter_map(|key| {
+            groups.remove(*key).map(|changes| DiffGroup {
+                group_key: (*key).to_owned(),
+                changes,
             })
-            .collect();
+        })
+        .collect();
         if self.reload_scope == ReloadScope::HostReload {
             ordered.push(DiffGroup {
                 group_key: "group.requiresReload".to_owned(),
@@ -211,7 +216,14 @@ pub fn plan_hash(
     changes: &[FieldChange],
     reload_scope: ReloadScope,
 ) -> String {
-    plan_hash_with_identity(instance_id, revision_id, expected_config_hash, true, changes, reload_scope)
+    plan_hash_with_identity(
+        instance_id,
+        revision_id,
+        expected_config_hash,
+        true,
+        changes,
+        reload_scope,
+    )
 }
 
 /// 与 [`plan_hash`] 相同，但把“文件是否存在”一并纳入摘要。
@@ -233,9 +245,13 @@ pub fn plan_hash_with_identity(
     hasher.update(b"|");
     hasher.update(expected_config_hash.as_bytes());
     hasher.update(b"|");
-    hasher.update(if expected_config_exists { b"exists" as &[u8] } else { b"absent" as &[u8] });
+    hasher.update(if expected_config_exists {
+        b"exists" as &[u8]
+    } else {
+        b"absent" as &[u8]
+    });
     hasher.update(b"|");
-    hasher.update(format!("{:?}", reload_scope).as_bytes());
+    hasher.update(format!("{reload_scope:?}").as_bytes());
     for change in changes {
         hasher.update(b"|");
         hasher.update(change.key_path.as_bytes());
@@ -274,10 +290,7 @@ pub fn check_cas(
 ) -> CasOutcome {
     if expected_exists != actual_exists {
         return CasOutcome::IdentityChanged {
-            detail: format!(
-                "计划预期文件存在={}，实际存在={}",
-                expected_exists, actual_exists
-            ),
+            detail: format!("计划预期文件存在={expected_exists}，实际存在={actual_exists}"),
         };
     }
     if expected_hash != actual_hash {
@@ -429,7 +442,12 @@ impl IdempotencyRegistry {
     }
 
     /// 登记一次执行。返回已存在的 operationId 表示本次不应重复执行。
-    pub fn begin(&mut self, plan_hash: &str, key: &str, operation: &OperationId) -> Option<OperationId> {
+    pub fn begin(
+        &mut self,
+        plan_hash: &str,
+        key: &str,
+        operation: &OperationId,
+    ) -> Option<OperationId> {
         let entry = (plan_hash.to_owned(), key.to_owned());
         if let Some(existing) = self.executed.get(&entry) {
             return Some(existing.clone());
@@ -468,10 +486,7 @@ pub enum RecoveryDecision {
 }
 
 /// 依据 journal 与当前文件摘要判定恢复动作。
-pub fn decide_recovery(
-    operation: &ApplyOperation,
-    current_hash: &str,
-) -> RecoveryDecision {
+pub fn decide_recovery(operation: &ApplyOperation, current_hash: &str) -> RecoveryDecision {
     match operation.stage {
         ApplyStage::Committing => {
             if let Some(written) = &operation.written_hash {
@@ -629,9 +644,15 @@ mod tests {
 
     #[test]
     fn host_reload_changes_primary_action_copy() {
-        assert_eq!(ReloadScope::HostReload.primary_action_key(), "action.applyAndReload");
+        assert_eq!(
+            ReloadScope::HostReload.primary_action_key(),
+            "action.applyAndReload"
+        );
         assert_eq!(ReloadScope::None.primary_action_key(), "action.apply");
-        assert_ne!(ReloadScope::HostReload.reason_key(), ReloadScope::None.reason_key());
+        assert_ne!(
+            ReloadScope::HostReload.reason_key(),
+            ReloadScope::None.reason_key()
+        );
     }
 
     #[test]
@@ -701,11 +722,7 @@ mod tests {
 
     #[test]
     fn gateway_only_policy_change_needs_no_reload() {
-        let scope = derive_reload_scope(&[change(
-            "model_context_window",
-            None,
-            Some("128000"),
-        )]);
+        let scope = derive_reload_scope(&[change("model_context_window", None, Some("128000"))]);
         // 上下文变化会影响目录能力，按文档归入需要重载的目录类变更。
         assert_eq!(scope, ReloadScope::HostReload);
 
@@ -748,7 +765,7 @@ mod tests {
                 assert_eq!(expected, "abc");
                 assert_eq!(actual, "def");
             }
-            other => panic!("期望 Changed，实际 {:?}", other),
+            other => panic!("期望 Changed，实际 {other:?}"),
         }
         assert!(matches!(
             check_cas("abc", false, "abc", true),
@@ -759,14 +776,20 @@ mod tests {
     #[test]
     fn operation_events_are_monotonic_and_resumable() {
         let plan = plan();
-        let mut operation =
-            ApplyOperation::new(OperationId::new("op_1"), &plan, "idem_1", "2026-09-18T00:00:00Z");
+        let mut operation = ApplyOperation::new(
+            OperationId::new("op_1"),
+            &plan,
+            "idem_1",
+            "2026-09-18T00:00:00Z",
+        );
         assert_eq!(operation.stage, ApplyStage::Draft);
 
         operation.transition(ApplyStage::Validating, "t1").unwrap();
         operation.transition(ApplyStage::Prepared, "t2").unwrap();
         operation.transition(ApplyStage::Committing, "t3").unwrap();
-        operation.transition(ApplyStage::AwaitingReload, "t4").unwrap();
+        operation
+            .transition(ApplyStage::AwaitingReload, "t4")
+            .unwrap();
 
         let sequences: Vec<u64> = operation.events.iter().map(|e| e.sequence).collect();
         assert_eq!(sequences, vec![1, 2, 3, 4]);
@@ -779,11 +802,8 @@ mod tests {
     #[test]
     fn illegal_transition_on_operation_is_reported() {
         let plan = plan();
-        let mut operation =
-            ApplyOperation::new(OperationId::new("op_1"), &plan, "idem_1", "t");
-        let error = operation
-            .transition(ApplyStage::Verified, "t")
-            .unwrap_err();
+        let mut operation = ApplyOperation::new(OperationId::new("op_1"), &plan, "idem_1", "t");
+        let error = operation.transition(ApplyStage::Verified, "t").unwrap_err();
         assert_eq!(error.code, ErrorCode::Internal);
         // 状态未被静默修正。
         assert_eq!(operation.stage, ApplyStage::Draft);
@@ -807,7 +827,11 @@ mod tests {
         let op = OperationId::new("op_1");
         assert!(registry.begin("planhash", "idem", &op).is_none());
         let replay = registry.begin("planhash", "idem", &OperationId::new("op_2"));
-        assert_eq!(replay.as_ref(), Some(&op), "重复应用同一 revision 不得再执行");
+        assert_eq!(
+            replay.as_ref(),
+            Some(&op),
+            "重复应用同一 revision 不得再执行"
+        );
         assert_eq!(registry.len(), 1);
 
         // 不同幂等键是新的执行。
@@ -844,8 +868,13 @@ mod tests {
         operation.transition(ApplyStage::Validating, "t").unwrap();
         operation.transition(ApplyStage::Prepared, "t").unwrap();
         operation.transition(ApplyStage::Committing, "t").unwrap();
-        operation.transition(ApplyStage::AwaitingReload, "t").unwrap();
-        assert_eq!(decide_recovery(&operation, "anything"), RecoveryDecision::AwaitHostReload);
+        operation
+            .transition(ApplyStage::AwaitingReload, "t")
+            .unwrap();
+        assert_eq!(
+            decide_recovery(&operation, "anything"),
+            RecoveryDecision::AwaitHostReload
+        );
     }
 
     #[test]
@@ -859,7 +888,10 @@ mod tests {
             decide_recovery(&operation, "external-hash"),
             RecoveryDecision::ConflictWithExternalChange
         );
-        assert_eq!(decide_recovery(&operation, "hash-before"), RecoveryDecision::NoAction);
+        assert_eq!(
+            decide_recovery(&operation, "hash-before"),
+            RecoveryDecision::NoAction
+        );
     }
 
     #[test]
@@ -869,7 +901,9 @@ mod tests {
         operation.transition(ApplyStage::Validating, "t").unwrap();
         operation.transition(ApplyStage::Prepared, "t").unwrap();
         operation.transition(ApplyStage::Committing, "t").unwrap();
-        operation.transition(ApplyStage::AwaitingReload, "t").unwrap();
+        operation
+            .transition(ApplyStage::AwaitingReload, "t")
+            .unwrap();
         operation.transition(ApplyStage::Pending, "t").unwrap();
         assert_eq!(operation.stage, ApplyStage::Pending);
         // 提交成功不等于宿主已加载：Pending 与 Verified 是两个阶段。
@@ -883,7 +917,9 @@ mod tests {
     fn operation_serializes_events_with_contract_field_names() {
         let plan = plan();
         let mut operation = ApplyOperation::new(OperationId::new("op_1"), &plan, "k", "t");
-        operation.transition(ApplyStage::Validating, "2026-09-18T00:00:01Z").unwrap();
+        operation
+            .transition(ApplyStage::Validating, "2026-09-18T00:00:01Z")
+            .unwrap();
         let json = serde_json::to_value(&operation.events[0]).unwrap();
         for key in [
             "schemaVersion",
@@ -895,7 +931,7 @@ mod tests {
             "cancellable",
             "timestamp",
         ] {
-            assert!(json.get(key).is_some(), "缺少事件字段 {}", key);
+            assert!(json.get(key).is_some(), "缺少事件字段 {key}");
         }
         assert_eq!(json["schemaVersion"], 1);
         assert_eq!(json["phase"], "validating");

@@ -91,9 +91,15 @@ mod tests {
         assert_eq!(current.status_against(&known), CompatibilityStatus::Stable);
 
         current.cli_version = Some("0.155.0".into());
-        assert_eq!(current.status_against(&known), CompatibilityStatus::Experimental);
+        assert_eq!(
+            current.status_against(&known),
+            CompatibilityStatus::Experimental
+        );
 
         current.schema_hash = Some("def".into());
-        assert_eq!(current.status_against(&known), CompatibilityStatus::Unverified);
+        assert_eq!(
+            current.status_against(&known),
+            CompatibilityStatus::Unverified
+        );
     }
 }

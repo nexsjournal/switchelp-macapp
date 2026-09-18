@@ -102,12 +102,12 @@ pub struct CompiledCatalog {
 impl CompiledCatalog {
     pub fn to_json(&self) -> Result<String, CoreError> {
         serde_json::to_string_pretty(&self.catalog)
-            .map_err(|error| CoreError::internal(format!("catalog serialize: {}", error)))
+            .map_err(|error| CoreError::internal(format!("catalog serialize: {error}")))
     }
 
     pub fn to_json_bytes(&self) -> Result<Vec<u8>, CoreError> {
         serde_json::to_vec_pretty(&self.catalog)
-            .map_err(|error| CoreError::internal(format!("catalog serialize: {}", error)))
+            .map_err(|error| CoreError::internal(format!("catalog serialize: {error}")))
     }
 }
 
@@ -127,7 +127,8 @@ impl Default for CompileOptions {
         Self {
             require_context: false,
             conservative_context_fallback: Some(CONSERVATIVE_CONTEXT_FALLBACK),
-            base_instructions: "You are a coding assistant. Follow the user instructions.".to_owned(),
+            base_instructions: "You are a coding assistant. Follow the user instructions."
+                .to_owned(),
         }
     }
 }
@@ -152,14 +153,18 @@ impl CatalogCompiler {
 
         let mut selected: Vec<&Model> = models
             .iter()
-            .filter(|m| m.in_catalog && m.lifecycle != crate::domain::model::ModelLifecycle::Disabled)
+            .filter(|m| {
+                m.in_catalog && m.lifecycle != crate::domain::model::ModelLifecycle::Disabled
+            })
             .collect();
         selected.sort_by(|a, b| a.catalog_alias.as_str().cmp(b.catalog_alias.as_str()));
 
         for model in selected {
             if !alias_seen.insert(model.catalog_alias.as_str()) {
-                return Err(CoreError::new(ErrorCode::ValidationFailed, "error.duplicateAlias")
-                    .with_detail(format!("alias 重复：{}", model.catalog_alias)));
+                return Err(
+                    CoreError::new(ErrorCode::ValidationFailed, "error.duplicateAlias")
+                        .with_detail(format!("alias 重复：{}", model.catalog_alias)),
+                );
             }
             entries.push(Self::entry(model, options, &mut warnings)?);
         }
@@ -172,11 +177,10 @@ impl CatalogCompiler {
                 .map(|w| w.model_id.clone())
                 .collect();
             if !unresolved.is_empty() {
-                return Err(CoreError::new(
-                    ErrorCode::ValidationFailed,
-                    "error.contextRequired",
-                )
-                .with_detail(format!("以下模型缺少上下文声明：{}", unresolved.join("、"))));
+                return Err(
+                    CoreError::new(ErrorCode::ValidationFailed, "error.contextRequired")
+                        .with_detail(format!("以下模型缺少上下文声明：{}", unresolved.join("、"))),
+                );
             }
         }
 
@@ -204,8 +208,7 @@ impl CatalogCompiler {
                         message_key: "warning.contextUnknown".to_owned(),
                         detail: format!(
                             "{} 未声明上下文，暂用保守策略值 {}，不是模型真实上限",
-                            model.display_name,
-                            fallback
+                            model.display_name, fallback
                         ),
                     });
                     fallback
@@ -273,11 +276,7 @@ impl CatalogCompiler {
             .map(|m| m.to_owned())
             .collect();
 
-        let output_reserve = model
-            .policy
-            .output_limit
-            .map(|o| o.value())
-            .unwrap_or(0);
+        let output_reserve = model.policy.output_limit.map(|o| o.value()).unwrap_or(0);
         let truncation_limit = model
             .policy
             .compact_limit
@@ -285,17 +284,18 @@ impl CatalogCompiler {
             .filter(|c| *c > 0)
             .unwrap_or_else(|| {
                 // 压缩阈值缺失时用预算建议值，仍保证是正数。
-                let suggestion = model.policy.budget_check(0).compact_suggestion.unwrap_or(context_window);
+                let suggestion = model
+                    .policy
+                    .budget_check(0)
+                    .compact_suggestion
+                    .unwrap_or(context_window);
                 suggestion.max(1).min(context_window)
             });
 
         Ok(CatalogModelEntry {
             slug: model.catalog_alias.as_str().to_owned(),
             display_name: model.display_name.clone(),
-            description: format!(
-                "由 Switchelp 管理；上游模型 ID：{}",
-                model.upstream_id
-            ),
+            description: format!("由 Switchelp 管理；上游模型 ID：{}", model.upstream_id),
             default_reasoning_level: default_level,
             supported_reasoning_levels: levels,
             shell_type: DEFAULT_SHELL_TYPE.to_owned(),
@@ -354,7 +354,7 @@ mod tests {
             ModelId::new(id),
             ProviderId::new("p_a"),
             upstream,
-            format!("显示名 {}", id),
+            format!("显示名 {id}"),
             CatalogAlias::parse(alias).unwrap(),
             "2026-09-18T00:00:00Z",
         )
@@ -501,7 +501,9 @@ mod tests {
             mapping_id: Some("m".into()),
         };
         let compiled = CatalogCompiler::compile(&[a], &CompileOptions::default()).unwrap();
-        assert!(compiled.catalog.models[0].supported_reasoning_levels.is_empty());
+        assert!(compiled.catalog.models[0]
+            .supported_reasoning_levels
+            .is_empty());
         assert!(compiled
             .warnings
             .iter()
@@ -513,8 +515,7 @@ mod tests {
         let mut a = model("m_1", "gs/p_a/m_1", "vendor/a", true);
         a.policy.context_limit = TokenCount::parse("128k").unwrap();
         let compiled = CatalogCompiler::compile(&[a], &CompileOptions::default()).unwrap();
-        let json: serde_json::Value =
-            serde_json::from_str(&compiled.to_json().unwrap()).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&compiled.to_json().unwrap()).unwrap();
         let entry = &json["models"][0];
         for key in [
             "slug",
@@ -529,7 +530,7 @@ mod tests {
             "visibility",
             "supported_in_api",
         ] {
-            assert!(entry.get(key).is_some(), "缺少宿主字段 {}", key);
+            assert!(entry.get(key).is_some(), "缺少宿主字段 {key}");
         }
         assert!(entry.get("slug").unwrap().is_string());
     }

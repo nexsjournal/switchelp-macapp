@@ -50,7 +50,9 @@ impl Revision {
                 return Err(CoreError::validation("修订包含空 alias"));
             }
             if !seen.insert(alias) {
-                return Err(CoreError::validation(format!("修订包含重复 alias：{}", alias)));
+                return Err(CoreError::validation(format!(
+                    "修订包含重复 alias：{alias}"
+                )));
             }
         }
         Ok(())
@@ -122,11 +124,10 @@ impl RouteSnapshot {
         let mut seen = std::collections::HashSet::new();
         for entry in &routes {
             if !seen.insert(entry.alias.as_str()) {
-                return Err(CoreError::new(
-                    ErrorCode::ValidationFailed,
-                    "error.duplicateAlias",
-                )
-                .with_detail(format!("路由快照包含重复 alias：{}", entry.alias)));
+                return Err(
+                    CoreError::new(ErrorCode::ValidationFailed, "error.duplicateAlias")
+                        .with_detail(format!("路由快照包含重复 alias：{}", entry.alias)),
+                );
             }
         }
         Ok(Self {
@@ -145,7 +146,7 @@ impl RouteSnapshot {
             .find(|entry| entry.alias == alias)
             .ok_or_else(|| {
                 CoreError::new(ErrorCode::RouteMismatch, "error.unknownAlias")
-                    .with_detail(format!("该目录版本不包含 alias：{}", alias))
+                    .with_detail(format!("该目录版本不包含 alias：{alias}"))
             })
     }
 
@@ -198,7 +199,11 @@ impl RuntimePublication {
     }
 
     pub fn full_base_url(&self, gateway_origin: &str) -> String {
-        format!("{}{}/v1", gateway_origin.trim_end_matches('/'), self.endpoint_prefix)
+        format!(
+            "{}{}/v1",
+            gateway_origin.trim_end_matches('/'),
+            self.endpoint_prefix
+        )
     }
 
     /// 解析形如 `/i/{instanceId}/c/{catalogRevision}` 的前缀。
@@ -257,7 +262,8 @@ mod tests {
 
     #[test]
     fn prefix_keeps_unreserved_characters_readable() {
-        let prefix = RuntimePublication::build_prefix(&InstanceId::new("inst_0123ab"), "rev_0123ab");
+        let prefix =
+            RuntimePublication::build_prefix(&InstanceId::new("inst_0123ab"), "rev_0123ab");
         assert_eq!(prefix, "/i/inst_0123ab/c/rev_0123ab");
     }
 
@@ -267,7 +273,7 @@ mod tests {
         let prefix = RuntimePublication::build_prefix(&InstanceId::new("a/b"), "rev%2F7");
         assert_eq!(prefix, "/i/a%2Fb/c/rev%252F7");
         assert_eq!(
-            RuntimePublication::parse_prefix(&format!("{}/v1/responses", prefix)),
+            RuntimePublication::parse_prefix(&format!("{prefix}/v1/responses")),
             Some(("a/b".to_owned(), "rev%2F7".to_owned()))
         );
     }
@@ -276,7 +282,7 @@ mod tests {
     fn prefix_round_trips_unicode_instance_ids() {
         let prefix = RuntimePublication::build_prefix(&InstanceId::new("实例-甲"), "rev_1");
         assert_eq!(
-            RuntimePublication::parse_prefix(&format!("{}/v1/models", prefix)),
+            RuntimePublication::parse_prefix(&format!("{prefix}/v1/models")),
             Some(("实例-甲".to_owned(), "rev_1".to_owned()))
         );
     }

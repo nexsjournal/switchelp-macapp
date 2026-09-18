@@ -68,7 +68,12 @@ pub fn check(current: &str, endpoint: &str) -> UpdateStatus {
         return status;
     }
     let mut response = response;
-    let text = match response.body_mut().with_config().limit(256 * 1024).read_to_string() {
+    let text = match response
+        .body_mut()
+        .with_config()
+        .limit(256 * 1024)
+        .read_to_string()
+    {
         Ok(text) => text,
         Err(_) => {
             status.error = Some("读取发布信息失败".to_owned());
@@ -154,9 +159,16 @@ mod tests {
         );
 
         assert!(status.has_update);
-        assert_eq!(status.latest.as_deref(), Some("0.2.0"), "tag 的 v 前缀要剥掉");
+        assert_eq!(
+            status.latest.as_deref(),
+            Some("0.2.0"),
+            "tag 的 v 前缀要剥掉"
+        );
         assert_eq!(status.current, "0.1.0");
-        assert_eq!(status.release_url.as_deref(), Some("https://example.test/releases/v0.2.0"));
+        assert_eq!(
+            status.release_url.as_deref(),
+            Some("https://example.test/releases/v0.2.0")
+        );
         assert!(status.error.is_none());
     }
 
@@ -172,7 +184,11 @@ mod tests {
         let status = check("0.1.0", &endpoint(404, "{\"message\":\"Not Found\"}"));
         assert!(!status.has_update);
         assert!(status.latest.is_none(), "没有发布版本时不能报一个版本出来");
-        assert!(status.error.as_deref().unwrap_or_default().contains("还没有发布版本"));
+        assert!(status
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("还没有发布版本"));
     }
 
     #[test]
@@ -194,6 +210,10 @@ mod tests {
     fn a_payload_without_a_tag_is_an_error_not_a_version() {
         let status = check("0.1.0", &endpoint(200, "{\"name\":\"latest\"}"));
         assert!(status.latest.is_none());
-        assert!(status.error.as_deref().unwrap_or_default().contains("版本号"));
+        assert!(status
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("版本号"));
     }
 }

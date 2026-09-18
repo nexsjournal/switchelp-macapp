@@ -7,12 +7,11 @@ use std::sync::Arc;
 use switch_core::{
     application::{ApplyService, GatewayLayout, SystemClock, WorkspaceService},
     codex::{backup::BackupStore, config::AUTH_HELPER_INSTANCE},
-    diagnostics::DiagnosticLog,
     credentials::{SecretVault, SystemVault},
+    diagnostics::DiagnosticLog,
     domain::ids::InstanceId,
     gateway::{
-        self, helper_path, install_auth_helper, Gateway, GatewayConfig,
-        GatewayRouter, GatewayToken,
+        self, helper_path, install_auth_helper, Gateway, GatewayConfig, GatewayRouter, GatewayToken,
     },
     storage::{OperationStore, Repository, SqliteOperationStore, SqliteRepository},
 };
@@ -68,7 +67,11 @@ fn start_gateway(
 /// 关闭窗口按设计**隐藏到托盘**而不是退出（见 `on_window_event`）：托盘常驻，
 /// 退出只从托盘菜单走。托盘本身的价值是状态可见 + 快速回到窗口，以及一个明确的
 /// 退出出口——正在使用本机网关的第三方模型会随进程退出而断开。
-fn install_tray(app: &tauri::AppHandle, gateway_running: bool, port: Option<u16>) -> tauri::Result<()> {
+fn install_tray(
+    app: &tauri::AppHandle,
+    gateway_running: bool,
+    port: Option<u16>,
+) -> tauri::Result<()> {
     let status = match (gateway_running, port) {
         (true, Some(port)) => format!("网关运行中 · 127.0.0.1:{port}"),
         _ => "网关未启动".to_owned(),
@@ -110,7 +113,11 @@ fn install_tray(app: &tauri::AppHandle, gateway_running: bool, port: Option<u16>
                         // 菜单文字必须跟着状态走，否则用户会以为点了没反应。
                         if let Some(item) = app.menu().and_then(|menu| menu.get("pause")) {
                             if let Some(item) = item.as_menuitem() {
-                                let _ = item.set_text(if next { "继续接受新请求" } else { "暂停新请求" });
+                                let _ = item.set_text(if next {
+                                    "继续接受新请求"
+                                } else {
+                                    "暂停新请求"
+                                });
                             }
                         }
                     }
@@ -133,7 +140,9 @@ fn install_tray(app: &tauri::AppHandle, gateway_running: bool, port: Option<u16>
 /// 打开宿主应用。平台差异集中在这里，不在事件回调里写 `cfg`。
 fn open_host_app() {
     #[cfg(target_os = "macos")]
-    let _ = std::process::Command::new("open").args(["-a", "ChatGPT"]).spawn();
+    let _ = std::process::Command::new("open")
+        .args(["-a", "ChatGPT"])
+        .spawn();
     #[cfg(target_os = "windows")]
     let _ = std::process::Command::new("cmd")
         .args(["/C", "start", "", "ChatGPT"])
@@ -152,15 +161,18 @@ fn main() {
                 directory = std::path::PathBuf::from(value);
             }
             std::fs::create_dir_all(&directory)?;
-            #[cfg(unix)] {
+            #[cfg(unix)]
+            {
                 use std::os::unix::fs::PermissionsExt;
                 std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
             }
             let db_path = directory.join("metadata.sqlite");
             // 仓库与事务记录共用同一个库文件；两个连接各自持有自己的迁移入口。
             let repository: Arc<dyn Repository> = Arc::new(SqliteRepository::open(&db_path)?);
-            let operations: Arc<dyn OperationStore> = Arc::new(SqliteOperationStore::open(&db_path)?);
-            #[cfg(unix)] {
+            let operations: Arc<dyn OperationStore> =
+                Arc::new(SqliteOperationStore::open(&db_path)?);
+            #[cfg(unix)]
+            {
                 use std::os::unix::fs::PermissionsExt;
                 std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o600))?;
             }
@@ -170,20 +182,22 @@ fn main() {
             // 网关立刻按新目录版本服务；两个实例各建一个会让网关永远看不到路由。
             let router = Arc::new(GatewayRouter::new());
             let backups = Arc::new(BackupStore::new(&directory));
-            let apply = Arc::new(ApplyService::new(
-                repository.clone(),
-                operations,
-                router.clone(),
-                GatewayLayout {
-                    app_data_dir: directory.clone(),
-                    port: gateway::DEFAULT_PORT,
-                    auth_helper: auth_helper(&directory),
-                    base_instructions: "通过 Switchelp 本机网关访问第三方模型。".to_owned(),
-                },
-                Arc::new(SystemClock),
-            )
-            // 提交前自动备份：写用户配置之前先留原样副本。
-            .with_backups(backups.clone()));
+            let apply = Arc::new(
+                ApplyService::new(
+                    repository.clone(),
+                    operations,
+                    router.clone(),
+                    GatewayLayout {
+                        app_data_dir: directory.clone(),
+                        port: gateway::DEFAULT_PORT,
+                        auth_helper: auth_helper(&directory),
+                        base_instructions: "通过 Switchelp 本机网关访问第三方模型。".to_owned(),
+                    },
+                    Arc::new(SystemClock),
+                )
+                // 提交前自动备份：写用户配置之前先留原样副本。
+                .with_backups(backups.clone()),
+            );
             // 未完成事务在下一次启动时按记录判定恢复；窗口重建不新建事务。
             for report in apply.startup_recovery()? {
                 eprintln!(
@@ -230,21 +244,41 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            commands::providers_list, commands::providers_save,
-            commands::credentials_list, commands::credentials_add,
-            commands::credentials_replace, commands::credentials_select,
-            commands::models_list, commands::models_save,
-            commands::providers_delete, commands::credentials_delete, commands::models_delete,
-            commands::instances_detect, commands::config_inspect,
-            commands::apply_plan, commands::apply_execute,
-            commands::apply_status, commands::apply_confirm_reload, commands::apply_summary,
-            commands::restore_plan, commands::restore_execute,
+            commands::providers_list,
+            commands::providers_save,
+            commands::credentials_list,
+            commands::credentials_add,
+            commands::credentials_replace,
+            commands::credentials_select,
+            commands::models_list,
+            commands::models_save,
+            commands::providers_delete,
+            commands::credentials_delete,
+            commands::models_delete,
+            commands::instances_detect,
+            commands::config_inspect,
+            commands::apply_plan,
+            commands::apply_execute,
+            commands::apply_status,
+            commands::apply_confirm_reload,
+            commands::apply_summary,
+            commands::restore_plan,
+            commands::restore_execute,
             commands::gateway_status,
-            commands::diagnostics_list, commands::diagnostics_preview, commands::diagnostics_export,
-            commands::diagnostics_clear, commands::gateway_set_paused,
-            commands::models_discover, commands::platform_info, commands::update_check,
-            commands::backups_list, commands::backups_create, commands::backups_preview, commands::backups_restore,
-            commands::probes_start, commands::probes_cancel,
+            commands::diagnostics_list,
+            commands::diagnostics_preview,
+            commands::diagnostics_export,
+            commands::diagnostics_clear,
+            commands::gateway_set_paused,
+            commands::models_discover,
+            commands::platform_info,
+            commands::update_check,
+            commands::backups_list,
+            commands::backups_create,
+            commands::backups_preview,
+            commands::backups_restore,
+            commands::probes_start,
+            commands::probes_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("Switchelp 无法启动");

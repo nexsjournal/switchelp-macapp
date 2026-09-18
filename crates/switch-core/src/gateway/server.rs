@@ -24,8 +24,8 @@ use super::routing::{AdmissionError, GatewayRouter};
 use super::sse::SseParser;
 use super::timeouts::TimeoutPolicy;
 use crate::credentials::{CredentialResolver, SecretVault};
-use crate::domain::error::{CoreError, ErrorCode};
 use crate::diagnostics::{DiagnosticEvent, DiagnosticLog, LogLevel};
+use crate::domain::error::{CoreError, ErrorCode};
 use crate::domain::ids::InstanceId;
 use crate::protocols::{chat, responses, ResponsesEvent, CHAT_COMPLETIONS_V1};
 use crate::storage::Repository;
@@ -107,16 +107,20 @@ impl Gateway {
     pub fn bind(&self) -> Result<u16, CoreError> {
         let address = SocketAddr::from((Ipv4Addr::LOCALHOST, self.config.port));
         let listener = TcpListener::bind(address).map_err(|error| {
-            CoreError::new(ErrorCode::PortInUse, "error.portInUse").with_detail(format!(
-                "无法绑定 {}：{}",
-                address, error
-            ))
+            CoreError::new(ErrorCode::PortInUse, "error.portInUse")
+                .with_detail(format!("无法绑定 {address}：{error}"))
         })?;
         let local = listener
             .local_addr()
             .map_err(|_| CoreError::internal("无法读取网关端口"))?;
-        *self.listener.lock().map_err(|_| CoreError::internal("监听锁不可用"))? = Some(listener);
-        *self.local_addr.lock().map_err(|_| CoreError::internal("地址锁不可用"))? = Some(local);
+        *self
+            .listener
+            .lock()
+            .map_err(|_| CoreError::internal("监听锁不可用"))? = Some(listener);
+        *self
+            .local_addr
+            .lock()
+            .map_err(|_| CoreError::internal("地址锁不可用"))? = Some(local);
         Ok(local.port())
     }
 
@@ -192,7 +196,9 @@ impl Gateway {
         let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
         let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
         let _ = stream.set_nodelay(true);
-        let mut writer = stream.try_clone().map_err(|_| CoreError::internal("复制连接失败"))?;
+        let mut writer = stream
+            .try_clone()
+            .map_err(|_| CoreError::internal("复制连接失败"))?;
         let mut reader = BufReader::new(stream);
 
         let request = match read_request(&mut reader) {
@@ -222,19 +228,23 @@ impl Gateway {
         }
 
         match (request.method.as_str(), route_kind(&request.path)) {
-            ("GET", RouteKind::Health) => write_json(&mut writer, 200, &json!({"status": "ok", "served": self.served_requests()})),
+            ("GET", RouteKind::Health) => write_json(
+                &mut writer,
+                200,
+                &json!({"status": "ok", "served": self.served_requests()}),
+            ),
             ("GET", RouteKind::Models { revision }) => self.handle_models(&mut writer, &revision),
             ("POST", RouteKind::Responses) => self.handle_inference(&mut writer, &request),
             ("POST", RouteKind::Realtime) => write_error(
                 &mut writer,
-                &CoreError::new(ErrorCode::CapabilityUnsupported, "error.realtimeUnsupported")
-                    .with_detail("本机网关不支持实时语音通道；请使用普通对话。".to_owned()),
+                &CoreError::new(
+                    ErrorCode::CapabilityUnsupported,
+                    "error.realtimeUnsupported",
+                )
+                .with_detail("本机网关不支持实时语音通道；请使用普通对话。".to_owned()),
             ),
             (_, RouteKind::Unknown) => write_error(&mut writer, &CoreError::not_found("网关接口")),
-            _ => write_error(
-                &mut writer,
-                &CoreError::validation("该路径不支持此方法".to_owned()),
-            ),
+            _ => write_error(&mut writer, &CoreError::validation("该路径不支持此方法")),
         }
     }
 
@@ -242,7 +252,7 @@ impl Gateway {
     fn handle_models(&self, writer: &mut TcpStream, revision: &str) -> Result<(), CoreError> {
         let aliases = self.router.aliases(revision).ok_or_else(|| {
             CoreError::new(ErrorCode::RouteMismatch, "error.unknownCatalogRevision")
-                .with_detail(format!("该目录版本未发布：{}", revision))
+                .with_detail(format!("该目录版本未发布：{revision}"))
         })?;
         let data: Vec<Value> = aliases
             .iter()
@@ -252,49 +262,49 @@ impl Gateway {
     }
 
     /// 推理主路径：准入 → 取凭据 → 转换为上游请求 → 流式还原 → 回写宿主。
-    fn handle_inference(&self, writer: &mut TcpStream, request: &IncomingRequest) -> Result<(), CoreError> {
+    fn handle_inference(
+        &self,
+        writer: &mut TcpStream,
+        request: &IncomingRequest,
+    ) -> Result<(), CoreError> {
         let payload: Value = match serde_json::from_slice(&request.body) {
             Ok(value) => value,
-            Err(_) => {
-                return write_error(
-                    writer,
-                    &CoreError::validation("请求体不是合法 JSON".to_owned()),
-                )
-            }
+            Err(_) => return write_error(writer, &CoreError::validation("请求体不是合法 JSON")),
         };
         let alias = payload
             .get("model")
             .and_then(Value::as_str)
-            .ok_or_else(|| CoreError::validation("请求缺少 model".to_owned()))?;
+            .ok_or_else(|| CoreError::validation("请求缺少 model"))?;
 
         // 实例取自 URL 前缀，而不是启动时写死的实例：一个网关可以服务本工具发布过的
         // 任意实例前缀，而前缀本身确定目录版本。`admission` 仍会校验该目录修订
         // 确实属于前缀里声明的实例，任一侧对不上都拒绝。
-        let admission = match crate::storage::snapshot::RuntimePublication::parse_prefix(&request.path)
-            .ok_or_else(|| AdmissionError::UnknownPrefix {
-                catalog_revision: request.path.clone(),
-            })
-            .and_then(|(instance, revision)| {
-                self.router
-                    .admission(&revision, alias, &InstanceId::new(instance))
-            }) {
-            Ok(admission) => admission,
-            Err(error) => {
-                let error = AdmissionError::to_core_error(&error);
-                self.config.diagnostics.record(
-                    DiagnosticEvent::new(
-                        crate::diagnostics::now_rfc3339(),
-                        LogLevel::Warning,
-                        "gateway",
-                        alias.to_owned(),
-                        "result.routeRejected",
-                    )
-                    .with_metadata("alias", alias)
-                    .with_metadata("error_code", format!("{:?}", error.code)),
-                );
-                return write_error(writer, &error);
-            }
-        };
+        let admission =
+            match crate::storage::snapshot::RuntimePublication::parse_prefix(&request.path)
+                .ok_or_else(|| AdmissionError::UnknownPrefix {
+                    catalog_revision: request.path.clone(),
+                })
+                .and_then(|(instance, revision)| {
+                    self.router
+                        .admission(&revision, alias, &InstanceId::new(instance))
+                }) {
+                Ok(admission) => admission,
+                Err(error) => {
+                    let error = AdmissionError::to_core_error(&error);
+                    self.config.diagnostics.record(
+                        DiagnosticEvent::new(
+                            crate::diagnostics::now_rfc3339(),
+                            LogLevel::Warning,
+                            "gateway",
+                            alias.to_owned(),
+                            "result.routeRejected",
+                        )
+                        .with_metadata("alias", alias)
+                        .with_metadata("error_code", format!("{:?}", error.code)),
+                    );
+                    return write_error(writer, &error);
+                }
+            };
         let route = admission.route;
 
         let provider = self
@@ -313,8 +323,11 @@ impl Gateway {
         if credential.secret_version != route.credential_version {
             return write_error(
                 writer,
-                &CoreError::new(ErrorCode::ContinuationBound, "error.credentialVersionChanged")
-                    .with_detail("该模型发布后 Key 已更换，请重新生成应用计划".to_owned()),
+                &CoreError::new(
+                    ErrorCode::ContinuationBound,
+                    "error.credentialVersionChanged",
+                )
+                .with_detail("该模型发布后 Key 已更换，请重新生成应用计划".to_owned()),
             );
         }
         let resolver = CredentialResolver::new(self.vault.as_ref());
@@ -331,13 +344,17 @@ impl Gateway {
 
         // 模态在执行前判定：把图片塞给只声明文本的模型属于模态虚报，
         // 也等于偷偷借用另一个模型的能力，必须显式拒绝而不是转发。
-        let unsupported = crate::protocols::unsupported_modalities(&payload, &route.native_modalities);
+        let unsupported =
+            crate::protocols::unsupported_modalities(&payload, &route.native_modalities);
         if !unsupported.is_empty() {
-            let error = CoreError::new(ErrorCode::CapabilityUnsupported, "error.modalityNotDeclared")
-                .with_detail(format!(
-                    "该模型未声明 {} 输入，本次请求包含这类内容，已拒绝转发",
-                    unsupported.join("、")
-                ));
+            let error = CoreError::new(
+                ErrorCode::CapabilityUnsupported,
+                "error.modalityNotDeclared",
+            )
+            .with_detail(format!(
+                "该模型未声明 {} 输入，本次请求包含这类内容，已拒绝转发",
+                unsupported.join("、")
+            ));
             self.config.diagnostics.record(
                 DiagnosticEvent::new(
                     crate::diagnostics::now_rfc3339(),
@@ -452,7 +469,9 @@ impl Gateway {
         );
 
         let translator = if route.protocol_id == CHAT_COMPLETIONS_V1 {
-            Translator::Chat { state: chat::ChatStream::new(alias) }
+            Translator::Chat {
+                state: chat::ChatStream::new(alias),
+            }
         } else {
             Translator::Passthrough {
                 alias: alias.to_owned(),
@@ -595,12 +614,16 @@ fn route_kind(path: &str) -> RouteKind {
     if path == "/health" {
         return RouteKind::Health;
     }
-    let Some((_, revision)) = crate::storage::snapshot::RuntimePublication::parse_prefix(path) else {
+    let Some((_, revision)) = crate::storage::snapshot::RuntimePublication::parse_prefix(path)
+    else {
         return RouteKind::Unknown;
     };
     // 前缀之后必须恰好是 `v1/<端点>`——路径形状是 `/i/{实例}/c/{版本}/v1/{端点}`。
     // 只看最后一段的话，`/i/x/c/rev/v1/anything/responses` 也会被当成推理端点。
-    let segments: Vec<&str> = path.split('/').filter(|segment| !segment.is_empty()).collect();
+    let segments: Vec<&str> = path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
     match segments.as_slice() {
         ["i", _, "c", _, "v1", "responses"] => RouteKind::Responses,
         ["i", _, "c", _, "v1", "models"] => RouteKind::Models { revision },
@@ -611,12 +634,8 @@ fn route_kind(path: &str) -> RouteKind {
 
 /// 流式翻译的两条路径。透传保留上游事件名，chat 走状态机重建事件。
 enum Translator {
-    Passthrough {
-        alias: String,
-    },
-    Chat {
-        state: chat::ChatStream,
-    },
+    Passthrough { alias: String },
+    Chat { state: chat::ChatStream },
 }
 
 impl Translator {
@@ -682,7 +701,10 @@ struct Chunked<'a> {
 
 impl<'a> Chunked<'a> {
     fn new(stream: &'a mut TcpStream) -> Self {
-        Self { stream, failed: false }
+        Self {
+            stream,
+            failed: false,
+        }
     }
 
     /// 上一次写是否失败（宿主断开）。
@@ -691,7 +713,7 @@ impl<'a> Chunked<'a> {
     }
 
     fn write_frame(&mut self, name: &str, payload: &Value) -> Result<(), CoreError> {
-        let frame = format!("event: {}\ndata: {}\n\n", name, payload);
+        let frame = format!("event: {name}\ndata: {payload}\n\n");
         self.write_chunk(frame.as_bytes())
     }
 
@@ -729,16 +751,16 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> Result<Option<IncomingRequ
     let mut line = String::new();
     if reader
         .read_line(&mut line)
-        .map_err(|_| CoreError::validation("读取请求行失败".to_owned()))?
+        .map_err(|_| CoreError::validation("读取请求行失败"))?
         == 0
     {
         return Ok(None);
     }
-    let mut parts = line.trim_end().split_whitespace();
+    let mut parts = line.split_whitespace();
     let method = parts.next().unwrap_or_default().to_ascii_uppercase();
     let path = parts.next().unwrap_or_default().to_owned();
     if method.is_empty() || path.is_empty() {
-        return Err(CoreError::validation("请求行不完整".to_owned()));
+        return Err(CoreError::validation("请求行不完整"));
     }
 
     let mut headers = InboundHeaders {
@@ -750,12 +772,12 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> Result<Option<IncomingRequ
         let mut raw = String::new();
         let read = reader
             .read_line(&mut raw)
-            .map_err(|_| CoreError::validation("读取请求头失败".to_owned()))?;
+            .map_err(|_| CoreError::validation("读取请求头失败"))?;
         if read == 0 || raw == "\r\n" || raw == "\n" {
             break;
         }
         if raw.len() > MAX_HEADER_LINE {
-            return Err(CoreError::validation("请求头过长".to_owned()));
+            return Err(CoreError::validation("请求头过长"));
         }
         let Some((name, value)) = raw.split_once(':') else {
             continue;
@@ -772,7 +794,7 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> Result<Option<IncomingRequ
             "content-length" => content_length = value.parse::<usize>().ok(),
             "transfer-encoding" => {
                 return Err(CoreError::validation(
-                    "本机网关不接受分块请求体，请使用 Content-Length".to_owned(),
+                    "本机网关不接受分块请求体，请使用 Content-Length",
                 ))
             }
             _ => {}
@@ -784,7 +806,7 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> Result<Option<IncomingRequ
     if length > MAX_REQUEST_BYTES {
         return Err(
             CoreError::new(ErrorCode::RequestTooLarge, "error.requestTooLarge").with_detail(
-                format!("请求体 {} 字节超过上限 {} 字节", length, MAX_REQUEST_BYTES),
+                format!("请求体 {length} 字节超过上限 {MAX_REQUEST_BYTES} 字节"),
             ),
         );
     }
@@ -792,7 +814,7 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> Result<Option<IncomingRequ
     if length > 0 {
         reader
             .read_exact(&mut body)
-            .map_err(|_| CoreError::validation("请求体不完整".to_owned()))?;
+            .map_err(|_| CoreError::validation("请求体不完整"))?;
     }
     Ok(Some(IncomingRequest {
         method,
@@ -881,13 +903,16 @@ fn reason_for(status: u16) -> &'static str {
 /// 上游非 2xx：归类后交给宿主，正文脱敏并截断。
 fn upstream_status_error(status: u16, detail: &str) -> CoreError {
     let (code, message_key) = match status {
-        401 | 403 => (ErrorCode::ModelPermissionDenied, "error.modelPermissionDenied"),
+        401 | 403 => (
+            ErrorCode::ModelPermissionDenied,
+            "error.modelPermissionDenied",
+        ),
         404 => (ErrorCode::NotFound, "error.upstreamModelMissing"),
         429 => (ErrorCode::Internal, "error.upstreamRateLimited"),
         400..=499 => (ErrorCode::ValidationFailed, "error.upstreamRejected"),
         _ => (ErrorCode::Internal, "error.upstreamFailed"),
     };
-    CoreError::new(code, message_key).with_detail(format!("上游返回 {}：{}", status, detail))
+    CoreError::new(code, message_key).with_detail(format!("上游返回 {status}：{detail}"))
 }
 
 /// 传输层失败：连接被拒、TLS 失败、首事件超时等。
@@ -902,7 +927,7 @@ fn upstream_transport_error(error: &ureq::Error) -> CoreError {
         }
         _ => (ErrorCode::Internal, "error.upstreamUnreachable"),
     };
-    CoreError::new(code, message_key).with_detail(format!("无法完成上游请求：{}", text))
+    CoreError::new(code, message_key).with_detail(format!("无法完成上游请求：{text}"))
 }
 
 /// 上游在流中途用数据帧报错。
@@ -926,20 +951,23 @@ fn upstream_stream_error(payload: &Value, secret: &str) -> CoreError {
 
 /// 流已开始后读取中断。此时响应头已经发出，只能用事件收尾。
 fn stream_read_error(error: &std::io::Error) -> CoreError {
-    CoreError::internal("上游流在传输中断开")
-        .with_detail(format!("读取上游流失败：{}", error))
+    CoreError::internal("上游流在传输中断开").with_detail(format!("读取上游流失败：{error}"))
 }
 
 /// 把已知秘密从要外发的文本里抹掉，再截断。
 ///
 /// 上游错误正文有时会回显请求头；这是唯一可能让上游 Key 出现在响应里的路径。
 fn redact(text: &str, secret: &str) -> String {
-    let mut cleaned = text.replace('\n', " ").replace('\r', " ");
+    let mut cleaned = text.replace(['\n', '\r'], " ");
     if !secret.is_empty() && cleaned.contains(secret) {
         cleaned = cleaned.replace(secret, "••••redacted");
     }
     if cleaned.chars().count() > MAX_UPSTREAM_ERROR_CHARS {
-        cleaned = cleaned.chars().take(MAX_UPSTREAM_ERROR_CHARS).collect::<String>() + "…";
+        cleaned = cleaned
+            .chars()
+            .take(MAX_UPSTREAM_ERROR_CHARS)
+            .collect::<String>()
+            + "…";
     }
     cleaned
 }
@@ -987,7 +1015,6 @@ pub fn token_fingerprint(token: &str) -> String {
         .collect()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -998,21 +1025,34 @@ mod tests {
     #[test]
     fn route_kind_requires_the_documented_shape_and_ignores_query() {
         let base = "/i/inst_1/c/rev_1";
-        assert_eq!(route_kind(&format!("{base}/v1/responses")), RouteKind::Responses);
-        assert_eq!(route_kind(&format!("{base}/v1/realtime")), RouteKind::Realtime);
+        assert_eq!(
+            route_kind(&format!("{base}/v1/responses")),
+            RouteKind::Responses
+        );
+        assert_eq!(
+            route_kind(&format!("{base}/v1/realtime")),
+            RouteKind::Realtime
+        );
         assert_eq!(
             route_kind(&format!("{base}/v1/models")),
-            RouteKind::Models { revision: "rev_1".to_owned() }
+            RouteKind::Models {
+                revision: "rev_1".to_owned()
+            }
         );
         assert_eq!(route_kind("/health"), RouteKind::Health);
         assert_eq!(route_kind("/health?probe=1"), RouteKind::Health);
         assert_eq!(
             route_kind(&format!("{base}/v1/models?limit=1")),
-            RouteKind::Models { revision: "rev_1".to_owned() }
+            RouteKind::Models {
+                revision: "rev_1".to_owned()
+            }
         );
 
         // 多一段尾路径不是本网关的路由，不能因为最后一段叫 responses 就当推理端点。
-        assert_eq!(route_kind(&format!("{base}/v1/anything/responses")), RouteKind::Unknown);
+        assert_eq!(
+            route_kind(&format!("{base}/v1/anything/responses")),
+            RouteKind::Unknown
+        );
         // 少了 v1 段、或没有实例前缀，同样不认。
         assert_eq!(route_kind(&format!("{base}/responses")), RouteKind::Unknown);
         assert_eq!(route_kind("/v1/responses"), RouteKind::Unknown);

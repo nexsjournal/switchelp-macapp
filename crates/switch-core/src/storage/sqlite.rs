@@ -12,7 +12,11 @@ use crate::domain::{
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{path::Path, sync::{Mutex, MutexGuard}, time::Duration};
+use std::{
+    path::Path,
+    sync::{Mutex, MutexGuard},
+    time::Duration,
+};
 
 pub struct SqliteRepository {
     connection: Mutex<Connection>,
@@ -53,24 +57,41 @@ impl SqliteRepository {
     }
 
     fn initialize(mut connection: Connection) -> Result<Self, CoreError> {
-        connection.busy_timeout(Duration::from_secs(5)).map_err(db_error)?;
-        connection.pragma_update(None, "foreign_keys", "ON").map_err(db_error)?;
+        connection
+            .busy_timeout(Duration::from_secs(5))
+            .map_err(db_error)?;
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .map_err(db_error)?;
         // 在写锁中检查版本，多个应用连接不能各自执行初始 migration。
-        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(db_error)?;
-        let current = tx.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0)).map_err(db_error)?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db_error)?;
+        let current = tx
+            .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+            .map_err(db_error)?;
         let version = run_migrations(current, |step| match step.to {
             1 => tx.execute_batch(INITIAL_SCHEMA).map_err(db_error),
             _ => Err(CoreError::internal("未知的数据库升级步骤")),
         })?;
-        tx.pragma_update(None, "user_version", version).map_err(db_error)?;
+        tx.pragma_update(None, "user_version", version)
+            .map_err(db_error)?;
         tx.commit().map_err(db_error)?;
-        connection.pragma_update(None, "journal_mode", "WAL").map_err(db_error)?;
-        connection.pragma_update(None, "synchronous", "FULL").map_err(db_error)?;
-        Ok(Self { connection: Mutex::new(connection) })
+        connection
+            .pragma_update(None, "journal_mode", "WAL")
+            .map_err(db_error)?;
+        connection
+            .pragma_update(None, "synchronous", "FULL")
+            .map_err(db_error)?;
+        Ok(Self {
+            connection: Mutex::new(connection),
+        })
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Connection>, CoreError> {
-        self.connection.lock().map_err(|_| CoreError::internal("数据库锁不可用"))
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("数据库锁不可用"))
     }
 }
 
@@ -82,24 +103,40 @@ fn decode<T: DeserializeOwned>(value: &str) -> Result<T, CoreError> {
     serde_json::from_str(value).map_err(|_| CoreError::internal("元数据结构损坏，已停止读取"))
 }
 
-fn one<T: DeserializeOwned>(connection: &Connection, sql: &str, id: &str) -> Result<Option<T>, CoreError> {
-    let value: Option<String> = connection.query_row(sql, [id], |row| row.get(0)).optional().map_err(db_error)?;
+fn one<T: DeserializeOwned>(
+    connection: &Connection,
+    sql: &str,
+    id: &str,
+) -> Result<Option<T>, CoreError> {
+    let value: Option<String> = connection
+        .query_row(sql, [id], |row| row.get(0))
+        .optional()
+        .map_err(db_error)?;
     value.map(|v| decode(&v)).transpose()
 }
 
-fn list<T: DeserializeOwned>(connection: &Connection, sql: &str, parameters: impl rusqlite::Params) -> Result<Vec<T>, CoreError> {
+fn list<T: DeserializeOwned>(
+    connection: &Connection,
+    sql: &str,
+    parameters: impl rusqlite::Params,
+) -> Result<Vec<T>, CoreError> {
     let mut statement = connection.prepare(sql).map_err(db_error)?;
-    let rows = statement.query_map(parameters, |row| row.get::<_, String>(0)).map_err(db_error)?;
+    let rows = statement
+        .query_map(parameters, |row| row.get::<_, String>(0))
+        .map_err(db_error)?;
     rows.map(|row| decode(&row.map_err(db_error)?)).collect()
 }
 
 fn db_error(error: rusqlite::Error) -> CoreError {
     // 不将 SQL、绑定参数或 SQLite 原始错误文本暴露给 UI。
     match error.sqlite_error_code() {
-        Some(rusqlite::ErrorCode::ConstraintViolation) => CoreError::conflict("error.storageConstraint")
-            .with_detail("记录被引用，或模型身份、目录别名重复".to_owned()),
-        Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) =>
-            CoreError::conflict("error.storageBusy"),
+        Some(rusqlite::ErrorCode::ConstraintViolation) => {
+            CoreError::conflict("error.storageConstraint")
+                .with_detail("记录被引用，或模型身份、目录别名重复".to_owned())
+        }
+        Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) => {
+            CoreError::conflict("error.storageBusy")
+        }
         _ => CoreError::internal("元数据库读写失败"),
     }
 }
@@ -113,18 +150,36 @@ fn protocol_key(protocol: Protocol) -> &'static str {
 
 impl Repository for SqliteRepository {
     fn list_providers(&self) -> Result<Vec<Provider>, CoreError> {
-        list(&*self.lock()?, "SELECT payload FROM providers ORDER BY json_extract(payload, '$.name'), id", [])
+        list(
+            &*self.lock()?,
+            "SELECT payload FROM providers ORDER BY json_extract(payload, '$.name'), id",
+            [],
+        )
     }
 
     fn get_provider(&self, id: &ProviderId) -> Result<Option<Provider>, CoreError> {
-        one(&*self.lock()?, "SELECT payload FROM providers WHERE id = ?1", id.as_str())
+        one(
+            &*self.lock()?,
+            "SELECT payload FROM providers WHERE id = ?1",
+            id.as_str(),
+        )
     }
 
-    fn save_provider(&self, mut provider: Provider, expected_version: u64) -> Result<Provider, CoreError> {
+    fn save_provider(
+        &self,
+        mut provider: Provider,
+        expected_version: u64,
+    ) -> Result<Provider, CoreError> {
         provider.validate()?;
         let mut connection = self.lock()?;
-        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(db_error)?;
-        let previous: Option<Provider> = one(&tx, "SELECT payload FROM providers WHERE id = ?1", provider.id.as_str())?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db_error)?;
+        let previous: Option<Provider> = one(
+            &tx,
+            "SELECT payload FROM providers WHERE id = ?1",
+            provider.id.as_str(),
+        )?;
         match &previous {
             Some(existing) => {
                 existing.check_version(expected_version)?;
@@ -135,8 +190,12 @@ impl Repository for SqliteRepository {
             None => return Err(CoreError::conflict("error.providerNotFound")),
         }
         if let Some(active) = &provider.active_credential_id {
-            let credential: Credential = one(&tx, "SELECT payload FROM credentials WHERE id = ?1", active.as_str())?
-                .ok_or_else(|| CoreError::not_found("Key"))?;
+            let credential: Credential = one(
+                &tx,
+                "SELECT payload FROM credentials WHERE id = ?1",
+                active.as_str(),
+            )?
+            .ok_or_else(|| CoreError::not_found("Key"))?;
             if credential.provider_id != provider.id {
                 return Err(CoreError::validation("不能选择其他供应商的 Key"));
             }
@@ -152,8 +211,13 @@ impl Repository for SqliteRepository {
     }
 
     fn delete_provider(&self, id: &ProviderId) -> Result<(), CoreError> {
-        let affected = self.lock()?.execute("DELETE FROM providers WHERE id=?1", [id.as_str()]).map_err(db_error)?;
-        if affected == 0 { return Err(CoreError::not_found("供应商")); }
+        let affected = self
+            .lock()?
+            .execute("DELETE FROM providers WHERE id=?1", [id.as_str()])
+            .map_err(db_error)?;
+        if affected == 0 {
+            return Err(CoreError::not_found("供应商"));
+        }
         Ok(())
     }
 
@@ -162,15 +226,27 @@ impl Repository for SqliteRepository {
     }
 
     fn get_credential(&self, id: &CredentialId) -> Result<Option<Credential>, CoreError> {
-        one(&*self.lock()?, "SELECT payload FROM credentials WHERE id=?1", id.as_str())
+        one(
+            &*self.lock()?,
+            "SELECT payload FROM credentials WHERE id=?1",
+            id.as_str(),
+        )
     }
 
     fn save_credential(&self, credential: Credential) -> Result<Credential, CoreError> {
         let mut connection = self.lock()?;
-        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(db_error)?;
-        let previous: Option<Credential> = one(&tx, "SELECT payload FROM credentials WHERE id=?1", credential.id.as_str())?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db_error)?;
+        let previous: Option<Credential> = one(
+            &tx,
+            "SELECT payload FROM credentials WHERE id=?1",
+            credential.id.as_str(),
+        )?;
         if let Some(existing) = previous {
-            if credential.version != existing.version + 1 || credential.provider_id != existing.provider_id {
+            if credential.version != existing.version + 1
+                || credential.provider_id != existing.provider_id
+            {
                 return Err(CoreError::conflict("error.credentialVersionConflict"));
             }
         } else if credential.version != 1 {
@@ -184,22 +260,38 @@ impl Repository for SqliteRepository {
 
     fn delete_credential(&self, id: &CredentialId) -> Result<(), CoreError> {
         let mut connection = self.lock()?;
-        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(db_error)?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db_error)?;
         let active: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM providers WHERE json_extract(payload, '$.activeCredentialId')=?1)",
             [id.as_str()], |row| row.get(0)).map_err(db_error)?;
-        if active { return Err(CoreError::conflict("error.credentialInUse")); }
-        if tx.execute("DELETE FROM credentials WHERE id=?1", [id.as_str()]).map_err(db_error)? == 0 {
+        if active {
+            return Err(CoreError::conflict("error.credentialInUse"));
+        }
+        if tx
+            .execute("DELETE FROM credentials WHERE id=?1", [id.as_str()])
+            .map_err(db_error)?
+            == 0
+        {
             return Err(CoreError::not_found("Key"));
         }
         tx.commit().map_err(db_error)
     }
 
     fn list_models(&self) -> Result<Vec<Model>, CoreError> {
-        list(&*self.lock()?, "SELECT payload FROM models ORDER BY alias", [])
+        list(
+            &*self.lock()?,
+            "SELECT payload FROM models ORDER BY alias",
+            [],
+        )
     }
 
     fn get_model(&self, id: &ModelId) -> Result<Option<Model>, CoreError> {
-        one(&*self.lock()?, "SELECT payload FROM models WHERE id=?1", id.as_str())
+        one(
+            &*self.lock()?,
+            "SELECT payload FROM models WHERE id=?1",
+            id.as_str(),
+        )
     }
 
     fn save_model(&self, mut model: Model, expected_version: u64) -> Result<Model, CoreError> {
@@ -208,15 +300,31 @@ impl Repository for SqliteRepository {
         // serde 的透明包装类型并不会自动执行 parse 校验。
         crate::domain::ids::CatalogAlias::parse(model.catalog_alias.as_str())?;
         let mut connection = self.lock()?;
-        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(db_error)?;
-        let provider: Provider = one(&tx, "SELECT payload FROM providers WHERE id=?1", model.provider_id.as_str())?
-            .ok_or_else(|| CoreError::not_found("供应商"))?;
-        let previous: Option<Model> = one(&tx, "SELECT payload FROM models WHERE id=?1", model.id.as_str())?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db_error)?;
+        let provider: Provider = one(
+            &tx,
+            "SELECT payload FROM providers WHERE id=?1",
+            model.provider_id.as_str(),
+        )?
+        .ok_or_else(|| CoreError::not_found("供应商"))?;
+        let previous: Option<Model> = one(
+            &tx,
+            "SELECT payload FROM models WHERE id=?1",
+            model.id.as_str(),
+        )?;
         match previous {
             Some(existing) => {
-                if existing.version != expected_version { return Err(CoreError::conflict("error.modelVersionConflict")); }
-                if existing.provider_id != model.provider_id { return Err(CoreError::validation("已有模型不能更换供应商")); }
-                if existing.upstream_id != model.upstream_id && existing.catalog_alias == model.catalog_alias {
+                if existing.version != expected_version {
+                    return Err(CoreError::conflict("error.modelVersionConflict"));
+                }
+                if existing.provider_id != model.provider_id {
+                    return Err(CoreError::validation("已有模型不能更换供应商"));
+                }
+                if existing.upstream_id != model.upstream_id
+                    && existing.catalog_alias == model.catalog_alias
+                {
                     return Err(CoreError::validation("更换上游模型需要新的目录别名"));
                 }
                 model.version = existing.version + 1;
@@ -234,7 +342,12 @@ impl Repository for SqliteRepository {
     }
 
     fn delete_model(&self, id: &ModelId) -> Result<(), CoreError> {
-        if self.lock()?.execute("DELETE FROM models WHERE id=?1", [id.as_str()]).map_err(db_error)? == 0 {
+        if self
+            .lock()?
+            .execute("DELETE FROM models WHERE id=?1", [id.as_str()])
+            .map_err(db_error)?
+            == 0
+        {
             return Err(CoreError::not_found("模型"));
         }
         Ok(())
@@ -251,8 +364,12 @@ pub struct SqliteOperationStore {
 impl SqliteOperationStore {
     pub fn open(path: &Path) -> Result<Self, CoreError> {
         let mut connection = Connection::open(path).map_err(db_error)?;
-        connection.busy_timeout(Duration::from_secs(5)).map_err(db_error)?;
-        connection.pragma_update(None, "foreign_keys", "ON").map_err(db_error)?;
+        connection
+            .busy_timeout(Duration::from_secs(5))
+            .map_err(db_error)?;
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .map_err(db_error)?;
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(db_error)?;
@@ -263,21 +380,32 @@ impl SqliteOperationStore {
             1 => tx.execute_batch(INITIAL_SCHEMA).map_err(db_error),
             _ => Err(CoreError::internal("未知的数据库升级步骤")),
         })?;
-        tx.pragma_update(None, "user_version", version).map_err(db_error)?;
+        tx.pragma_update(None, "user_version", version)
+            .map_err(db_error)?;
         tx.commit().map_err(db_error)?;
-        connection.pragma_update(None, "journal_mode", "WAL").map_err(db_error)?;
-        connection.pragma_update(None, "synchronous", "FULL").map_err(db_error)?;
-        Ok(Self { connection: Mutex::new(connection) })
+        connection
+            .pragma_update(None, "journal_mode", "WAL")
+            .map_err(db_error)?;
+        connection
+            .pragma_update(None, "synchronous", "FULL")
+            .map_err(db_error)?;
+        Ok(Self {
+            connection: Mutex::new(connection),
+        })
     }
 
     pub fn in_memory() -> Result<Self, CoreError> {
         let connection = Connection::open_in_memory().map_err(db_error)?;
         connection.execute_batch(INITIAL_SCHEMA).map_err(db_error)?;
-        Ok(Self { connection: Mutex::new(connection) })
+        Ok(Self {
+            connection: Mutex::new(connection),
+        })
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Connection>, CoreError> {
-        self.connection.lock().map_err(|_| CoreError::internal("数据库锁不可用"))
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("数据库锁不可用"))
     }
 }
 
@@ -311,7 +439,11 @@ impl OperationStore for SqliteOperationStore {
     }
 
     fn get(&self, operation_id: &str) -> Result<Option<OperationState>, CoreError> {
-        one(&*self.lock()?, "SELECT payload FROM operations WHERE id=?1", operation_id)
+        one(
+            &*self.lock()?,
+            "SELECT payload FROM operations WHERE id=?1",
+            operation_id,
+        )
     }
 
     fn find_by_plan(&self, plan_id: &str) -> Result<Option<OperationState>, CoreError> {
@@ -323,7 +455,11 @@ impl OperationStore for SqliteOperationStore {
     }
 
     fn list(&self) -> Result<Vec<OperationState>, CoreError> {
-        list(&*self.lock()?, "SELECT payload FROM operations ORDER BY rowid", [])
+        list(
+            &*self.lock()?,
+            "SELECT payload FROM operations ORDER BY rowid",
+            [],
+        )
     }
 
     fn unfinished(&self) -> Result<Vec<OperationState>, CoreError> {
@@ -342,10 +478,17 @@ impl OperationStore for SqliteOperationStore {
         )?;
         Ok(states
             .iter()
-            .filter(|state| state.operation.written_hash.is_some() && matches!(state.operation.stage,
-                crate::codex::plan::ApplyStage::AwaitingReload | crate::codex::plan::ApplyStage::Pending
-                | crate::codex::plan::ApplyStage::Verified | crate::codex::plan::ApplyStage::Restored))
-            .last()
+            .filter(|state| {
+                state.operation.written_hash.is_some()
+                    && matches!(
+                        state.operation.stage,
+                        crate::codex::plan::ApplyStage::AwaitingReload
+                            | crate::codex::plan::ApplyStage::Pending
+                            | crate::codex::plan::ApplyStage::Verified
+                            | crate::codex::plan::ApplyStage::Restored
+                    )
+            })
+            .next_back()
             .map(|state| state.ownership.clone())
             .unwrap_or_default())
     }

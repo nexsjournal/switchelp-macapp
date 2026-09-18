@@ -9,13 +9,18 @@ pub struct SystemVault {
 impl SystemVault {
     pub fn new(service: impl Into<String>) -> Result<Self, CoreError> {
         let service = service.into();
-        if service.trim().is_empty() { return Err(CoreError::validation("凭据服务名不能为空")); }
+        if service.trim().is_empty() {
+            return Err(CoreError::validation("凭据服务名不能为空"));
+        }
         Ok(Self { service })
     }
 
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     fn entry(&self, reference: &str) -> Result<keyring::Entry, CoreError> {
-        if !reference.starts_with("gptswitch/") || reference.len() > 512 || reference.chars().any(char::is_control) {
+        if !reference.starts_with("gptswitch/")
+            || reference.len() > 512
+            || reference.chars().any(char::is_control)
+        {
             return Err(CoreError::validation("凭据引用无效"));
         }
         keyring::Entry::new(&self.service, reference).map_err(vault_error)
@@ -33,8 +38,12 @@ fn vault_error(_: keyring::Error) -> CoreError {
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 impl SecretVault for SystemVault {
     fn store(&self, reference: &str, secret: &str) -> Result<(), CoreError> {
-        if secret.trim().is_empty() || secret.len() > 4096 { return Err(CoreError::validation("API Key 为空或过长")); }
-        self.entry(reference)?.set_password(secret).map_err(vault_error)
+        if secret.trim().is_empty() || secret.len() > 4096 {
+            return Err(CoreError::validation("API Key 为空或过长"));
+        }
+        self.entry(reference)?
+            .set_password(secret)
+            .map_err(vault_error)
     }
     fn load(&self, reference: &str) -> Result<Option<String>, CoreError> {
         match self.entry(reference)?.get_password() {
@@ -58,10 +67,18 @@ impl SecretVault for SystemVault {
 // keyring 在未启用原生后端的平台会退回 mock；这里显式失败，避免报告假保存。
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 impl SecretVault for SystemVault {
-    fn store(&self, _: &str, _: &str) -> Result<(), CoreError> { Err(unsupported()) }
-    fn load(&self, _: &str) -> Result<Option<String>, CoreError> { Err(unsupported()) }
-    fn delete(&self, _: &str) -> Result<(), CoreError> { Err(unsupported()) }
-    fn exists(&self, _: &str) -> Result<bool, CoreError> { Err(unsupported()) }
+    fn store(&self, _: &str, _: &str) -> Result<(), CoreError> {
+        Err(unsupported())
+    }
+    fn load(&self, _: &str) -> Result<Option<String>, CoreError> {
+        Err(unsupported())
+    }
+    fn delete(&self, _: &str) -> Result<(), CoreError> {
+        Err(unsupported())
+    }
+    fn exists(&self, _: &str) -> Result<bool, CoreError> {
+        Err(unsupported())
+    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]

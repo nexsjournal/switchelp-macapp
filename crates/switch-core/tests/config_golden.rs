@@ -35,7 +35,10 @@ fn managed() -> ManagedConfig {
     ManagedConfig {
         model: Some("gs/p_a/m_1".to_owned()),
         model_provider: Some("gptswitch".to_owned()),
-        model_catalog_json: Some("/Users/example/Library/Application Support/Switchelp/catalogs/rev_0007/models.json".to_owned()),
+        model_catalog_json: Some(
+            "/Users/example/Library/Application Support/Switchelp/catalogs/rev_0007/models.json"
+                .to_owned(),
+        ),
         provider: Some(gateway_provider()),
         model_context_window: None,
         model_reasoning_effort: None,
@@ -96,7 +99,10 @@ fn preserves_quoted_keys() {
     let (text, _) = apply_managed(&snapshot, &managed(), &[]).unwrap();
     // quoted key 语义仍可读回；写入后不产生重复键。
     let reparsed = ConfigSnapshot::parse(fixture("quoted-keys.toml"), &text).unwrap();
-    assert_eq!(reparsed.managed_value("model").as_deref(), Some("gs/p_a/m_1"));
+    assert_eq!(
+        reparsed.managed_value("model").as_deref(),
+        Some("gs/p_a/m_1")
+    );
 }
 
 #[test]
@@ -124,10 +130,14 @@ fn missing_keys_are_recorded_as_absent_baseline() {
         .expect("应记录 model_provider 所有权");
     assert!(!provider_record.baseline_presence);
     assert_eq!(provider_record.baseline_value, None);
-    assert_eq!(provider_record.last_written_value.as_deref(), Some("gptswitch"));
+    assert_eq!(
+        provider_record.last_written_value.as_deref(),
+        Some("gptswitch")
+    );
 
     // 应用后还原：原本不存在的键应被删除，而不是写成空值。
-    let applied = ConfigSnapshot::parse(fixture("missing-keys.toml"), &apply(&snapshot, &ownership)).unwrap();
+    let applied =
+        ConfigSnapshot::parse(fixture("missing-keys.toml"), &apply(&snapshot, &ownership)).unwrap();
     let outcomes = plan_restore(&applied, &ownership);
     let model_provider = outcomes
         .iter()
@@ -150,25 +160,46 @@ fn missing_keys_are_recorded_as_absent_baseline() {
 #[test]
 fn restore_writes_an_existing_gateway_provider_back_as_a_table() {
     let snapshot = load("existing-gateway-provider.toml");
-    assert!(snapshot.read_provider().is_some(), "fixture 的基线 provider 必须可读");
+    assert!(
+        snapshot.read_provider().is_some(),
+        "fixture 的基线 provider 必须可读"
+    );
 
     let (applied_text, ownership) = apply_managed(&snapshot, &managed(), &[]).unwrap();
-    let applied = ConfigSnapshot::parse(fixture("existing-gateway-provider.toml"), &applied_text).unwrap();
+    let applied =
+        ConfigSnapshot::parse(fixture("existing-gateway-provider.toml"), &applied_text).unwrap();
     // 接管后 base_url 指向新目录版本。
-    assert!(applied.read_provider().unwrap().base_url.contains("rev_0007"));
+    assert!(applied
+        .read_provider()
+        .unwrap()
+        .base_url
+        .contains("rev_0007"));
 
     let outcomes = plan_restore(&applied, &ownership);
-    let provider = outcomes.iter().find(|o| o.key_path() == "model_providers.gptswitch").unwrap();
-    assert!(matches!(provider, RestoreOutcome::Restore { .. }), "本次应可安全恢复基线：{provider:?}");
+    let provider = outcomes
+        .iter()
+        .find(|o| o.key_path() == "model_providers.gptswitch")
+        .unwrap();
+    assert!(
+        matches!(provider, RestoreOutcome::Restore { .. }),
+        "本次应可安全恢复基线：{provider:?}"
+    );
 
     let (restored, _) = execute_restore(&applied, &ownership).unwrap();
     assert!(
         !restored.contains("\"model_providers.gptswitch\""),
         "不得写入字面点号键：\n{restored}"
     );
-    let reparsed = ConfigSnapshot::parse(fixture("existing-gateway-provider.toml"), &restored).unwrap();
-    let provider = reparsed.read_provider().expect("还原后 provider 子表必须仍然可读");
-    assert!(provider.base_url.contains("rev_0006"), "应回到基线版本：{}", provider.base_url);
+    let reparsed =
+        ConfigSnapshot::parse(fixture("existing-gateway-provider.toml"), &restored).unwrap();
+    let provider = reparsed
+        .read_provider()
+        .expect("还原后 provider 子表必须仍然可读");
+    assert!(
+        provider.base_url.contains("rev_0006"),
+        "应回到基线版本：{}",
+        provider.base_url
+    );
     // 无关内容保留。
     assert!(restored.contains("[mcp_servers.docs]"));
 }
@@ -188,14 +219,11 @@ fn writes_provider_when_model_providers_is_an_inline_table() {
     // 用户原有的内联表内容不能被吞掉。
     assert!(text.contains("other-tool"));
     assert!(text.contains("Other Manager"));
-    assert_eq!(
-        ownership
-            .iter()
-            .find(|o| o.key_path == "model_providers.gptswitch")
-            .and_then(|o| o.last_written_value.clone())
-            .is_some(),
-        true
-    );
+    assert!(ownership
+        .iter()
+        .find(|o| o.key_path == "model_providers.gptswitch")
+        .and_then(|o| o.last_written_value.clone())
+        .is_some());
 }
 
 /// 回归：`model_context_window` 是整数受管字段，写成字符串宿主读不出来。
@@ -205,8 +233,14 @@ fn context_window_is_written_as_an_integer() {
     let mut config = managed();
     config.model_context_window = Some(128_000);
     let (text, _) = apply_managed(&snapshot, &config, &[]).unwrap();
-    assert!(text.contains("model_context_window = 128000"), "必须是整数：\n{text}");
-    assert!(!text.contains("model_context_window = \"128000\""), "不能写成字符串");
+    assert!(
+        text.contains("model_context_window = 128000"),
+        "必须是整数：\n{text}"
+    );
+    assert!(
+        !text.contains("model_context_window = \"128000\""),
+        "不能写成字符串"
+    );
 }
 
 /// 回归：用户把整数写成 `128_000` 时，写法差异不能被当成「外部已修改」。
@@ -220,7 +254,10 @@ fn integer_notation_is_not_an_external_change() {
     let applied = ConfigSnapshot::parse(fixture("missing-keys.toml"), &applied_text).unwrap();
 
     let outcomes = plan_restore(&applied, &ownership);
-    let window = outcomes.iter().find(|o| o.key_path() == "model_context_window").unwrap();
+    let window = outcomes
+        .iter()
+        .find(|o| o.key_path() == "model_context_window")
+        .unwrap();
     assert!(
         !window.is_conflict(),
         "数值相同、写法不同不应判成冲突：{window:?}"
@@ -253,7 +290,8 @@ fn restore_detects_external_modification_and_keeps_current_value() {
     let (applied_text, ownership) = apply_managed(&snapshot, &managed(), &[]).unwrap();
 
     // 模拟外部工具在本工具写入后又改了默认模型。
-    let externally_edited = applied_text.replace("model = \"gs/p_a/m_1\"", "model = \"external-model\"");
+    let externally_edited =
+        applied_text.replace("model = \"gs/p_a/m_1\"", "model = \"external-model\"");
     let current = ConfigSnapshot::parse(fixture("commented.toml"), &externally_edited).unwrap();
 
     let outcomes = plan_restore(&current, &ownership);
@@ -261,7 +299,10 @@ fn restore_detects_external_modification_and_keeps_current_value() {
     assert!(model.is_conflict(), "外部改动必须进入冲突而不是被覆盖");
 
     let (restored, _) = execute_restore(&current, &ownership).unwrap();
-    assert!(restored.contains("model = \"external-model\""), "冲突字段保留当前值");
+    assert!(
+        restored.contains("model = \"external-model\""),
+        "冲突字段保留当前值"
+    );
     // 未被外部改动的字段仍可安全恢复。
     assert!(!restored.contains("[model_providers.gptswitch]"));
 }
@@ -298,8 +339,14 @@ fn diff_reports_field_level_changes_with_reasons() {
 fn redacted_preview_masks_secret_bearing_fields() {
     let snapshot = load("secret-bearing.toml");
     let preview = snapshot.redacted_preview();
-    assert!(!preview.contains("sk-legacy-canary-0123456789"), "env_key 必须脱敏");
-    assert!(!preview.contains("sk-mcp-canary-abcdefghij"), "args 中的 canary 不能被导出");
+    assert!(
+        !preview.contains("sk-legacy-canary-0123456789"),
+        "env_key 必须脱敏"
+    );
+    assert!(
+        !preview.contains("sk-mcp-canary-abcdefghij"),
+        "args 中的 canary 不能被导出"
+    );
     assert!(preview.contains("••••••••"));
     // 非秘密字段仍然可读，便于用户核对。
     assert!(preview.contains("https://legacy.example.com/v1"));
@@ -409,7 +456,10 @@ fn ownership_records_do_not_store_secrets_verbatim() {
     assert_eq!(text, snapshot.to_text());
     assert!(ownership.is_empty());
 
-    let explicit = vec![FieldOwnership::new("model", snapshot.managed_value("model"))];
+    let explicit = vec![FieldOwnership::new(
+        "model",
+        snapshot.managed_value("model"),
+    )];
     let (_, ownership) = apply_managed(&snapshot, &config, &explicit).unwrap();
     assert!(ownership
         .iter()

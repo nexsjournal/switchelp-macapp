@@ -34,8 +34,7 @@ where
 {
     if current > CURRENT_SCHEMA_VERSION {
         return Err(CoreError::internal(format!(
-            "元数据库版本 {} 高于本应用支持的 {}，拒绝降级读取",
-            current, CURRENT_SCHEMA_VERSION
+            "元数据库版本 {current} 高于本应用支持的 {CURRENT_SCHEMA_VERSION}，拒绝降级读取"
         )));
     }
 
@@ -50,8 +49,7 @@ where
 
     if version != CURRENT_SCHEMA_VERSION {
         return Err(CoreError::internal(format!(
-            "migration 后版本为 {}，期望 {}",
-            version, CURRENT_SCHEMA_VERSION
+            "migration 后版本为 {version}，期望 {CURRENT_SCHEMA_VERSION}"
         )));
     }
     Ok(version)

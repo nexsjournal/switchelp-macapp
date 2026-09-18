@@ -73,7 +73,9 @@ impl CatalogAlias {
             return Err(super::error::CoreError::validation("alias 不能为空"));
         }
         if trimmed.len() > 128 {
-            return Err(super::error::CoreError::validation("alias 不能超过 128 字符"));
+            return Err(super::error::CoreError::validation(
+                "alias 不能超过 128 字符",
+            ));
         }
         if !trimmed.starts_with("gs/") {
             return Err(super::error::CoreError::validation("alias 必须以 gs/ 开头"));
@@ -92,7 +94,9 @@ impl CatalogAlias {
             }
         }
         if trimmed.contains('@') || trimmed.contains("://") {
-            return Err(super::error::CoreError::validation("alias 不能包含邮箱或 URL"));
+            return Err(super::error::CoreError::validation(
+                "alias 不能包含邮箱或 URL",
+            ));
         }
         Ok(Self(trimmed.to_owned()))
     }
@@ -125,7 +129,7 @@ fn sanitize_segment(value: &str) -> String {
         }
     }
     if out.is_empty() {
-        out.push_str("x");
+        out.push('x');
     }
     out
 }
@@ -161,7 +165,10 @@ mod tests {
         let alias = CatalogAlias::from_parts("供应商 A", "Model/X").unwrap();
         assert!(alias.as_str().starts_with("gs/"));
         // 大小写与分隔符归一，重复调用结果一致。
-        assert_eq!(alias, CatalogAlias::from_parts("供应商 A", "Model/X").unwrap());
+        assert_eq!(
+            alias,
+            CatalogAlias::from_parts("供应商 A", "Model/X").unwrap()
+        );
         assert!(!alias.as_str().contains('A'));
     }
 }

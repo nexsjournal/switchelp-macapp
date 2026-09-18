@@ -16,18 +16,21 @@ use serde_json::{json, Value};
 use switch_core::{
     application::{ModelDraft, ProviderDraft, WorkspaceService},
     credentials::MemoryVault,
+    diagnostics::{DiagnosticLog, LogLevel},
     domain::{
         ids::{InstanceId, RevisionId},
         model::ModelPolicy,
         provider::{AuthKind, Protocol},
         tokens::TokenCount,
     },
-    diagnostics::{DiagnosticLog, LogLevel},
     gateway::{
         Gateway, GatewayConfig, GatewayRouter, GatewayToken, TimeoutPolicy, MAX_REQUEST_BYTES,
     },
     protocols::{CHAT_COMPLETIONS_V1, RESPONSES_V1},
-    storage::{snapshot::{RouteEntry, RouteSnapshot}, Repository, SqliteRepository},
+    storage::{
+        snapshot::{RouteEntry, RouteSnapshot},
+        Repository, SqliteRepository,
+    },
 };
 
 const SECRET: &str = "synthetic-upstream-key-0123456789";
@@ -57,9 +60,10 @@ impl MockUpstream {
                 let sink = sink.clone();
                 let reply = match &reply {
                     MockReply::Sse(body) => MockReply::Sse(body),
-                    MockReply::Status { code, body } => {
-                        MockReply::Status { code: *code, body: body.clone() }
-                    }
+                    MockReply::Status { code, body } => MockReply::Status {
+                        code: *code,
+                        body: body.clone(),
+                    },
                 };
                 std::thread::spawn(move || {
                     let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -72,7 +76,9 @@ impl MockUpstream {
                         if line == "\r\n" || line == "\n" {
                             break;
                         }
-                        if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        if let Some(value) =
+                            line.to_ascii_lowercase().strip_prefix("content-length:")
+                        {
                             length = value.trim().parse().unwrap_or(0);
                         }
                     }
@@ -80,7 +86,9 @@ impl MockUpstream {
                     if length > 0 {
                         let _ = reader.read_exact(&mut body);
                     }
-                    sink.lock().unwrap().push(String::from_utf8_lossy(&body).into_owned());
+                    sink.lock()
+                        .unwrap()
+                        .push(String::from_utf8_lossy(&body).into_owned());
 
                     let mut stream = stream;
                     let response = match reply {
@@ -97,7 +105,10 @@ impl MockUpstream {
                 });
             }
         });
-        Self { endpoint: format!("http://127.0.0.1:{port}/v1"), received }
+        Self {
+            endpoint: format!("http://127.0.0.1:{port}/v1"),
+            received,
+        }
     }
 
     fn requests(&self) -> usize {
@@ -129,7 +140,10 @@ struct TestPolicy {
 
 impl TestPolicy {
     fn declaring(modalities: &[&str]) -> Self {
-        Self{ native_modalities: modalities.iter().map(|value| (*value).to_owned()).collect(), ..Self::default() }
+        Self {
+            native_modalities: modalities.iter().map(|value| (*value).to_owned()).collect(),
+            ..Self::default()
+        }
     }
 }
 
@@ -170,9 +184,11 @@ impl Harness {
         workspace
             .select_credential(provider.id.as_str(), credential.id.as_str())
             .unwrap();
-        let mut policy = ModelPolicy::default();
-        policy.context_limit = Some(TokenCount::new(128_000).unwrap());
-        policy.output_limit = Some(TokenCount::new(8_192).unwrap());
+        let policy = ModelPolicy {
+            context_limit: Some(TokenCount::new(128_000).unwrap()),
+            output_limit: Some(TokenCount::new(8_192).unwrap()),
+            ..Default::default()
+        };
         let model = workspace
             .save_model(
                 ModelDraft {
@@ -202,7 +218,8 @@ impl Harness {
                         model_id: model.id.clone(),
                         upstream_id: model.upstream_id.clone(),
                         credential_id: credential.id.clone(),
-                        credential_version: credential.secret_version + route_policy.credential_version_offset,
+                        credential_version: credential.secret_version
+                            + route_policy.credential_version_offset,
                         protocol_id: protocol_id.to_owned(),
                         output_limit: route_policy.output_limit,
                         reasoning_efforts: route_policy.reasoning_efforts.clone(),
@@ -239,7 +256,10 @@ impl Harness {
     }
 
     fn url(&self, suffix: &str) -> String {
-        format!("http://127.0.0.1:{}/i/{INSTANCE}/c/{REVISION}/v1/{suffix}", self.port)
+        format!(
+            "http://127.0.0.1:{}/i/{INSTANCE}/c/{REVISION}/v1/{suffix}",
+            self.port
+        )
     }
 
     fn post(&self, suffix: &str, token: Option<&str>, body: &Value) -> (u16, String) {
@@ -290,7 +310,11 @@ const RESPONSES_SSE: &str = concat!(
 
 #[test]
 fn missing_or_wrong_token_is_rejected() {
-    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+    );
     let body = request_body("whatever");
 
     let (status, text) = harness.post("responses", None, &body);
@@ -304,19 +328,30 @@ fn missing_or_wrong_token_is_rejected() {
 
 #[test]
 fn unknown_alias_is_rejected_without_reaching_the_upstream() {
-    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+    );
     let token = harness.token.expose().to_owned();
 
     let (status, text) = harness.post("responses", Some(&token), &request_body("gs/not-published"));
 
     assert_eq!(status, 404);
-    assert!(text.contains("ROUTE_MISMATCH"), "必须给出路由不匹配而不是通用错误：{text}");
+    assert!(
+        text.contains("ROUTE_MISMATCH"),
+        "必须给出路由不匹配而不是通用错误：{text}"
+    );
     assert_eq!(harness.upstream.requests(), 0);
 }
 
 #[test]
 fn unknown_catalog_revision_is_rejected() {
-    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+    );
     let token = harness.token.expose().to_owned();
     let url = format!(
         "http://127.0.0.1:{}/i/{INSTANCE}/c/rev_missing/v1/responses",
@@ -332,12 +367,20 @@ fn unknown_catalog_revision_is_rejected() {
         .send(request_body("x").to_string().as_bytes())
         .unwrap();
 
-    assert_eq!(response.status().as_u16(), 404, "未发布的目录版本不能回落到最新");
+    assert_eq!(
+        response.status().as_u16(),
+        404,
+        "未发布的目录版本不能回落到最新"
+    );
 }
 
 #[test]
 fn chat_upstream_is_translated_into_responses_events() {
-    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+    );
     let token = harness.token.expose().to_owned();
 
     let (status, text) = harness.post("responses", Some(&token), &harness.request_body());
@@ -356,9 +399,15 @@ fn chat_upstream_is_translated_into_responses_events() {
     }
     assert!(text.contains("你好"), "增量文本必须转发");
     assert!(text.contains("世界"));
-    assert!(text.contains("\"total_tokens\":9"), "用量必须翻译成 Responses 形状：{text}");
+    assert!(
+        text.contains("\"total_tokens\":9"),
+        "用量必须翻译成 Responses 形状：{text}"
+    );
     assert!(text.contains(&harness.alias), "响应身份必须是 alias");
-    assert!(!text.contains("vendor/Upstream-Model"), "上游模型 ID 不得泄漏给宿主");
+    assert!(
+        !text.contains("vendor/Upstream-Model"),
+        "上游模型 ID 不得泄漏给宿主"
+    );
 
     let upstream_body = harness.upstream.last_body();
     assert_eq!(upstream_body["model"], "vendor/Upstream-Model");
@@ -389,19 +438,29 @@ fn mid_stream_error_frame_is_surfaced_instead_of_reported_as_completed() {
     let (status, text) = harness.post("responses", Some(&token), &harness.request_body());
 
     assert_eq!(status, 200, "响应头早已发出，只能用事件收尾");
-    assert!(text.contains("event: error"), "必须给出明确的终止事件：\n{text}");
+    assert!(
+        text.contains("event: error"),
+        "必须给出明确的终止事件：\n{text}"
+    );
     assert!(
         !text.contains("response.completed"),
         "不得把截断伪装成完整回复：\n{text}"
     );
-    assert!(text.contains("rate_limit_exceeded"), "错误原因要可读：\n{text}");
+    assert!(
+        text.contains("rate_limit_exceeded"),
+        "错误原因要可读：\n{text}"
+    );
     // 上游地址里的 Key 不得出现在外发内容里。
     assert!(!text.contains(SECRET), "错误详情不得泄漏上游 Key");
 }
 
 #[test]
 fn responses_upstream_passes_through_and_hides_the_upstream_id() {
-    let harness = Harness::start(RESPONSES_V1, MockReply::Sse(RESPONSES_SSE), Protocol::Responses);
+    let harness = Harness::start(
+        RESPONSES_V1,
+        MockReply::Sse(RESPONSES_SSE),
+        Protocol::Responses,
+    );
     let token = harness.token.expose().to_owned();
 
     let (status, text) = harness.post("responses", Some(&token), &harness.request_body());
@@ -433,9 +492,18 @@ fn upstream_error_body_never_leaks_the_upstream_key() {
     let (status, text) = harness.post("responses", Some(&token), &harness.request_body());
 
     assert_eq!(status, 500, "上游 5xx 映射为内部错误");
-    assert!(!text.contains(SECRET), "上游错误正文里的 Key 必须被抹掉：{text}");
-    assert!(text.contains("redacted"), "应留下脱敏痕迹，便于排查：{text}");
-    assert!(text.contains("INTERNAL"), "5xx 归类为可重试的内部错误：{text}");
+    assert!(
+        !text.contains(SECRET),
+        "上游错误正文里的 Key 必须被抹掉：{text}"
+    );
+    assert!(
+        text.contains("redacted"),
+        "应留下脱敏痕迹，便于排查：{text}"
+    );
+    assert!(
+        text.contains("INTERNAL"),
+        "5xx 归类为可重试的内部错误：{text}"
+    );
     assert!(
         text.contains("error.upstreamFailed"),
         "必须保留“失败来自上游”这一区分：{text}"
@@ -446,7 +514,10 @@ fn upstream_error_body_never_leaks_the_upstream_key() {
 fn upstream_permission_error_is_classified() {
     let harness = Harness::start(
         CHAT_COMPLETIONS_V1,
-        MockReply::Status { code: 401, body: "{\"error\":{\"message\":\"no permission\"}}".to_owned() },
+        MockReply::Status {
+            code: 401,
+            body: "{\"error\":{\"message\":\"no permission\"}}".to_owned(),
+        },
         Protocol::ChatCompletions,
     );
     let token = harness.token.expose().to_owned();
@@ -459,7 +530,11 @@ fn upstream_permission_error_is_classified() {
 
 #[test]
 fn models_endpoint_lists_only_the_published_revision() {
-    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+    );
     let token = harness.token.expose().to_owned();
 
     let response = ureq::Agent::config_builder()
@@ -478,7 +553,11 @@ fn models_endpoint_lists_only_the_published_revision() {
 
 #[test]
 fn health_requires_the_token_too() {
-    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+    );
     let response = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .build()
@@ -491,18 +570,29 @@ fn health_requires_the_token_too() {
 
 #[test]
 fn realtime_path_reports_unsupported_instead_of_hanging() {
-    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+    );
     let token = harness.token.expose().to_owned();
 
     let (status, text) = harness.post("realtime", Some(&token), &json!({}));
 
     assert_eq!(status, 400);
-    assert!(text.contains("CAPABILITY_UNSUPPORTED"), "必须显式告知不支持：{text}");
+    assert!(
+        text.contains("CAPABILITY_UNSUPPORTED"),
+        "必须显式告知不支持：{text}"
+    );
 }
 
 #[test]
 fn oversized_body_is_rejected_before_reading_it_all() {
-    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+    );
     let token = harness.token.expose().to_owned();
     let declared = MAX_REQUEST_BYTES + 1;
 
@@ -514,13 +604,20 @@ fn oversized_body_is_rejected_before_reading_it_all() {
     let mut response = String::new();
     let _ = stream.read_to_string(&mut response);
 
-    assert!(response.starts_with("HTTP/1.1 413"), "应返回 413：{response}");
+    assert!(
+        response.starts_with("HTTP/1.1 413"),
+        "应返回 413：{response}"
+    );
     assert!(response.contains("REQUEST_TOO_LARGE"));
 }
 
 #[test]
 fn chunked_request_bodies_are_refused_with_a_clear_error() {
-    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+    );
     let token = harness.token.expose().to_owned();
 
     let mut stream = TcpStream::connect(("127.0.0.1", harness.port)).unwrap();
@@ -531,7 +628,10 @@ fn chunked_request_bodies_are_refused_with_a_clear_error() {
     let mut response = String::new();
     let _ = stream.read_to_string(&mut response);
 
-    assert!(response.starts_with("HTTP/1.1 400"), "应返回 400：{response}");
+    assert!(
+        response.starts_with("HTTP/1.1 400"),
+        "应返回 400：{response}"
+    );
     assert!(response.contains("Content-Length"));
 }
 
@@ -542,7 +642,10 @@ fn credential_version_change_blocks_the_request() {
         CHAT_COMPLETIONS_V1,
         MockReply::Sse(CHAT_SSE),
         Protocol::ChatCompletions,
-        TestPolicy { credential_version_offset: 1, ..TestPolicy::default() },
+        TestPolicy {
+            credential_version_offset: 1,
+            ..TestPolicy::default()
+        },
     );
     let token = harness.token.expose().to_owned();
 
@@ -555,7 +658,11 @@ fn credential_version_change_blocks_the_request() {
 
 #[test]
 fn binding_reports_the_actual_port_and_status_reflects_it() {
-    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+    );
     let status = harness.gateway.status();
 
     assert!(status.running);
@@ -567,7 +674,11 @@ fn binding_reports_the_actual_port_and_status_reflects_it() {
 /// 网关必须把每次推理的结论写进诊断日志，否则界面无从定位失败。
 #[test]
 fn the_gateway_records_diagnostics_for_success_and_rejection() {
-    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+    );
     let token = harness.token.expose().to_owned();
     let log = harness.gateway.diagnostics();
 
@@ -576,7 +687,10 @@ fn the_gateway_records_diagnostics_for_success_and_rejection() {
     assert_eq!(status, 401);
 
     let events = log.list(None);
-    let results: Vec<&str> = events.iter().map(|event| event.result_key.as_str()).collect();
+    let results: Vec<&str> = events
+        .iter()
+        .map(|event| event.result_key.as_str())
+        .collect();
     assert!(
         results.contains(&"result.upstreamAccepted"),
         "成功请求必须留痕：{results:?}"
@@ -616,7 +730,10 @@ fn an_undeclared_modality_is_rejected_before_reaching_the_upstream() {
 
     assert_eq!(status, 400);
     assert!(text.contains("CAPABILITY_UNSUPPORTED"), "{text}");
-    assert!(text.contains("未声明"), "错误详情要说明是未声明模态：{text}");
+    assert!(
+        text.contains("未声明"),
+        "错误详情要说明是未声明模态：{text}"
+    );
     assert_eq!(harness.upstream.requests(), 0, "拒绝必须发生在上游调用之前");
     assert!(
         harness
@@ -650,7 +767,10 @@ fn a_declared_modality_is_forwarded() {
     assert_eq!(status, 200);
     assert_eq!(harness.upstream.requests(), 1);
     let upstream_body = harness.upstream.last_body();
-    assert_eq!(upstream_body["messages"][1]["content"][1]["type"], "image_url");
+    assert_eq!(
+        upstream_body["messages"][1]["content"][1]["type"],
+        "image_url"
+    );
 }
 
 /// GW-05：模型声明的输出上限必须落到真实的上游请求参数上。
@@ -660,7 +780,10 @@ fn the_declared_output_limit_reaches_the_upstream_request() {
         CHAT_COMPLETIONS_V1,
         MockReply::Sse(CHAT_SSE),
         Protocol::ChatCompletions,
-        TestPolicy { output_limit: Some(2_048), ..TestPolicy::default() },
+        TestPolicy {
+            output_limit: Some(2_048),
+            ..TestPolicy::default()
+        },
     );
     let token = harness.token.expose().to_owned();
     let mut body = harness.request_body();
@@ -690,7 +813,11 @@ fn a_client_disconnect_stops_the_upstream_stream() {
     sse.push_str("data: [DONE]\n\n");
     let leaked: &'static str = Box::leak(sse.into_boxed_str());
 
-    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(leaked), Protocol::ChatCompletions);
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(leaked),
+        Protocol::ChatCompletions,
+    );
     let token = harness.token.expose().to_owned();
 
     let mut stream = TcpStream::connect(("127.0.0.1", harness.port)).unwrap();
@@ -739,7 +866,11 @@ fn a_client_disconnect_stops_the_upstream_stream() {
 /// 暂停只拦新请求：在途请求不受影响，新请求得到明确的 503 而不是等待超时。
 #[test]
 fn pausing_the_gateway_rejects_new_requests_without_affecting_in_flight_ones() {
-    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+    );
     let token = harness.token.expose().to_owned();
 
     let (status, _) = harness.post("responses", Some(&token), &harness.request_body());
@@ -750,7 +881,10 @@ fn pausing_the_gateway_rejects_new_requests_without_affecting_in_flight_ones() {
     assert!(harness.gateway.status().paused);
     let (status, text) = harness.post("responses", Some(&token), &harness.request_body());
     assert_eq!(status, 500);
-    assert!(text.contains("error.gatewayPaused"), "必须给出暂停原因：{text}");
+    assert!(
+        text.contains("error.gatewayPaused"),
+        "必须给出暂停原因：{text}"
+    );
     assert_eq!(harness.upstream.requests(), 1, "暂停时不得触达上游");
 
     harness.gateway.set_paused(false);

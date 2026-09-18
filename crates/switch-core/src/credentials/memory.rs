@@ -32,8 +32,10 @@ impl MemoryVault {
 
     fn guard(&self) -> Result<(), CoreError> {
         if *self.locked.lock().expect("锁未被污染") {
-            return Err(CoreError::new(ErrorCode::KeystoreLocked, "error.keystoreLocked")
-                .with_recovery("unlock", "action.unlockKeystore"));
+            return Err(
+                CoreError::new(ErrorCode::KeystoreLocked, "error.keystoreLocked")
+                    .with_recovery("unlock", "action.unlockKeystore"),
+            );
         }
         Ok(())
     }

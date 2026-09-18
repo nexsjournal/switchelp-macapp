@@ -18,12 +18,8 @@ pub struct BaseUrl {
 }
 
 /// 用户可能粘贴完整接口地址；这里给出建议 Base URL，而不是悄悄拼成重复路径。
-const KNOWN_ENDPOINT_SUFFIXES: [&str; 4] = [
-    "/chat/completions",
-    "/responses",
-    "/completions",
-    "/models",
-];
+const KNOWN_ENDPOINT_SUFFIXES: [&str; 4] =
+    ["/chat/completions", "/responses", "/completions", "/models"];
 
 impl BaseUrl {
     pub fn parse(input: &str) -> Result<Self, CoreError> {
@@ -80,10 +76,10 @@ impl BaseUrl {
         };
 
         let origin = match port {
-            Some(port) => format!("{}://{}:{}", scheme, host, port),
-            None => format!("{}://{}", scheme, host),
+            Some(port) => format!("{scheme}://{host}:{port}"),
+            None => format!("{scheme}://{host}"),
         };
-        let mut normalized = format!("{}{}", origin, path);
+        let mut normalized = format!("{origin}{path}");
         if let Some(query) = &query {
             normalized.push('?');
             normalized.push_str(query);
@@ -199,10 +195,16 @@ mod tests {
 
     #[test]
     fn allows_http_for_loopback_only() {
-        assert!(BaseUrl::parse("http://127.0.0.1:18765/v1").unwrap().is_loopback());
-        assert!(BaseUrl::parse("http://localhost:8080").unwrap().is_loopback());
+        assert!(BaseUrl::parse("http://127.0.0.1:18765/v1")
+            .unwrap()
+            .is_loopback());
+        assert!(BaseUrl::parse("http://localhost:8080")
+            .unwrap()
+            .is_loopback());
         assert!(BaseUrl::parse("http://[::1]:8080").unwrap().is_loopback());
-        assert!(!BaseUrl::parse("https://api.example.com").unwrap().is_loopback());
+        assert!(!BaseUrl::parse("https://api.example.com")
+            .unwrap()
+            .is_loopback());
     }
 
     #[test]
@@ -222,7 +224,10 @@ mod tests {
         let url = BaseUrl::parse("https://api.example.com/OpenAI/V1?api-version=2024").unwrap();
         assert_eq!(url.path(), "/OpenAI/V1");
         assert_eq!(url.query(), Some("api-version=2024"));
-        assert_eq!(url.normalized(), "https://api.example.com/OpenAI/V1?api-version=2024");
+        assert_eq!(
+            url.normalized(),
+            "https://api.example.com/OpenAI/V1?api-version=2024"
+        );
     }
 
     #[test]
@@ -237,13 +242,19 @@ mod tests {
     fn join_appends_endpoint_without_double_slash() {
         let url = BaseUrl::parse("https://api.example.com/v1/").unwrap();
         assert_eq!(url.join("/models"), "https://api.example.com/v1/models");
-        assert_eq!(url.join("chat/completions"), "https://api.example.com/v1/chat/completions");
+        assert_eq!(
+            url.join("chat/completions"),
+            "https://api.example.com/v1/chat/completions"
+        );
     }
 
     #[test]
     fn suggests_base_url_when_user_pastes_endpoint() {
         let url = BaseUrl::parse("https://api.example.com/v1/chat/completions").unwrap();
-        assert_eq!(url.suggest_base().as_deref(), Some("https://api.example.com/v1"));
+        assert_eq!(
+            url.suggest_base().as_deref(),
+            Some("https://api.example.com/v1")
+        );
         let url = BaseUrl::parse("https://api.example.com/v1").unwrap();
         assert_eq!(url.suggest_base(), None);
     }

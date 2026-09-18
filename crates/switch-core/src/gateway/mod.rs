@@ -28,5 +28,5 @@ pub const LOOPBACK_HOST: &str = "127.0.0.1";
 
 /// 该端口的监听来源。只有本工具自己占用的端口才允许发布。
 pub fn origin(port: u16) -> String {
-    format!("http://{}:{}", LOOPBACK_HOST, port)
+    format!("http://{LOOPBACK_HOST}:{port}")
 }

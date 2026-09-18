@@ -35,7 +35,7 @@ impl GatewayToken {
         let digest = hasher.finalize();
         let mut hex = String::with_capacity(64);
         for byte in digest {
-            hex.push_str(&format!("{:02x}", byte));
+            hex.push_str(&format!("{byte:02x}"));
         }
         Self(hex)
     }
@@ -132,8 +132,10 @@ impl RequestGuard {
     pub fn check(&self, headers: &InboundHeaders, body_len: usize) -> Result<(), CoreError> {
         let method = headers.method.trim().to_ascii_uppercase();
         if !ALLOWED_METHODS.contains(&method.as_str()) {
-            return Err(CoreError::new(ErrorCode::ValidationFailed, "error.methodNotAllowed")
-                .with_detail(format!("不支持的方法 {}", method)));
+            return Err(
+                CoreError::new(ErrorCode::ValidationFailed, "error.methodNotAllowed")
+                    .with_detail(format!("不支持的方法 {method}")),
+            );
         }
 
         // 浏览器预检一律拒绝：本工具没有 Web UI，也不开放跨域。
@@ -150,7 +152,7 @@ impl RequestGuard {
             .as_deref()
             .ok_or_else(|| unauthorized("缺少 Host"))?;
         if !is_loopback_host(host) {
-            return Err(unauthorized(format!("Host 不是本机地址：{}", host)));
+            return Err(unauthorized(format!("Host 不是本机地址：{host}")));
         }
 
         let presented = headers
@@ -165,17 +167,17 @@ impl RequestGuard {
         if body_len > MAX_REQUEST_BYTES {
             return Err(
                 CoreError::new(ErrorCode::RequestTooLarge, "error.requestTooLarge").with_detail(
-                    format!(
-                        "请求体 {} 字节超过上限 {} 字节",
-                        body_len, MAX_REQUEST_BYTES
-                    ),
+                    format!("请求体 {body_len} 字节超过上限 {MAX_REQUEST_BYTES} 字节"),
                 ),
             );
         }
 
         if method == "POST" {
             let content_type = headers.content_type.as_deref().unwrap_or_default();
-            if !content_type.to_ascii_lowercase().starts_with("application/json") {
+            if !content_type
+                .to_ascii_lowercase()
+                .starts_with("application/json")
+            {
                 return Err(CoreError::new(
                     ErrorCode::ValidationFailed,
                     "error.unsupportedContentType",
@@ -219,9 +221,7 @@ pub fn is_loopback_host(host: &str) -> bool {
         value
     } else {
         match value.rsplit_once(':') {
-            Some((head, tail))
-                if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) =>
-            {
+            Some((head, tail)) if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) => {
                 head
             }
             _ => value,
@@ -237,7 +237,6 @@ pub fn is_loopback_host(host: &str) -> bool {
 mod tests {
     use super::*;
 
-
     /// 回归：长度差曾经折进 `u8`，相差 256 的倍数时截断成 0，
     /// 「长度不同必然不等」这条性质就不成立了。
     #[test]
@@ -246,9 +245,12 @@ mod tests {
         assert!(!constant_time_eq(b"abc", b"abcd"));
         assert!(!constant_time_eq(b"", b"a"));
         let mut padded = b"abc".to_vec();
-        padded.extend(std::iter::repeat(0u8).take(256));
+        padded.extend(std::iter::repeat_n(0u8, 256));
         assert_eq!(padded.len() - 3, 256, "构造 256 字节的长度差");
-        assert!(!constant_time_eq(b"abc", &padded), "长度差 256 不能被截断成相等");
+        assert!(
+            !constant_time_eq(b"abc", &padded),
+            "长度差 256 不能被截断成相等"
+        );
     }
 
     fn guard() -> (RequestGuard, GatewayToken) {
@@ -279,7 +281,7 @@ mod tests {
     #[test]
     fn debug_never_reveals_the_token() {
         let (guard, token) = guard();
-        let rendered = format!("{:?} {:?}", token, guard);
+        let rendered = format!("{token:?} {guard:?}");
         assert!(!rendered.contains(token.expose()));
         assert!(rendered.contains("••••••••"));
     }
@@ -289,16 +291,25 @@ mod tests {
         let (guard, token) = guard();
         let mut request = headers(&token);
         request.authorization = None;
-        assert_eq!(guard.check(&request, 1).unwrap_err().code, ErrorCode::Unauthorized);
+        assert_eq!(
+            guard.check(&request, 1).unwrap_err().code,
+            ErrorCode::Unauthorized
+        );
 
         let mut request = headers(&token);
         request.authorization = Some("Bearer wrong-token".to_owned());
-        assert_eq!(guard.check(&request, 1).unwrap_err().code, ErrorCode::Unauthorized);
+        assert_eq!(
+            guard.check(&request, 1).unwrap_err().code,
+            ErrorCode::Unauthorized
+        );
 
         // 不带 Bearer 前缀也拒绝。
         let mut request = headers(&token);
         request.authorization = Some(token.expose().to_owned());
-        assert_eq!(guard.check(&request, 1).unwrap_err().code, ErrorCode::Unauthorized);
+        assert_eq!(
+            guard.check(&request, 1).unwrap_err().code,
+            ErrorCode::Unauthorized
+        );
     }
 
     #[test]
@@ -306,11 +317,17 @@ mod tests {
         let (guard, token) = guard();
         let mut request = headers(&token);
         request.origin = Some("https://evil.example.com".to_owned());
-        assert_eq!(guard.check(&request, 1).unwrap_err().code, ErrorCode::Unauthorized);
+        assert_eq!(
+            guard.check(&request, 1).unwrap_err().code,
+            ErrorCode::Unauthorized
+        );
 
         let mut request = headers(&token);
         request.access_control_request_method = Some("POST".to_owned());
-        assert_eq!(guard.check(&request, 1).unwrap_err().code, ErrorCode::Unauthorized);
+        assert_eq!(
+            guard.check(&request, 1).unwrap_err().code,
+            ErrorCode::Unauthorized
+        );
 
         let mut request = headers(&token);
         request.method = "OPTIONS".to_owned();
@@ -344,17 +361,19 @@ mod tests {
             "[::1]:8080",
             "LOCALHOST",
         ] {
-            assert!(is_loopback_host(host), "{} 应被识别为 loopback", host);
+            assert!(is_loopback_host(host), "{host} 应被识别为 loopback");
         }
         for host in ["0.0.0.0", "192.0.2.10", "api.example.com", "", "::2"] {
-            assert!(!is_loopback_host(host), "{} 不应被识别为 loopback", host);
+            assert!(!is_loopback_host(host), "{host} 不应被识别为 loopback");
         }
     }
 
     #[test]
     fn oversized_body_is_rejected_with_dedicated_code() {
         let (guard, token) = guard();
-        let error = guard.check(&headers(&token), MAX_REQUEST_BYTES + 1).unwrap_err();
+        let error = guard
+            .check(&headers(&token), MAX_REQUEST_BYTES + 1)
+            .unwrap_err();
         assert_eq!(error.code, ErrorCode::RequestTooLarge);
         assert!(guard.check(&headers(&token), MAX_REQUEST_BYTES).is_ok());
     }

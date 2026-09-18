@@ -17,7 +17,11 @@ pub trait Repository: Send + Sync {
     fn list_providers(&self) -> Result<Vec<Provider>, CoreError>;
     fn get_provider(&self, id: &ProviderId) -> Result<Option<Provider>, CoreError>;
     /// 新增或按 optimistic version 更新供应商。
-    fn save_provider(&self, provider: Provider, expected_version: u64) -> Result<Provider, CoreError>;
+    fn save_provider(
+        &self,
+        provider: Provider,
+        expected_version: u64,
+    ) -> Result<Provider, CoreError>;
     fn delete_provider(&self, id: &ProviderId) -> Result<(), CoreError>;
 
     fn list_credentials(&self, provider_id: &ProviderId) -> Result<Vec<Credential>, CoreError>;
@@ -76,15 +80,18 @@ impl InMemoryRepository {
         })
     }
 
-    fn check_alias_free(&self, alias: &CatalogAlias, owner: Option<&ModelId>) -> Result<(), CoreError> {
+    fn check_alias_free(
+        &self,
+        alias: &CatalogAlias,
+        owner: Option<&ModelId>,
+    ) -> Result<(), CoreError> {
         let aliases = self.aliases.lock().expect("锁未被污染");
         if let Some(existing) = aliases.get(alias.as_str()) {
             if Some(existing.as_str()) != owner.map(ModelId::as_str) {
-                return Err(CoreError::new(
-                    ErrorCode::ValidationFailed,
-                    "error.duplicateAlias",
-                )
-                .with_detail(format!("alias 已被占用：{}", alias)));
+                return Err(
+                    CoreError::new(ErrorCode::ValidationFailed, "error.duplicateAlias")
+                        .with_detail(format!("alias 已被占用：{alias}")),
+                );
             }
         }
         Ok(())
@@ -140,7 +147,11 @@ impl Repository for InMemoryRepository {
             .cloned())
     }
 
-    fn save_provider(&self, mut provider: Provider, expected_version: u64) -> Result<Provider, CoreError> {
+    fn save_provider(
+        &self,
+        mut provider: Provider,
+        expected_version: u64,
+    ) -> Result<Provider, CoreError> {
         provider.validate()?;
         let mut providers = self.providers.lock().expect("锁未被污染");
         match providers.get(provider.id.as_str()) {
@@ -164,10 +175,12 @@ impl Repository for InMemoryRepository {
     fn delete_provider(&self, id: &ProviderId) -> Result<(), CoreError> {
         let references = self.reference_count(id)?;
         if references.blocks_hard_delete() {
-            return Err(CoreError::conflict("error.providerInUse").with_detail(format!(
-                "该供应商仍被 {} 个模型、{} 个 Key 引用",
-                references.models, references.credentials
-            )));
+            return Err(
+                CoreError::conflict("error.providerInUse").with_detail(format!(
+                    "该供应商仍被 {} 个模型、{} 个 Key 引用",
+                    references.models, references.credentials
+                )),
+            );
         }
         self.providers
             .lock()
@@ -344,7 +357,10 @@ mod tests {
         draft.name = "Alpha 2".to_owned();
         let updated = repo.save_provider(draft.clone(), 1).unwrap();
         assert_eq!(updated.version, 2);
-        assert_eq!(updated.created_at, saved.created_at, "created_at 不应被更新覆盖");
+        assert_eq!(
+            updated.created_at, saved.created_at,
+            "created_at 不应被更新覆盖"
+        );
 
         // 用过期版本再写必须冲突。
         let error = repo.save_provider(draft, 1).unwrap_err();
@@ -435,7 +451,9 @@ mod tests {
     #[test]
     fn credential_requires_existing_provider() {
         let repo = InMemoryRepository::new();
-        let error = repo.save_credential(credential("c_1", "p_missing")).unwrap_err();
+        let error = repo
+            .save_credential(credential("c_1", "p_missing"))
+            .unwrap_err();
         assert_eq!(error.code, ErrorCode::NotFound);
 
         repo.save_provider(provider("p_a", "A"), 0).unwrap();
@@ -446,7 +464,9 @@ mod tests {
     fn deleting_missing_entities_is_reported_not_silent() {
         let repo = InMemoryRepository::new();
         assert_eq!(
-            repo.delete_credential(&CredentialId::new("c_x")).unwrap_err().code,
+            repo.delete_credential(&CredentialId::new("c_x"))
+                .unwrap_err()
+                .code,
             ErrorCode::NotFound
         );
         assert_eq!(
@@ -454,7 +474,9 @@ mod tests {
             ErrorCode::NotFound
         );
         assert_eq!(
-            repo.delete_provider(&ProviderId::new("p_x")).unwrap_err().code,
+            repo.delete_provider(&ProviderId::new("p_x"))
+                .unwrap_err()
+                .code,
             ErrorCode::NotFound
         );
     }

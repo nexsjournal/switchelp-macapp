@@ -1,3 +1,5 @@
+#![allow(clippy::field_reassign_with_default)] // 夹具按「先默认值再逐项赋值」写更好读
+
 //! 把一次真实的应用事务**写入应用自己的数据库**，供端到端验收使用。
 //!
 //! 用法：
@@ -61,7 +63,8 @@ fn main() {
                 .join("gptswitch-auth-helper")
                 .display()
                 .to_string(),
-            base_instructions: "You are a coding assistant. Follow the user instructions.".to_owned(),
+            base_instructions: "You are a coding assistant. Follow the user instructions."
+                .to_owned(),
         },
         Arc::new(SystemClock),
     );
@@ -112,10 +115,26 @@ fn main() {
         .unwrap();
 
     let text_model = workspace
-        .save_model(model(provider.id.as_str(), "synthetic/text-model", "E2E 文本模型", false), 0)
+        .save_model(
+            model(
+                provider.id.as_str(),
+                "synthetic/text-model",
+                "E2E 文本模型",
+                false,
+            ),
+            0,
+        )
         .unwrap();
     let vision_model = workspace
-        .save_model(model(provider.id.as_str(), "synthetic/vision-model", "E2E 视觉模型", true), 0)
+        .save_model(
+            model(
+                provider.id.as_str(),
+                "synthetic/vision-model",
+                "E2E 视觉模型",
+                true,
+            ),
+            0,
+        )
         .unwrap();
 
     let plan = service.plan_apply(&instance, None).unwrap();
@@ -163,10 +182,17 @@ fn model(provider_id: &str, upstream_id: &str, display_name: &str, vision: bool)
                 InputKind::Image if vision => Support::Supported,
                 _ => Support::Unsupported,
             };
-            InputCapability::new(*kind, upstream, Support::Unknown, Support::Unknown, Verification::Declared)
+            InputCapability::new(
+                *kind,
+                upstream,
+                Support::Unknown,
+                Support::Unknown,
+                Verification::Declared,
+            )
         })
         .collect();
-    policy.reasoning = ReasoningPolicy::effort(vec!["low".into(), "high".into()], Some("low".into()));
+    policy.reasoning =
+        ReasoningPolicy::effort(vec!["low".into(), "high".into()], Some("low".into()));
     ModelDraft {
         id: None,
         provider_id: provider_id.to_owned(),

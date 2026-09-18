@@ -106,7 +106,8 @@ impl CoreError {
     }
 
     pub fn with_recovery(mut self, action: &str, message_key: &str) -> Self {
-        self.recovery_actions.push(RecoveryAction::new(action, message_key));
+        self.recovery_actions
+            .push(RecoveryAction::new(action, message_key));
         self
     }
 

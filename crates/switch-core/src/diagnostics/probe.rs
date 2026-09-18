@@ -51,7 +51,12 @@ impl StageOutcome {
         }
     }
 
-    fn failed(stage_key: &str, code: ErrorCode, message_key: &str, elapsed_ms: Option<u64>) -> Self {
+    fn failed(
+        stage_key: &str,
+        code: ErrorCode,
+        message_key: &str,
+        elapsed_ms: Option<u64>,
+    ) -> Self {
         Self {
             error_code: Some(code),
             ..Self::new(stage_key, ProbeState::Failed, message_key, elapsed_ms)
@@ -80,7 +85,10 @@ pub struct ProbePlan {
 
 impl ProbePlan {
     pub fn read_only(protocol: Protocol) -> Self {
-        Self { protocol, include_generate: false }
+        Self {
+            protocol,
+            include_generate: false,
+        }
     }
 }
 
@@ -101,7 +109,10 @@ pub struct ProbeReport {
 impl ProbeReport {
     /// 是否全部通过（跳过的阶段不算失败）。
     pub fn passed(&self) -> bool {
-        !self.stages.iter().any(|stage| stage.status == ProbeState::Failed)
+        !self
+            .stages
+            .iter()
+            .any(|stage| stage.status == ProbeState::Failed)
     }
 }
 
@@ -127,7 +138,10 @@ impl Probes {
                 .proxy(ureq::Proxy::try_from_env())
                 .build(),
         );
-        Self { agent, cancelled: Mutex::new(HashSet::new()) }
+        Self {
+            agent,
+            cancelled: Mutex::new(HashSet::new()),
+        }
     }
 
     /// 请求取消。返回是否命中一个仍在登记的探测。
@@ -234,7 +248,11 @@ impl Probes {
                     .limit(512 * 1024)
                     .read_to_string()
                     .unwrap_or_default();
-                Listing::Status { status, elapsed, ids: parse_model_ids(&text) }
+                Listing::Status {
+                    status,
+                    elapsed,
+                    ids: parse_model_ids(&text),
+                }
             }
             Err(error) => Listing::Transport {
                 elapsed: started.elapsed().as_millis() as u64,
@@ -244,7 +262,13 @@ impl Probes {
     }
 
     /// 真实生成一次最小请求。这是唯一有副作用与费用的阶段。
-    fn generate(&self, base: &str, protocol: Protocol, upstream_id: &str, secret: &str) -> StageOutcome {
+    fn generate(
+        &self,
+        base: &str,
+        protocol: Protocol,
+        upstream_id: &str,
+        secret: &str,
+    ) -> StageOutcome {
         let (url, body) = match protocol {
             Protocol::Responses => (
                 responses::endpoint(base),
@@ -286,9 +310,12 @@ impl Probes {
             .send(bytes.as_slice());
         let elapsed = started.elapsed().as_millis() as u64;
         match call {
-            Ok(response) if response.status().is_success() => {
-                StageOutcome::new("generate", ProbeState::Passed, "probe.generatePassed", Some(elapsed))
-            }
+            Ok(response) if response.status().is_success() => StageOutcome::new(
+                "generate",
+                ProbeState::Passed,
+                "probe.generatePassed",
+                Some(elapsed),
+            ),
             Ok(response) => {
                 let status = response.status().as_u16();
                 let (code, key) = classify_status(status);
@@ -306,8 +333,15 @@ impl Probes {
 
 /// `/models` 调用的三种结果。
 enum Listing {
-    Status { status: u16, elapsed: u64, ids: Option<Vec<String>> },
-    Transport { elapsed: u64, detail: String },
+    Status {
+        status: u16,
+        elapsed: u64,
+        ids: Option<Vec<String>>,
+    },
+    Transport {
+        elapsed: u64,
+        detail: String,
+    },
 }
 
 /// 把一次 `/models` 调用拆成 connect / credential / model 三个结论。
@@ -320,12 +354,31 @@ fn judge_listing(
             let (code, message_key) = classify_transport(detail);
             (
                 StageOutcome::failed("connect", code, message_key, Some(*elapsed)),
-                StageOutcome::new("credential", ProbeState::Skipped, "probe.skippedUnreachable", None),
-                StageOutcome::new("model", ProbeState::Skipped, "probe.skippedUnreachable", None),
+                StageOutcome::new(
+                    "credential",
+                    ProbeState::Skipped,
+                    "probe.skippedUnreachable",
+                    None,
+                ),
+                StageOutcome::new(
+                    "model",
+                    ProbeState::Skipped,
+                    "probe.skippedUnreachable",
+                    None,
+                ),
             )
         }
-        Listing::Status { status, elapsed, ids } => {
-            let connect = StageOutcome::new("connect", ProbeState::Passed, "probe.connected", Some(*elapsed));
+        Listing::Status {
+            status,
+            elapsed,
+            ids,
+        } => {
+            let connect = StageOutcome::new(
+                "connect",
+                ProbeState::Passed,
+                "probe.connected",
+                Some(*elapsed),
+            );
             match status {
                 200..=299 => {
                     let credential = StageOutcome::new(
@@ -345,7 +398,12 @@ fn judge_listing(
                         "probe.credentialRejected",
                         Some(*elapsed),
                     ),
-                    StageOutcome::new("model", ProbeState::Skipped, "probe.skippedNoCredential", None),
+                    StageOutcome::new(
+                        "model",
+                        ProbeState::Skipped,
+                        "probe.skippedNoCredential",
+                        None,
+                    ),
                 ),
                 403 => (
                     connect,
@@ -355,19 +413,39 @@ fn judge_listing(
                         "probe.credentialForbidden",
                         Some(*elapsed),
                     ),
-                    StageOutcome::new("model", ProbeState::Skipped, "probe.skippedNoCredential", None),
+                    StageOutcome::new(
+                        "model",
+                        ProbeState::Skipped,
+                        "probe.skippedNoCredential",
+                        None,
+                    ),
                 ),
                 404 => (
                     connect,
-                    StageOutcome::new("credential", ProbeState::Skipped, "probe.credentialUnknown", Some(*elapsed)),
-                    StageOutcome::new("model", ProbeState::Skipped, "probe.modelsUnsupported", Some(*elapsed)),
+                    StageOutcome::new(
+                        "credential",
+                        ProbeState::Skipped,
+                        "probe.credentialUnknown",
+                        Some(*elapsed),
+                    ),
+                    StageOutcome::new(
+                        "model",
+                        ProbeState::Skipped,
+                        "probe.modelsUnsupported",
+                        Some(*elapsed),
+                    ),
                 ),
                 other => {
                     let (code, key) = classify_status(*other);
                     (
                         connect,
                         StageOutcome::failed("credential", code, key, Some(*elapsed)),
-                        StageOutcome::new("model", ProbeState::Skipped, "probe.skippedNoCredential", None),
+                        StageOutcome::new(
+                            "model",
+                            ProbeState::Skipped,
+                            "probe.skippedNoCredential",
+                            None,
+                        ),
                     )
                 }
             }
@@ -385,12 +463,7 @@ fn judge_model(ids: Option<&[String]>, target: &ProbeTarget) -> StageOutcome {
     if ids.iter().any(|id| id == upstream_id) {
         StageOutcome::new("model", ProbeState::Passed, "probe.modelFound", None)
     } else {
-        StageOutcome::failed(
-            "model",
-            ErrorCode::NotFound,
-            "probe.modelMissing",
-            None,
-        )
+        StageOutcome::failed("model", ErrorCode::NotFound, "probe.modelMissing", None)
     }
 }
 
@@ -400,7 +473,12 @@ fn parse_model_ids(text: &str) -> Option<Vec<String>> {
     let data = value.get("data")?.as_array()?;
     Some(
         data.iter()
-            .filter_map(|entry| entry.get("id").and_then(|id| id.as_str()).map(str::to_owned))
+            .filter_map(|entry| {
+                entry
+                    .get("id")
+                    .and_then(|id| id.as_str())
+                    .map(str::to_owned)
+            })
             .collect(),
     )
 }
@@ -408,7 +486,10 @@ fn parse_model_ids(text: &str) -> Option<Vec<String>> {
 fn classify_status(status: u16) -> (ErrorCode, &'static str) {
     match status {
         401 => (ErrorCode::CredentialMissing, "probe.credentialRejected"),
-        403 => (ErrorCode::ModelPermissionDenied, "probe.credentialForbidden"),
+        403 => (
+            ErrorCode::ModelPermissionDenied,
+            "probe.credentialForbidden",
+        ),
         404 => (ErrorCode::NotFound, "probe.modelMissing"),
         429 => (ErrorCode::Internal, "probe.rateLimited"),
         400..=499 => (ErrorCode::ValidationFailed, "probe.upstreamRejected"),
@@ -419,7 +500,10 @@ fn classify_status(status: u16) -> (ErrorCode, &'static str) {
 fn classify_transport(detail: &str) -> (ErrorCode, &'static str) {
     if detail.contains("timeout") || detail.contains("timed out") {
         (ErrorCode::Internal, "probe.timedOut")
-    } else if detail.contains("dns") || detail.contains("resolve") || detail.contains("Name or service") {
+    } else if detail.contains("dns")
+        || detail.contains("resolve")
+        || detail.contains("Name or service")
+    {
         (ErrorCode::ValidationFailed, "probe.unresolvable")
     } else {
         (ErrorCode::Internal, "probe.upstreamUnreachable")
@@ -450,7 +534,9 @@ mod tests {
                 let mut replies = replies.into_iter();
                 for incoming in listener.incoming() {
                     let Ok(stream) = incoming else { break };
-                    let Some((status, body)) = replies.next() else { break };
+                    let Some((status, body)) = replies.next() else {
+                        break;
+                    };
                     let sink = sink.clone();
                     std::thread::spawn(move || {
                         let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -464,11 +550,16 @@ mod tests {
                             }
                             let lower = line.to_ascii_lowercase();
                             if lower.starts_with("content-length:") {
-                                length = line["content-length:".len()..].trim().parse().unwrap_or(0);
+                                length =
+                                    line["content-length:".len()..].trim().parse().unwrap_or(0);
                             } else if lower.starts_with("authorization:") {
                                 auth = line["authorization:".len()..].trim().to_owned();
                             } else if lower.starts_with("get ") || lower.starts_with("post ") {
-                                path = line.split_whitespace().nth(1).unwrap_or_default().to_owned();
+                                path = line
+                                    .split_whitespace()
+                                    .nth(1)
+                                    .unwrap_or_default()
+                                    .to_owned();
                             }
                         }
                         let mut body_bytes = vec![0u8; length];
@@ -488,15 +579,28 @@ mod tests {
                     });
                 }
             });
-            Self { endpoint: format!("http://127.0.0.1:{port}/v1"), seen }
+            Self {
+                endpoint: format!("http://127.0.0.1:{port}/v1"),
+                seen,
+            }
         }
 
         fn paths(&self) -> Vec<String> {
-            self.seen.lock().unwrap().iter().map(|(path, _)| path.clone()).collect()
+            self.seen
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(path, _)| path.clone())
+                .collect()
         }
 
         fn secrets(&self) -> Vec<String> {
-            self.seen.lock().unwrap().iter().map(|(_, auth)| auth.clone()).collect()
+            self.seen
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(_, auth)| auth.clone())
+                .collect()
         }
     }
 
@@ -540,7 +644,11 @@ mod tests {
         assert_eq!(stage(&report, "model").status, ProbeState::Passed);
         assert!(!report.generated, "只读探测不得发起生成请求");
         assert_eq!(mock.paths(), vec!["/v1/models"], "只读探测只打一次 /models");
-        assert_eq!(mock.secrets()[0], format!("Bearer {SECRET}"), "凭据只在请求头里");
+        assert_eq!(
+            mock.secrets()[0],
+            format!("Bearer {SECRET}"),
+            "凭据只在请求头里"
+        );
     }
 
     #[test]
@@ -559,7 +667,10 @@ mod tests {
         assert!(!report.passed());
         assert_eq!(stage(&report, "credential").status, ProbeState::Passed);
         assert_eq!(stage(&report, "model").status, ProbeState::Failed);
-        assert_eq!(stage(&report, "model").error_code, Some(ErrorCode::NotFound));
+        assert_eq!(
+            stage(&report, "model").error_code,
+            Some(ErrorCode::NotFound)
+        );
     }
 
     #[test]
@@ -632,7 +743,10 @@ mod tests {
             "probe_6",
             &mock.endpoint,
             &target(Some("vendor/Model-X")),
-            &ProbePlan { protocol: Protocol::ChatCompletions, include_generate: true },
+            &ProbePlan {
+                protocol: Protocol::ChatCompletions,
+                include_generate: true,
+            },
             SECRET,
         );
 
@@ -653,7 +767,10 @@ mod tests {
             "probe_7",
             &mock.endpoint,
             &target(Some("vendor/Model-X")),
-            &ProbePlan { protocol: Protocol::Responses, include_generate: true },
+            &ProbePlan {
+                protocol: Protocol::Responses,
+                include_generate: true,
+            },
             SECRET,
         );
 
@@ -670,7 +787,10 @@ mod tests {
             "probe_8",
             &mock.endpoint,
             &target(Some("vendor/Model-X")),
-            &ProbePlan { protocol: Protocol::ChatCompletions, include_generate: true },
+            &ProbePlan {
+                protocol: Protocol::ChatCompletions,
+                include_generate: true,
+            },
             SECRET,
         );
 
@@ -705,7 +825,10 @@ mod tests {
             parse_model_ids("{\"data\":[{\"id\":\"a\"},{\"id\":\"b\"}]}").unwrap(),
             vec!["a".to_owned(), "b".to_owned()]
         );
-        assert_eq!(parse_model_ids("{\"data\":[]}").unwrap(), Vec::<String>::new());
+        assert_eq!(
+            parse_model_ids("{\"data\":[]}").unwrap(),
+            Vec::<String>::new()
+        );
         assert!(parse_model_ids("not json").is_none());
         assert!(
             parse_model_ids("{\"object\":\"list\"}").is_none(),

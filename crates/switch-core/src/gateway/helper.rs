@@ -46,8 +46,7 @@ pub fn install(
         ));
     }
     let bin_dir = app_data_dir.join("bin");
-    std::fs::create_dir_all(&bin_dir)
-        .map_err(|_| CoreError::internal("无法创建 helper 目录"))?;
+    std::fs::create_dir_all(&bin_dir).map_err(|_| CoreError::internal("无法创建 helper 目录"))?;
     restrict(&bin_dir, 0o700)?;
 
     let token_file = token_path(app_data_dir);
@@ -114,7 +113,9 @@ cat "$dir/gateway-token"
 #[cfg(windows)]
 fn script(_instance_id: &str) -> String {
     // Windows 版本尚未在真机验证；这里显式留空，由 install 之外的装配层决定是否启用。
-    String::from("@echo off\r\necho gptswitch-auth-helper: not implemented for windows >&2\r\nexit /b 1\r\n")
+    String::from(
+        "@echo off\r\necho gptswitch-auth-helper: not implemented for windows >&2\r\nexit /b 1\r\n",
+    )
 }
 
 #[cfg(test)]

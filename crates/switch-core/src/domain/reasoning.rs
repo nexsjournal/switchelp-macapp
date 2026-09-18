@@ -65,21 +65,16 @@ impl ReasoningPolicy {
     pub fn validate(&self) -> Result<(), CoreError> {
         if let Some(default) = &self.default_value {
             if self.support == Support::Unknown {
-                return Err(CoreError::validation(
-                    "思考支持状态未知时只能选择“不指定”".to_owned(),
-                ));
+                return Err(CoreError::validation("思考支持状态未知时只能选择“不指定”"));
             }
             if !self.allowed_values.iter().any(|v| v == default) {
                 return Err(CoreError::validation(format!(
-                    "默认思考档位 {} 不在已声明集合内",
-                    default
+                    "默认思考档位 {default} 不在已声明集合内"
                 )));
             }
         }
         if matches!(self.control, ReasoningControl::Toggle) && self.allowed_values.len() > 2 {
-            return Err(CoreError::validation(
-                "开关型推理控制不能声明超过两个取值".to_owned(),
-            ));
+            return Err(CoreError::validation("开关型推理控制不能声明超过两个取值"));
         }
         Ok(())
     }
@@ -136,8 +131,10 @@ mod tests {
 
     #[test]
     fn unknown_support_cannot_declare_a_default() {
-        let mut policy = ReasoningPolicy::default();
-        policy.default_value = Some("low".into());
+        let policy = ReasoningPolicy {
+            default_value: Some("low".into()),
+            ..Default::default()
+        };
         assert!(policy.validate().is_err());
     }
 

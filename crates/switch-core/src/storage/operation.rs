@@ -8,8 +8,8 @@ use crate::codex::config::{FieldOwnership, ManagedConfig};
 use crate::codex::plan::{ApplyOperation, ApplyPlan};
 use crate::domain::error::CoreError;
 use crate::domain::ids::InstanceId;
-use crate::storage::snapshot::{RuntimePublication, RouteSnapshot};
 use crate::domain::model::Model;
+use crate::storage::snapshot::{RouteSnapshot, RuntimePublication};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
@@ -161,10 +161,17 @@ impl OperationStore for MemoryOperationStore {
             .expect("锁未被污染")
             .iter()
             .filter(|state| state.instance_id() == instance_id)
-            .filter(|state| state.operation.written_hash.is_some() && matches!(state.operation.stage,
-                crate::codex::plan::ApplyStage::AwaitingReload | crate::codex::plan::ApplyStage::Pending
-                | crate::codex::plan::ApplyStage::Verified | crate::codex::plan::ApplyStage::Restored))
-            .last()
+            .filter(|state| {
+                state.operation.written_hash.is_some()
+                    && matches!(
+                        state.operation.stage,
+                        crate::codex::plan::ApplyStage::AwaitingReload
+                            | crate::codex::plan::ApplyStage::Pending
+                            | crate::codex::plan::ApplyStage::Verified
+                            | crate::codex::plan::ApplyStage::Restored
+                    )
+            })
+            .next_back()
             .map(|state| state.ownership.clone())
             .unwrap_or_default())
     }
@@ -231,7 +238,10 @@ mod tests {
         );
 
         store.save(state(ApplyStage::Verified)).unwrap();
-        assert!(store.unfinished().unwrap().is_empty(), "终态不再参与启动恢复");
+        assert!(
+            store.unfinished().unwrap().is_empty(),
+            "终态不再参与启动恢复"
+        );
     }
 
     #[test]
@@ -258,6 +268,9 @@ mod tests {
         let ownership = store.ownership(&InstanceId::new("inst_1")).unwrap();
         assert_eq!(ownership.len(), 1);
         assert_eq!(ownership[0].key_path, "model");
-        assert!(store.ownership(&InstanceId::new("inst_other")).unwrap().is_empty());
+        assert!(store
+            .ownership(&InstanceId::new("inst_other"))
+            .unwrap()
+            .is_empty());
     }
 }

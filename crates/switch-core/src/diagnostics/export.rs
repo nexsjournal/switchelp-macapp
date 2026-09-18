@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::{DiagnosticLog, DiagnosticEvent};
+use super::{DiagnosticEvent, DiagnosticLog};
 use crate::domain::error::CoreError;
 
 /// 诊断包格式标识。升级时递增，读取方据此判断兼容性。
@@ -92,7 +92,12 @@ pub fn preview_export(
         PreviewItem {
             name: "diagnostics.json".to_owned(),
             included: true,
-            note: format!("{} 条事件，{}（共 {} 字节）", events, scope_note, bytes.len()),
+            note: format!(
+                "{} 条事件，{}（共 {} 字节）",
+                events,
+                scope_note,
+                bytes.len()
+            ),
         },
         PreviewItem {
             name: "上游 API Key 与网关令牌".to_owned(),
@@ -124,7 +129,7 @@ pub fn preview_export(
         items.push(PreviewItem {
             name: "范围外事件".to_owned(),
             included: false,
-            note: format!("{} 条事件不在本次范围内，未包含", excluded),
+            note: format!("{excluded} 条事件不在本次范围内，未包含"),
         });
     }
     if log.dropped() > 0 {
@@ -153,8 +158,7 @@ pub fn write_export(
 ) -> Result<(PathBuf, usize), CoreError> {
     let bytes = build_export(log, scopes, app_version)?;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|_| CoreError::internal("无法创建诊断包目录"))?;
+        std::fs::create_dir_all(parent).map_err(|_| CoreError::internal("无法创建诊断包目录"))?;
     }
     std::fs::write(path, &bytes).map_err(|_| CoreError::internal("无法写入诊断包"))?;
     Ok((path.to_path_buf(), bytes.len()))
@@ -188,12 +192,17 @@ mod tests {
     fn preview_states_what_is_included_and_what_is_never_collected() {
         let preview = preview_export(&populated(), &[], "0.1.0").unwrap();
 
-        let included: Vec<&PreviewItem> = preview.items.iter().filter(|item| item.included).collect();
+        let included: Vec<&PreviewItem> =
+            preview.items.iter().filter(|item| item.included).collect();
         assert_eq!(included.len(), 1);
         assert_eq!(included[0].name, "diagnostics.json");
         assert!(included[0].note.contains("2 条事件"));
 
-        let notes: Vec<&str> = preview.items.iter().map(|item| item.note.as_str()).collect();
+        let notes: Vec<&str> = preview
+            .items
+            .iter()
+            .map(|item| item.note.as_str())
+            .collect();
         assert!(notes.iter().any(|note| note.contains("永不写入")));
         assert!(notes.iter().any(|note| note.contains("prompt")));
         assert_eq!(preview.events, 2);

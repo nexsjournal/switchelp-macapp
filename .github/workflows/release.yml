@@ -43,7 +43,12 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          # 固定版本：rustfmt 的排版与 clippy 的 lint 集合都随版本变化，不固定的话
+          # CI 装到的新版本会报出本地没有的 lint（本仓库的 MSRV 见 Cargo.toml 的 rust-version）。
+          toolchain: 1.88.0
+          components: rustfmt, clippy
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: .
@@ -55,6 +60,13 @@ jobs:
           pnpm test
       - name: 核心测试
         run: cargo test -p switch-core
+      - name: 格式与 clippy
+        # 这个 job 在 ubuntu 上跑：`--workspace` 会编译 src-tauri，而 Tauri 在 Linux 上
+        # 需要 webkit2gtk/gtk 开发库。工作区级 clippy 放在 ci.yml 的 macOS job 里，
+        # 这里只查不依赖平台的核心。
+        run: |
+          cargo fmt --all --check
+          cargo clippy -p switch-core --all-targets -- -D warnings
       - name: 版本号一致（package.json / tauri.conf.json / Cargo.toml）
         run: |
           pkg=$(node -p "require('./package.json').version")
@@ -102,8 +114,11 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          # 固定版本：rustfmt 的排版与 clippy 的 lint 集合都随版本变化，不固定的话
+          # CI 装到的新版本会报出本地没有的 lint（本仓库的 MSRV 见 Cargo.toml 的 rust-version）。
+          toolchain: 1.88.0
           targets: x86_64-pc-windows-msvc
       - uses: swatinem/rust-cache@v2
         with:
@@ -156,8 +171,11 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          # 固定版本：rustfmt 的排版与 clippy 的 lint 集合都随版本变化，不固定的话
+          # CI 装到的新版本会报出本地没有的 lint（本仓库的 MSRV 见 Cargo.toml 的 rust-version）。
+          toolchain: 1.88.0
           targets: ${{ matrix.target }}
       - uses: swatinem/rust-cache@v2
         with:

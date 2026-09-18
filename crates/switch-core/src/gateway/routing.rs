@@ -47,14 +47,14 @@ impl AdmissionError {
     pub fn to_core_error(&self) -> CoreError {
         let detail = match self {
             AdmissionError::UnknownPrefix { catalog_revision } => {
-                format!("该目录版本未发布：{}", catalog_revision)
+                format!("该目录版本未发布：{catalog_revision}")
             }
             AdmissionError::UnknownAlias {
                 alias,
                 catalog_revision,
-            } => format!("目录版本 {} 不包含 alias {}", catalog_revision, alias),
+            } => format!("目录版本 {catalog_revision} 不包含 alias {alias}"),
             AdmissionError::InstanceMismatch { expected, actual } => {
-                format!("令牌属于实例 {}，请求指向实例 {}", expected, actual)
+                format!("令牌属于实例 {expected}，请求指向实例 {actual}")
             }
         };
         CoreError::new(self.code(), self.message_key()).with_detail(detail)
@@ -166,9 +166,7 @@ impl GatewayRouter {
             .as_str()
             .is_empty()
             .then_some(())
-            .map_or(Ok(()), |_| {
-                Err(CoreError::validation("修订 ID 不能为空"))
-            })?;
+            .map_or(Ok(()), |_| Err(CoreError::validation("修订 ID 不能为空")))?;
         if snapshot.catalog_revision.trim().is_empty() {
             return Err(CoreError::validation("目录版本标识不能为空"));
         }
@@ -181,10 +179,8 @@ impl GatewayRouter {
             if existing.as_ref() == &comparable {
                 return Ok(());
             }
-            return Err(CoreError::conflict("error.catalogRevisionConflict").with_detail(format!(
-                "目录版本 {} 已发布且内容不同，拒绝覆盖",
-                key
-            )));
+            return Err(CoreError::conflict("error.catalogRevisionConflict")
+                .with_detail(format!("目录版本 {key} 已发布且内容不同，拒绝覆盖")));
         }
         snapshots.insert(key.clone(), Arc::new(snapshot));
         drop(snapshots);
@@ -203,11 +199,9 @@ impl GatewayRouter {
         alias: &str,
         expected_instance: &InstanceId,
     ) -> Result<Admission, AdmissionError> {
-        let (instance, revision) =
-            crate::storage::snapshot::RuntimePublication::parse_prefix(path).ok_or_else(|| {
-                AdmissionError::UnknownPrefix {
-                    catalog_revision: path.to_owned(),
-                }
+        let (instance, revision) = crate::storage::snapshot::RuntimePublication::parse_prefix(path)
+            .ok_or_else(|| AdmissionError::UnknownPrefix {
+                catalog_revision: path.to_owned(),
             })?;
         if instance != expected_instance.as_str() {
             return Err(AdmissionError::InstanceMismatch {
@@ -364,7 +358,7 @@ mod tests {
 
     fn snapshot(revision: &str, aliases: &[&str]) -> RouteSnapshot {
         RouteSnapshot::new(
-            RevisionId::new(format!("rev_{}", revision)),
+            RevisionId::new(format!("rev_{revision}")),
             InstanceId::new("inst_1"),
             revision,
             aliases.iter().map(|a| entry(a, "vendor/x")).collect(),
@@ -380,7 +374,9 @@ mod tests {
     #[test]
     fn publishes_and_admits_known_route() {
         let router = GatewayRouter::new();
-        router.publish(snapshot("rev_0007", &["gs/p_a/m_1"])).unwrap();
+        router
+            .publish(snapshot("rev_0007", &["gs/p_a/m_1"]))
+            .unwrap();
 
         let admission = router
             .admission("rev_0007", "gs/p_a/m_1", &instance())
@@ -395,7 +391,9 @@ mod tests {
     #[test]
     fn unknown_prefix_is_rejected_and_never_falls_back_to_latest() {
         let router = GatewayRouter::new();
-        router.publish(snapshot("rev_0007", &["gs/p_a/m_1"])).unwrap();
+        router
+            .publish(snapshot("rev_0007", &["gs/p_a/m_1"]))
+            .unwrap();
 
         let error = router
             .admission("rev_0006", "gs/p_a/m_1", &instance())
@@ -413,7 +411,9 @@ mod tests {
     #[test]
     fn unknown_alias_is_rejected() {
         let router = GatewayRouter::new();
-        router.publish(snapshot("rev_0007", &["gs/p_a/m_1"])).unwrap();
+        router
+            .publish(snapshot("rev_0007", &["gs/p_a/m_1"]))
+            .unwrap();
 
         let error = router
             .admission("rev_0007", "gs/p_a/m_9", &instance())
@@ -425,7 +425,9 @@ mod tests {
     #[test]
     fn old_prefix_keeps_serving_its_own_snapshot() {
         let router = GatewayRouter::new();
-        router.publish(snapshot("rev_0006", &["gs/p_a/m_1"])).unwrap();
+        router
+            .publish(snapshot("rev_0006", &["gs/p_a/m_1"]))
+            .unwrap();
         router
             .publish(snapshot("rev_0007", &["gs/p_a/m_1", "gs/p_a/m_2"]))
             .unwrap();
@@ -451,15 +453,21 @@ mod tests {
     #[test]
     fn republishing_identical_snapshot_is_idempotent() {
         let router = GatewayRouter::new();
-        router.publish(snapshot("rev_0007", &["gs/p_a/m_1"])).unwrap();
-        assert!(router.publish(snapshot("rev_0007", &["gs/p_a/m_1"])).is_ok());
+        router
+            .publish(snapshot("rev_0007", &["gs/p_a/m_1"]))
+            .unwrap();
+        assert!(router
+            .publish(snapshot("rev_0007", &["gs/p_a/m_1"]))
+            .is_ok());
         assert_eq!(router.len(), 1);
     }
 
     #[test]
     fn republishing_different_content_under_same_prefix_conflicts() {
         let router = GatewayRouter::new();
-        router.publish(snapshot("rev_0007", &["gs/p_a/m_1"])).unwrap();
+        router
+            .publish(snapshot("rev_0007", &["gs/p_a/m_1"]))
+            .unwrap();
         let error = router
             .publish(snapshot("rev_0007", &["gs/p_a/m_2"]))
             .unwrap_err();
@@ -494,7 +502,9 @@ mod tests {
     #[test]
     fn instance_mismatch_is_reported_as_unauthorized() {
         let router = GatewayRouter::new();
-        router.publish(snapshot("rev_0007", &["gs/p_a/m_1"])).unwrap();
+        router
+            .publish(snapshot("rev_0007", &["gs/p_a/m_1"]))
+            .unwrap();
 
         let error = router
             .admission("rev_0007", "gs/p_a/m_1", &InstanceId::new("inst_2"))
@@ -506,7 +516,9 @@ mod tests {
     #[test]
     fn admission_from_path_parses_prefixed_url() {
         let router = GatewayRouter::new();
-        router.publish(snapshot("rev_0007", &["gs/p_a/m_1"])).unwrap();
+        router
+            .publish(snapshot("rev_0007", &["gs/p_a/m_1"]))
+            .unwrap();
 
         let path = "/i/inst_1/c/rev_0007/v1/responses";
         let admission = router
@@ -530,7 +542,9 @@ mod tests {
     #[test]
     fn retire_keeps_revision_while_refs_remain() {
         let router = GatewayRouter::new();
-        router.publish(snapshot("rev_0007", &["gs/p_a/m_1"])).unwrap();
+        router
+            .publish(snapshot("rev_0007", &["gs/p_a/m_1"]))
+            .unwrap();
 
         router.retain("rev_0007", 2);
         assert_eq!(router.refs("rev_0007").total(), 3);
@@ -568,7 +582,9 @@ mod tests {
     #[test]
     fn request_route_identity_ignores_display_but_tracks_credentials() {
         let router = GatewayRouter::new();
-        router.publish(snapshot("rev_0007", &["gs/p_a/m_1"])).unwrap();
+        router
+            .publish(snapshot("rev_0007", &["gs/p_a/m_1"]))
+            .unwrap();
         let first = router
             .admission("rev_0007", "gs/p_a/m_1", &instance())
             .unwrap()
@@ -577,7 +593,10 @@ mod tests {
 
         let mut changed = first.clone();
         changed.credential_version = 2;
-        assert!(!first.is_same_route(&changed), "Key 版本变化必须视为不同路由");
+        assert!(
+            !first.is_same_route(&changed),
+            "Key 版本变化必须视为不同路由"
+        );
 
         let mut renamed = first.clone();
         renamed.upstream_id = "vendor/other".to_owned();
@@ -594,7 +613,10 @@ mod tests {
             RevisionId::new("rev"),
             InstanceId::new("inst_1"),
             "rev_0007",
-            vec![entry("gs/p_a/m_1", "vendor/a"), entry("gs/p_a/m_1", "vendor/b")],
+            vec![
+                entry("gs/p_a/m_1", "vendor/a"),
+                entry("gs/p_a/m_1", "vendor/b"),
+            ],
             "now",
         )
         .unwrap_err();

@@ -21,10 +21,10 @@ impl Support {
 
     /// 交集原则：任一层明确不支持即不支持；任一层未知则未知。
     pub fn intersect(values: &[Support]) -> Support {
-        if values.iter().any(|v| *v == Support::Unsupported) {
+        if values.contains(&Support::Unsupported) {
             return Support::Unsupported;
         }
-        if values.is_empty() || values.iter().any(|v| *v == Support::Unknown) {
+        if values.is_empty() || values.contains(&Support::Unknown) {
             return Support::Unknown;
         }
         Support::Supported
@@ -325,7 +325,8 @@ mod tests {
 
     #[test]
     fn user_override_is_flagged() {
-        let value = CapabilityValue::declared(128_000_u64, EvidenceSource::User, "2026-09-18T00:00:00Z");
+        let value =
+            CapabilityValue::declared(128_000_u64, EvidenceSource::User, "2026-09-18T00:00:00Z");
         assert!(value.is_user_override());
         let unknown: CapabilityValue<u64> = CapabilityValue::unknown("2026-09-18T00:00:00Z");
         assert!(!unknown.is_user_override());

@@ -33,13 +33,19 @@ pub fn prepare(
 
     let mut body = Map::new();
     body.insert("model".to_owned(), json!(upstream_id));
-    body.insert("messages".to_owned(), Value::Array(messages(request, &mut losses)?));
+    body.insert(
+        "messages".to_owned(),
+        Value::Array(messages(request, &mut losses)?),
+    );
     body.insert("stream".to_owned(), json!(true));
     // 让上游在最后一帧给出用量；不支持时只是少一次统计，不影响内容。
     body.insert("stream_options".to_owned(), json!({"include_usage": true}));
 
     if let Some(tools) = object.get("tools").and_then(Value::as_array) {
-        let translated: Vec<Value> = tools.iter().filter_map(|tool| translate_tool(tool, &mut losses)).collect();
+        let translated: Vec<Value> = tools
+            .iter()
+            .filter_map(|tool| translate_tool(tool, &mut losses))
+            .collect();
         if !translated.is_empty() {
             body.insert("tools".to_owned(), Value::Array(translated));
         }
@@ -80,9 +86,21 @@ pub fn prepare(
     }
 
     for (field, message_key, detail) in [
-        ("store", "loss.storeUnsupported", "chat 端点没有等价的 store 语义"),
-        ("include", "loss.includeUnsupported", "chat 端点不支持 include 选择"),
-        ("prompt_cache_key", "loss.promptCacheKeyUnsupported", "chat 端点没有提示缓存键"),
+        (
+            "store",
+            "loss.storeUnsupported",
+            "chat 端点没有等价的 store 语义",
+        ),
+        (
+            "include",
+            "loss.includeUnsupported",
+            "chat 端点不支持 include 选择",
+        ),
+        (
+            "prompt_cache_key",
+            "loss.promptCacheKeyUnsupported",
+            "chat 端点没有提示缓存键",
+        ),
     ] {
         if object.contains_key(field) {
             losses.push(AdaptationLoss::new(field, message_key, detail));
@@ -90,13 +108,16 @@ pub fn prepare(
     }
     // 思考档位：只有该模型声明了档位（且映射已版本化为 reasoning.effort.v1）才发送。
     // 未声明就不发，并记录为损失，而不是假装生效。
-    if let Some(effort) = object.get("reasoning").and_then(|value| value.get("effort")) {
+    if let Some(effort) = object
+        .get("reasoning")
+        .and_then(|value| value.get("effort"))
+    {
         let requested = effort.as_str().unwrap_or_default();
         if limits.reasoning_efforts.is_empty() {
             losses.push(AdaptationLoss::new(
                 "reasoning.effort",
                 "loss.reasoningEffortNotDeclared",
-                format!("该模型未声明思考档位，{} 未发送", requested),
+                format!("该模型未声明思考档位，{requested} 未发送"),
             ));
         } else if limits.allows_effort(requested) {
             body.insert("reasoning_effort".to_owned(), json!(requested));
@@ -146,7 +167,7 @@ fn messages(request: &Value, losses: &mut Vec<AdaptationLoss>) -> Result<Vec<Val
             Some(other) => losses.push(AdaptationLoss::new(
                 other,
                 "loss.inputItemDropped",
-                format!("chat 协议没有 {} 这类输入条目", other),
+                format!("chat 协议没有 {other} 这类输入条目"),
             )),
             None => losses.push(AdaptationLoss::new(
                 "input.unknown",
@@ -182,12 +203,22 @@ fn push_message(messages: &mut Vec<Value>, item: &Value, losses: &mut Vec<Adapta
                 }
             }
             Some("input_image") | Some("image_url") => {
-                let url = part
-                    .get("image_url")
-                    .and_then(|value| value.as_str().map(str::to_owned).or_else(|| value.get("url").and_then(Value::as_str).map(str::to_owned)))
-                    .or_else(|| part.get("image_url").and_then(Value::as_str).map(str::to_owned));
+                let url =
+                    part.get("image_url")
+                        .and_then(|value| {
+                            value.as_str().map(str::to_owned).or_else(|| {
+                                value.get("url").and_then(Value::as_str).map(str::to_owned)
+                            })
+                        })
+                        .or_else(|| {
+                            part.get("image_url")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned)
+                        });
                 match url {
-                    Some(url) => images.push(json!({"type": "image_url", "image_url": {"url": url}})),
+                    Some(url) => {
+                        images.push(json!({"type": "image_url", "image_url": {"url": url}}))
+                    }
                     None => losses.push(AdaptationLoss::new(
                         "input.image",
                         "loss.imageWithoutUrl",
@@ -198,7 +229,7 @@ fn push_message(messages: &mut Vec<Value>, item: &Value, losses: &mut Vec<Adapta
             Some(other) => losses.push(AdaptationLoss::new(
                 other,
                 "loss.contentPartDropped",
-                format!("chat 协议没有 {} 这类内容分片", other),
+                format!("chat 协议没有 {other} 这类内容分片"),
             )),
             None => {}
         }
@@ -220,7 +251,10 @@ fn push_message(messages: &mut Vec<Value>, item: &Value, losses: &mut Vec<Adapta
 
 /// 助手发起的工具调用。连续的调用合并进同一条 assistant 消息，符合 chat 的惯例。
 fn push_function_call(messages: &mut Vec<Value>, item: &Value, losses: &mut Vec<AdaptationLoss>) {
-    let call_id = item.get("call_id").and_then(Value::as_str).unwrap_or_default();
+    let call_id = item
+        .get("call_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let (Some(name), Some(arguments)) = (
         item.get("name").and_then(Value::as_str),
         item.get("arguments").and_then(Value::as_str),
@@ -246,7 +280,10 @@ fn push_function_call(messages: &mut Vec<Value>, item: &Value, losses: &mut Vec<
 }
 
 fn push_tool_output(messages: &mut Vec<Value>, item: &Value) {
-    let call_id = item.get("call_id").and_then(Value::as_str).unwrap_or_default();
+    let call_id = item
+        .get("call_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let output = match item.get("output") {
         Some(Value::String(text)) => text.clone(),
         Some(other) => other.to_string(),
@@ -272,7 +309,9 @@ fn translate_tool(tool: &Value, losses: &mut Vec<AdaptationLoss>) -> Option<Valu
     }
     function.insert(
         "parameters".to_owned(),
-        tool.get("parameters").cloned().unwrap_or_else(|| json!({"type": "object", "properties": {}})),
+        tool.get("parameters")
+            .cloned()
+            .unwrap_or_else(|| json!({"type": "object", "properties": {}})),
     );
     Some(json!({"type": "function", "function": Value::Object(function)}))
 }
@@ -449,7 +488,11 @@ impl ChatStream {
             let entry = ToolCall {
                 item_id: format!("fc_{}", uuid::Uuid::new_v4().simple()),
                 call_id,
-                name: function.get("name").and_then(Value::as_str).unwrap_or_default().to_owned(),
+                name: function
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
                 arguments: String::new(),
                 output_index,
             };
@@ -464,10 +507,18 @@ impl ChatStream {
             self.tool_calls.insert(key, entry);
         }
         let entry = self.tool_calls.get_mut(&key).expect("刚插入或已存在");
-        if let Some(id) = call.get("id").and_then(Value::as_str).filter(|id| !id.is_empty()) {
+        if let Some(id) = call
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+        {
             entry.call_id = id.to_owned();
         }
-        if let Some(name) = function.get("name").and_then(Value::as_str).filter(|name| !name.is_empty()) {
+        if let Some(name) = function
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|name| !name.is_empty())
+        {
             entry.name = name.to_owned();
         }
         if let Some(fragment) = function.get("arguments").and_then(Value::as_str) {
@@ -546,8 +597,14 @@ impl ChatStream {
 
     fn usage_object(&self) -> Value {
         let source = self.usage.clone().unwrap_or(Value::Null);
-        let input = source.get("prompt_tokens").and_then(Value::as_u64).unwrap_or(0);
-        let output = source.get("completion_tokens").and_then(Value::as_u64).unwrap_or(0);
+        let input = source
+            .get("prompt_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let output = source
+            .get("completion_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
         let total = source
             .get("total_tokens")
             .and_then(Value::as_u64)
@@ -603,7 +660,10 @@ pub fn translate_completion(completion: &Value, alias: &str) -> Value {
         .unwrap_or(Value::Null);
 
     let mut output = Vec::new();
-    let text = message.get("content").and_then(Value::as_str).unwrap_or_default();
+    let text = message
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     if !text.is_empty() {
         output.push(json!({
             "id": format!("msg_{}", uuid::Uuid::new_v4().simple()),
@@ -626,8 +686,14 @@ pub fn translate_completion(completion: &Value, alias: &str) -> Value {
     }
 
     let usage_source = completion.get("usage").cloned().unwrap_or(Value::Null);
-    let input = usage_source.get("prompt_tokens").and_then(Value::as_u64).unwrap_or(0);
-    let out = usage_source.get("completion_tokens").and_then(Value::as_u64).unwrap_or(0);
+    let input = usage_source
+        .get("prompt_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let out = usage_source
+        .get("completion_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     json!({
         "id": completion.get("id").and_then(Value::as_str).map(|id| format!("resp_{id}"))
             .unwrap_or_else(|| format!("resp_{}", uuid::Uuid::new_v4().simple())),
@@ -672,7 +738,13 @@ mod tests {
 
     #[test]
     fn prepare_translates_the_basic_request() {
-        let prepared = prepare("https://host/v1/", "vendor/Model-X", &responses_request(), &RouteLimits::default()).unwrap();
+        let prepared = prepare(
+            "https://host/v1/",
+            "vendor/Model-X",
+            &responses_request(),
+            &RouteLimits::default(),
+        )
+        .unwrap();
 
         assert_eq!(prepared.url, "https://host/v1/chat/completions");
         let body = body_of(&prepared);
@@ -699,7 +771,11 @@ mod tests {
         let prepared = prepare("https://host/v1", "m", &request, &RouteLimits::default()).unwrap();
         let body = body_of(&prepared);
 
-        assert_eq!(body["tools"].as_array().unwrap().len(), 1, "非 function 工具不应被发送");
+        assert_eq!(
+            body["tools"].as_array().unwrap().len(),
+            1,
+            "非 function 工具不应被发送"
+        );
         assert_eq!(body["tools"][0]["function"]["name"], "read_file");
         assert_eq!(body["tools"][0]["function"]["parameters"]["type"], "object");
         assert_eq!(body["tool_choice"]["function"]["name"], "read_file");
@@ -720,7 +796,11 @@ mod tests {
         let body = body_of(&prepared);
         let messages = body["messages"].as_array().unwrap();
 
-        assert_eq!(messages.len(), 4, "system + user + 合并后的 assistant + tool");
+        assert_eq!(
+            messages.len(),
+            4,
+            "system + user + 合并后的 assistant + tool"
+        );
         assert_eq!(messages[1]["role"], "user");
         assert_eq!(messages[2]["role"], "assistant");
         assert_eq!(messages[2]["tool_calls"].as_array().unwrap().len(), 2);
@@ -759,7 +839,7 @@ mod tests {
         let features = loss_features(&prepared.losses);
 
         for expected in ["store", "include", "prompt_cache_key", "reasoning.effort"] {
-            assert!(features.contains(&expected), "{} 必须被记录为损失", expected);
+            assert!(features.contains(&expected), "{expected} 必须被记录为损失");
         }
         // 损失只记录，不写入请求体。
         let body = body_of(&prepared);
@@ -779,15 +859,14 @@ mod tests {
         let mut request = responses_request();
         request["max_output_tokens"] = json!(32_000);
 
-        let prepared = prepare(
-            "https://host/v1",
-            "m",
-            &request,
-            &limits(Some(8_192), &[]),
-        )
-        .unwrap();
+        let prepared =
+            prepare("https://host/v1", "m", &request, &limits(Some(8_192), &[])).unwrap();
 
-        assert_eq!(body_of(&prepared)["max_tokens"], 8192, "必须收口到模型声明的上限");
+        assert_eq!(
+            body_of(&prepared)["max_tokens"],
+            8192,
+            "必须收口到模型声明的上限"
+        );
         assert!(
             loss_features(&prepared.losses).contains(&"max_output_tokens"),
             "下调必须被记录，不能静默发生"
@@ -800,13 +879,8 @@ mod tests {
         let mut request = responses_request();
         request["max_output_tokens"] = json!(1_024);
 
-        let prepared = prepare(
-            "https://host/v1",
-            "m",
-            &request,
-            &limits(Some(8_192), &[]),
-        )
-        .unwrap();
+        let prepared =
+            prepare("https://host/v1", "m", &request, &limits(Some(8_192), &[])).unwrap();
 
         assert_eq!(body_of(&prepared)["max_tokens"], 1024, "宿主可以要得更少");
         assert!(prepared.losses.is_empty());
@@ -817,7 +891,8 @@ mod tests {
         let mut request = responses_request();
         request.as_object_mut().unwrap().remove("max_output_tokens");
 
-        let prepared = prepare("https://host/v1", "m", &request, &limits(Some(4_096), &[])).unwrap();
+        let prepared =
+            prepare("https://host/v1", "m", &request, &limits(Some(4_096), &[])).unwrap();
 
         assert_eq!(body_of(&prepared)["max_tokens"], 4096);
         assert!(prepared.losses.is_empty(), "这是模型策略，不算损失");
@@ -847,7 +922,10 @@ mod tests {
 
         // 模型完全没声明档位。
         let prepared = prepare("https://host/v1", "m", &request, &limits(None, &[])).unwrap();
-        assert!(body_of(&prepared)["reasoning_effort"].is_null(), "未声明就不得发送");
+        assert!(
+            body_of(&prepared)["reasoning_effort"].is_null(),
+            "未声明就不得发送"
+        );
         assert!(loss_features(&prepared.losses).contains(&"reasoning.effort"));
 
         // 声明了档位但不含请求值。
@@ -865,18 +943,33 @@ mod tests {
     #[test]
     fn clamp_output_limit_has_three_distinct_outcomes() {
         let declared = limits(Some(8_192), &[]);
-        assert_eq!(declared.clamp_output_limit(Some(32_000)), (Some(8_192), true));
-        assert_eq!(declared.clamp_output_limit(Some(1_024)), (Some(1_024), false));
+        assert_eq!(
+            declared.clamp_output_limit(Some(32_000)),
+            (Some(8_192), true)
+        );
+        assert_eq!(
+            declared.clamp_output_limit(Some(1_024)),
+            (Some(1_024), false)
+        );
         assert_eq!(declared.clamp_output_limit(None), (Some(8_192), false));
 
         let undeclared = RouteLimits::default();
-        assert_eq!(undeclared.clamp_output_limit(Some(2_048)), (Some(2_048), false));
+        assert_eq!(
+            undeclared.clamp_output_limit(Some(2_048)),
+            (Some(2_048), false)
+        );
         assert_eq!(undeclared.clamp_output_limit(None), (None, false));
     }
 
     #[test]
     fn prepare_rejects_non_object_bodies() {
-        assert!(prepare("https://host/v1", "m", &json!("nope"), &RouteLimits::default()).is_err());
+        assert!(prepare(
+            "https://host/v1",
+            "m",
+            &json!("nope"),
+            &RouteLimits::default()
+        )
+        .is_err());
     }
 
     fn event_names(events: &[ResponsesEvent]) -> Vec<&'static str> {
@@ -889,7 +982,9 @@ mod tests {
         let mut all = stream.starting();
         assert_eq!(event_names(&all), vec!["response.created"]);
 
-        all.extend(stream.feed(&json!({"id": "chatcmpl-1", "choices": [{"index": 0, "delta": {"role": "assistant"}}]})));
+        all.extend(stream.feed(
+            &json!({"id": "chatcmpl-1", "choices": [{"index": 0, "delta": {"role": "assistant"}}]}),
+        ));
         all.extend(stream.feed(&json!({"choices": [{"index": 0, "delta": {"content": "你"}}]})));
         all.extend(stream.feed(&json!({"choices": [{"index": 0, "delta": {"content": "好"}, "finish_reason": "stop"}]})));
         all.extend(stream.feed(&json!({"choices": [], "usage": {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15}})));
@@ -914,7 +1009,10 @@ mod tests {
         let completed = all.last().unwrap();
         let response = &completed.payload["response"];
         assert_eq!(response["status"], "completed");
-        assert_eq!(response["model"], "gs/p_a/m_1", "响应身份必须是 alias，不是上游 ID");
+        assert_eq!(
+            response["model"], "gs/p_a/m_1",
+            "响应身份必须是 alias，不是上游 ID"
+        );
         assert_eq!(response["usage"]["input_tokens"], 12);
         assert_eq!(response["usage"]["output_tokens"], 3);
         assert_eq!(response["usage"]["total_tokens"], 15);
@@ -937,12 +1035,17 @@ mod tests {
         all.extend(stream.feed(&json!({"choices": [{"index": 0, "delta": {"tool_calls": [
             {"index": 0, "id": "call_9", "type": "function", "function": {"name": "read_file", "arguments": "{\"pa"}}
         ]}}]})));
-        all.extend(stream.feed(&json!({"choices": [{"index": 0, "delta": {"tool_calls": [
-            {"index": 0, "function": {"arguments": "th\":\"a\"}"}}
-        ]}}]})));
+        all.extend(
+            stream.feed(&json!({"choices": [{"index": 0, "delta": {"tool_calls": [
+                {"index": 0, "function": {"arguments": "th\":\"a\"}"}}
+            ]}}]})),
+        );
         all.extend(stream.finish());
 
-        let added = all.iter().find(|event| event.name == "response.output_item.added").unwrap();
+        let added = all
+            .iter()
+            .find(|event| event.name == "response.output_item.added")
+            .unwrap();
         assert_eq!(added.payload["item"]["type"], "function_call");
         assert_eq!(added.payload["item"]["name"], "read_file");
         assert_eq!(added.payload["item"]["call_id"], "call_9");
@@ -956,7 +1059,10 @@ mod tests {
 
         let completed = all.last().unwrap();
         let item = &completed.payload["response"]["output"][0];
-        assert_eq!(item["arguments"], "{\"path\":\"a\"}", "分片必须拼成完整参数");
+        assert_eq!(
+            item["arguments"], "{\"path\":\"a\"}",
+            "分片必须拼成完整参数"
+        );
         assert_eq!(item["call_id"], "call_9", "call_id 必须可回传以对回结果");
     }
 
@@ -1008,4 +1114,3 @@ mod tests {
         assert_eq!(response["usage"]["total_tokens"], 12);
     }
 }
-

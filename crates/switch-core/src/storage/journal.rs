@@ -244,7 +244,7 @@ impl FileJournal {
                 continue;
             }
             let entry: JournalEntry = serde_json::from_str(line)
-                .map_err(|error| CoreError::internal(format!("journal 解析失败: {}", error)))?;
+                .map_err(|error| CoreError::internal(format!("journal 解析失败: {error}")))?;
             entries.push(entry);
         }
         Ok(entries)
@@ -255,7 +255,7 @@ impl FileJournal {
         for entry in entries {
             text.push_str(
                 &serde_json::to_string(entry)
-                    .map_err(|error| CoreError::internal(format!("journal 序列化失败: {}", error)))?,
+                    .map_err(|error| CoreError::internal(format!("journal 序列化失败: {error}")))?,
             );
             text.push('\n');
         }
@@ -350,13 +350,21 @@ mod tests {
     fn stage_sync_follows_apply_state_machine() {
         let mut record = entry("op_1", "rev_1");
         record.sync_from_stage(ApplyStage::Committing, 1);
-        assert_eq!(record.stage, JournalStage::CatalogWritten, "提交中不改变 journal 阶段");
+        assert_eq!(
+            record.stage,
+            JournalStage::CatalogWritten,
+            "提交中不改变 journal 阶段"
+        );
 
         record.sync_from_stage(ApplyStage::AwaitingReload, 2);
         assert_eq!(record.stage, JournalStage::Committed);
 
         record.sync_from_stage(ApplyStage::Pending, 3);
-        assert_eq!(record.stage, JournalStage::Committed, "等待重载仍是 Committed");
+        assert_eq!(
+            record.stage,
+            JournalStage::Committed,
+            "等待重载仍是 Committed"
+        );
 
         record.sync_from_stage(ApplyStage::Verified, 4);
         assert_eq!(record.stage, JournalStage::Verified);
@@ -429,11 +437,13 @@ mod tests {
         let mut record = record;
         record.mark_verified(6);
         reopened.update(record).unwrap();
-        assert!(FileJournal::new(&path)
-            .get("op_1")
-            .unwrap()
-            .unwrap()
-            .finished);
+        assert!(
+            FileJournal::new(&path)
+                .get("op_1")
+                .unwrap()
+                .unwrap()
+                .finished
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -473,7 +483,7 @@ mod tests {
             "updatedAtUnix",
             "finished",
         ] {
-            assert!(json.get(key).is_some(), "缺少 journal 字段 {}", key);
+            assert!(json.get(key).is_some(), "缺少 journal 字段 {key}");
         }
         assert_eq!(json["stage"], "catalog_written");
     }

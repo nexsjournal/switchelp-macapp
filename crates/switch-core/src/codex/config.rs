@@ -185,7 +185,11 @@ impl ConfigSnapshot {
     /// 是否存在其他工具已经占用的同名 provider 或非本工具的目录配置。
     pub fn foreign_managers(&self) -> Vec<String> {
         let mut found: Vec<String> = Vec::new();
-        if let Some(providers) = self.document.get("model_providers").and_then(|i| i.as_table()) {
+        if let Some(providers) = self
+            .document
+            .get("model_providers")
+            .and_then(|i| i.as_table())
+        {
             for (id, item) in providers.iter() {
                 if id == PROVIDER_ID {
                     continue;
@@ -209,7 +213,14 @@ impl ConfigSnapshot {
     /// `args`、`headers` 等列表里被原样导出。扫描只做替换，不做任何网络动作。
     pub fn redacted_preview(&self) -> String {
         let mut preview = self.document.clone();
-        let secret_keys = ["key", "api_key", "token", "password", "secret", "authorization"];
+        let secret_keys = [
+            "key",
+            "api_key",
+            "token",
+            "password",
+            "secret",
+            "authorization",
+        ];
         redact_table(preview.as_table_mut(), &secret_keys, None);
         redact_secret_shapes(&preview.to_string())
     }
@@ -220,7 +231,7 @@ fn redact_table(table: &mut Table, secrets: &[&str], parent: Option<&str>) {
     for key in keys {
         let lowered = key.to_ascii_lowercase();
         let path = match parent {
-            Some(parent) => format!("{}.{}", parent, lowered),
+            Some(parent) => format!("{parent}.{lowered}"),
             None => lowered.clone(),
         };
         let is_secret = secrets.iter().any(|s| lowered.contains(s))
@@ -241,16 +252,17 @@ fn redact_table(table: &mut Table, secrets: &[&str], parent: Option<&str>) {
 }
 
 /// 已知密钥前缀形状。只覆盖可识别的公开前缀，不做启发式猜测。
-const SECRET_PREFIXES: [&str; 8] = [
-    "sk-", "sk_", "rk-", "api-", "key-", "pk-", "ghp_", "xoxb-",
-];
+const SECRET_PREFIXES: [&str; 8] = ["sk-", "sk_", "rk-", "api-", "key-", "pk-", "ghp_", "xoxb-"];
 
 /// 把形如 `sk-xxxx` 的连续秘密片段替换为掩码，保留前缀以便用户识别来源。
 fn redact_secret_shapes(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for token in split_keep_delimiters(text) {
-        let trimmed = token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_');
-        let is_secret = SECRET_PREFIXES.iter().any(|prefix| trimmed.starts_with(prefix))
+        let trimmed =
+            token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_');
+        let is_secret = SECRET_PREFIXES
+            .iter()
+            .any(|prefix| trimmed.starts_with(prefix))
             && trimmed.chars().count() >= 12;
         if is_secret {
             let prefix_len = SECRET_PREFIXES
@@ -259,7 +271,7 @@ fn redact_secret_shapes(text: &str) -> String {
                 .map(|prefix| prefix.len())
                 .unwrap_or(0);
             let prefix = &trimmed[..prefix_len];
-            out.push_str(&token.replace(trimmed, &format!("{}••••••••", prefix)));
+            out.push_str(&token.replace(trimmed, &format!("{prefix}••••••••")));
         } else {
             out.push_str(&token);
         }
@@ -306,7 +318,11 @@ fn provider_table(provider: &ManagedProvider) -> Table {
     table["wire_api"] = value(provider.wire_api.clone());
     let mut auth = Table::new();
     match &provider.auth {
-        ProviderAuth::Command { command, timeout_ms, refresh_interval_ms } => {
+        ProviderAuth::Command {
+            command,
+            timeout_ms,
+            refresh_interval_ms,
+        } => {
             auth["command"] = value(command.clone());
             let mut args: toml_edit::Array = toml_edit::Array::new();
             args.push("--instance");
@@ -333,14 +349,17 @@ fn serialized_provider(provider: &ManagedProvider) -> Option<String> {
         PROVIDER_NAME, provider.base_url, provider.wire_api
     );
     match &provider.auth {
-        ProviderAuth::Command { command, timeout_ms, refresh_interval_ms } => {
+        ProviderAuth::Command {
+            command,
+            timeout_ms,
+            refresh_interval_ms,
+        } => {
             text.push_str(&format!(
-                "\n\n[auth]\ncommand = \"{}\"\nargs = [\"--instance\", \"{}\"]\ntimeout_ms = {}\nrefresh_interval_ms = {}",
-                command, AUTH_HELPER_INSTANCE, timeout_ms, refresh_interval_ms
+                "\n\n[auth]\ncommand = \"{command}\"\nargs = [\"--instance\", \"{AUTH_HELPER_INSTANCE}\"]\ntimeout_ms = {timeout_ms}\nrefresh_interval_ms = {refresh_interval_ms}"
             ));
         }
         ProviderAuth::EnvKey { env_key } => {
-            text.push_str(&format!("\n\n[auth]\nenv_key = \"{}\"", env_key));
+            text.push_str(&format!("\n\n[auth]\nenv_key = \"{env_key}\""));
         }
     }
     Some(text)
@@ -351,7 +370,11 @@ fn serialized_provider(provider: &ManagedProvider) -> Option<String> {
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum ProviderAuth {
     /// 通过 helper 输出本机访问令牌。
-    Command { command: String, timeout_ms: u64, refresh_interval_ms: u64 },
+    Command {
+        command: String,
+        timeout_ms: u64,
+        refresh_interval_ms: u64,
+    },
     /// 旧宿主使用环境变量注入本机令牌。
     EnvKey { env_key: String },
 }
@@ -364,7 +387,11 @@ impl ProviderAuth {
 
     fn validate(&self) -> Result<(), CoreError> {
         match self {
-            ProviderAuth::Command { command, timeout_ms, refresh_interval_ms } => {
+            ProviderAuth::Command {
+                command,
+                timeout_ms,
+                refresh_interval_ms,
+            } => {
                 if command.trim().is_empty() {
                     return Err(CoreError::validation("auth helper 路径不能为空"));
                 }
@@ -450,7 +477,10 @@ pub enum RestoreOutcome {
     /// 基线原本不存在，恢复即删除该键。
     Delete { key_path: String },
     /// 外部已修改，保留当前值并进入冲突处理。
-    Conflict { key_path: String, current: Option<String> },
+    Conflict {
+        key_path: String,
+        current: Option<String>,
+    },
     /// 无需处理。
     Unchanged { key_path: String },
 }
@@ -503,7 +533,10 @@ pub fn apply_managed(
     let existing: std::collections::HashMap<&str, &FieldOwnership> =
         ownership.iter().map(|o| (o.key_path.as_str(), o)).collect();
 
-    let record = |document: &DocumentMut, key: &str, new_value: Option<String>, updated: &mut Vec<FieldOwnership>| {
+    let record = |document: &DocumentMut,
+                  key: &str,
+                  new_value: Option<String>,
+                  updated: &mut Vec<FieldOwnership>| {
         let baseline = match existing.get(key) {
             Some(record) => (*record).clone(),
             None => FieldOwnership::new(key, snapshot.managed_value(key)),
@@ -553,7 +586,9 @@ pub fn apply_managed(
         }
         None => {
             if document.contains_key("model_context_window")
-                && ownership.iter().any(|o| o.key_path == "model_context_window")
+                && ownership
+                    .iter()
+                    .any(|o| o.key_path == "model_context_window")
             {
                 document.remove("model_context_window");
                 record(&document, "model_context_window", None, &mut updated);
@@ -565,7 +600,12 @@ pub fn apply_managed(
     if let Some(provider) = &managed.provider {
         let key_path = "model_providers.gptswitch";
         set_gateway_provider(&mut document, Some(&provider_table(provider)))?;
-        record(&document, key_path, serialized_provider(provider), &mut updated);
+        record(
+            &document,
+            key_path,
+            serialized_provider(provider),
+            &mut updated,
+        );
     }
 
     Ok((render(&document, &snapshot.line_ending), updated))
@@ -629,7 +669,11 @@ fn parse_gateway_provider(fragment: &str) -> Result<Table, CoreError> {
     for (key, item) in document.iter() {
         table.insert(key, item.clone());
     }
-    if table.get("base_url").and_then(|item| item.as_str()).is_none() {
+    if table
+        .get("base_url")
+        .and_then(|item| item.as_str())
+        .is_none()
+    {
         return Err(CoreError::internal("provider 基线缺少 base_url"));
     }
     Ok(table)
@@ -732,7 +776,9 @@ pub fn execute_restore(
         if record.key_path == "model_providers.gptswitch" {
             match outcome {
                 RestoreOutcome::Restore { .. } => {
-                    let table = parse_gateway_provider(record.baseline_value.as_deref().unwrap_or_default())?;
+                    let table = parse_gateway_provider(
+                        record.baseline_value.as_deref().unwrap_or_default(),
+                    )?;
                     set_gateway_provider(&mut document, Some(&table))?;
                 }
                 RestoreOutcome::Delete { .. } => set_gateway_provider(&mut document, None)?,

@@ -60,10 +60,11 @@ pub fn fetch(
         .unwrap_or_default();
 
     if status == 404 {
-        return Err(
-            CoreError::new(ErrorCode::CapabilityUnsupported, "error.discoveryUnsupported")
-                .with_detail("此接口未提供模型列表，请手动填写模型 ID".to_owned()),
-        );
+        return Err(CoreError::new(
+            ErrorCode::CapabilityUnsupported,
+            "error.discoveryUnsupported",
+        )
+        .with_detail("此接口未提供模型列表，请手动填写模型 ID".to_owned()));
     }
     if !(200..300).contains(&status) {
         let (code, key) = match status {
@@ -71,18 +72,28 @@ pub fn fetch(
             403 => (ErrorCode::ModelPermissionDenied, "error.discoveryForbidden"),
             _ => (ErrorCode::Internal, "error.discoveryFailed"),
         };
-        return Err(CoreError::new(code, key)
-            .with_detail(format!("上游返回 {}，未能读取模型列表", status)));
+        return Err(
+            CoreError::new(code, key).with_detail(format!("上游返回 {status}，未能读取模型列表"))
+        );
     }
 
     let value: serde_json::Value = serde_json::from_str(&text).map_err(|_| {
-        CoreError::new(ErrorCode::CapabilityUnsupported, "error.discoveryUnparsable")
-            .with_detail("上游模型列表不是合法 JSON，请手动填写模型 ID".to_owned())
+        CoreError::new(
+            ErrorCode::CapabilityUnsupported,
+            "error.discoveryUnparsable",
+        )
+        .with_detail("上游模型列表不是合法 JSON，请手动填写模型 ID".to_owned())
     })?;
-    let data = value.get("data").and_then(|data| data.as_array()).ok_or_else(|| {
-        CoreError::new(ErrorCode::CapabilityUnsupported, "error.discoveryUnparsable")
+    let data = value
+        .get("data")
+        .and_then(|data| data.as_array())
+        .ok_or_else(|| {
+            CoreError::new(
+                ErrorCode::CapabilityUnsupported,
+                "error.discoveryUnparsable",
+            )
             .with_detail("上游模型列表缺少 data 字段，请手动填写模型 ID".to_owned())
-    })?;
+        })?;
 
     let mut models: Vec<DiscoveredModel> = data
         .iter()
@@ -162,7 +173,10 @@ mod tests {
         assert!(!models[0].already_saved);
         assert_eq!(models[1].upstream_id, "vendor/b");
         assert!(models[1].already_saved);
-        assert_eq!(models[1].display_name, "vendor/b", "上游没给名字就回落到 ID");
+        assert_eq!(
+            models[1].display_name, "vendor/b",
+            "上游没给名字就回落到 ID"
+        );
     }
 
     #[test]
@@ -172,7 +186,10 @@ mod tests {
 
         assert_eq!(error.code, ErrorCode::CapabilityUnsupported);
         assert_eq!(error.message_key, "error.discoveryUnsupported");
-        assert!(error.safe_details.iter().any(|detail| detail.contains("手动填写")));
+        assert!(error
+            .safe_details
+            .iter()
+            .any(|detail| detail.contains("手动填写")));
     }
 
     #[test]

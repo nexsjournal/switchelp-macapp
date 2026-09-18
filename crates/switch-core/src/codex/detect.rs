@@ -198,10 +198,7 @@ impl InstanceDetector {
         let mut seen: std::collections::HashSet<(String, Option<String>)> =
             std::collections::HashSet::new();
         instances.retain(|instance| {
-            seen.insert((
-                instance.config_root.clone(),
-                instance.cli_path.clone(),
-            ))
+            seen.insert((instance.config_root.clone(), instance.cli_path.clone()))
         });
 
         Ok(instances)
@@ -306,13 +303,13 @@ impl InstanceDetector {
     pub fn matches_bundle_id(plist_text: &str) -> bool {
         KNOWN_BUNDLE_IDS
             .iter()
-            .any(|id| plist_text.contains(&format!("<string>{}</string>", id)))
+            .any(|id| plist_text.contains(&format!("<string>{id}</string>")))
     }
 }
 
 /// 从 plist 中提取某个 key 后紧跟的 `<string>` 值。
 fn extract_plist_string(plist: &str, key: &str) -> Option<String> {
-    let key_pos = plist.find(&format!("<key>{}</key>", key))?;
+    let key_pos = plist.find(&format!("<key>{key}</key>"))?;
     let rest = &plist[key_pos..];
     let open = rest.find("<string>")? + "<string>".len();
     let close = rest[open..].find("</string>")? + open;
@@ -407,13 +404,19 @@ mod tests {
             .dir("/Applications/ChatGPT.app")
             .file("/Applications/ChatGPT.app/Contents/Info.plist", PLIST)
             .dir("/Applications/ChatGPT.app/Contents/Resources")
-            .file("/Applications/ChatGPT.app/Contents/Resources/codex", "binary")
+            .file(
+                "/Applications/ChatGPT.app/Contents/Resources/codex",
+                "binary",
+            )
             .file(
                 "/Applications/ChatGPT.app/Contents/Resources/codex.version",
                 "0.154.0-alpha.6.2\n",
             )
             .dir("/Users/example/.codex")
-            .file("/Users/example/.codex/config.toml", "model = \"gpt-5-codex\"\n");
+            .file(
+                "/Users/example/.codex/config.toml",
+                "model = \"gpt-5-codex\"\n",
+            );
         let input = DetectInput::for_macos(PathBuf::from("/Users/example"));
         (fs, input)
     }
@@ -546,9 +549,11 @@ mod tests {
             .file("/opt/homebrew/bin/codex", "binary")
             .dir("/Users/example/.codex")
             .file("/Users/example/.codex/config.toml", "");
-        let mut input = DetectInput::default();
-        input.home = Some(PathBuf::from("/Users/example"));
-        input.cli_path = Some(PathBuf::from("/opt/homebrew/bin/codex"));
+        let input = DetectInput {
+            home: Some(PathBuf::from("/Users/example")),
+            cli_path: Some(PathBuf::from("/opt/homebrew/bin/codex")),
+            ..Default::default()
+        };
         let found = InstanceDetector::detect(&input, &fs, None, 0).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].app_path, None);
@@ -587,7 +592,10 @@ mod tests {
         let fs = FakeFs::default();
         let input = DetectInput::default();
         let error = InstanceDetector::detect(&input, &fs, None, 0).unwrap_err();
-        assert_eq!(error.code, crate::domain::error::ErrorCode::ValidationFailed);
+        assert_eq!(
+            error.code,
+            crate::domain::error::ErrorCode::ValidationFailed
+        );
     }
 
     #[test]

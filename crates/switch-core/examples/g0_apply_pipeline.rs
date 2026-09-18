@@ -1,3 +1,5 @@
+#![allow(clippy::field_reassign_with_default)] // 夹具按「先默认值再逐项赋值」写更好读
+
 //! G0 实机探针：用真实的计划 → CAS 提交链路产出 `config.toml` 与模型目录，
 //! 再交给真实 Codex app-server 校验目录契约。
 //!
@@ -39,7 +41,11 @@ fn main() {
     );
     let codex_home = workdir.join("codex-home");
     let auth_helper = workdir.join("bin").join("gptswitch-auth-helper");
-    for directory in [&workdir, &codex_home, &auth_helper.parent().unwrap().to_path_buf()] {
+    for directory in [
+        &workdir,
+        &codex_home,
+        &auth_helper.parent().unwrap().to_path_buf(),
+    ] {
         std::fs::create_dir_all(directory).expect("无法创建工作目录");
     }
     write_auth_helper(&auth_helper);
@@ -58,7 +64,8 @@ fn main() {
             app_data_dir: workdir.join("app-data"),
             port: gateway::DEFAULT_PORT,
             auth_helper: auth_helper.display().to_string(),
-            base_instructions: "You are a coding assistant. Follow the user instructions.".to_owned(),
+            base_instructions: "You are a coding assistant. Follow the user instructions."
+                .to_owned(),
         },
         Arc::new(SystemClock),
     );
@@ -120,9 +127,7 @@ fn main() {
         "上游 Key 绝不能写入 config.toml"
     );
 
-    let catalog_path = service
-        .layout()
-        .catalog_path(&plan.catalog_revision);
+    let catalog_path = service.layout().catalog_path(&plan.catalog_revision);
     let catalog_json = std::fs::read_to_string(&catalog_path).unwrap();
 
     println!(

@@ -110,14 +110,11 @@ impl<'a> CredentialResolver<'a> {
             }
         }
 
-        let secret = self
-            .vault
-            .load(&credential.secret_ref)?
-            .ok_or_else(|| {
-                CoreError::new(ErrorCode::CredentialMissing, "error.credentialMissing")
-                    .with_detail("此 Key 的安全记录不存在，需要重新填写".to_owned())
-                    .with_recovery("reenter", "action.reenterSecret")
-            })?;
+        let secret = self.vault.load(&credential.secret_ref)?.ok_or_else(|| {
+            CoreError::new(ErrorCode::CredentialMissing, "error.credentialMissing")
+                .with_detail("此 Key 的安全记录不存在，需要重新填写".to_owned())
+                .with_recovery("reenter", "action.reenterSecret")
+        })?;
 
         if self.cache_enabled {
             self.cache
@@ -149,12 +146,19 @@ impl<'a> CredentialResolver<'a> {
         self.vault.store(&reference, secret)?;
         credential.secret_ref = reference;
         // 轮换后缓存必须失效，否则新请求仍可能拿到旧秘密。
-        self.cache.lock().expect("锁未被污染").remove(credential.id.as_str());
+        self.cache
+            .lock()
+            .expect("锁未被污染")
+            .remove(credential.id.as_str());
         Ok(())
     }
 
     /// 首次保存。
-    pub fn store_initial(&self, credential: &mut Credential, secret: &str) -> Result<(), CoreError> {
+    pub fn store_initial(
+        &self,
+        credential: &mut Credential,
+        secret: &str,
+    ) -> Result<(), CoreError> {
         let reference = crate::credentials::secret_ref(
             credential.provider_id.as_str(),
             credential.id.as_str(),
@@ -173,13 +177,19 @@ impl<'a> CredentialResolver<'a> {
     /// 撤销：先停止分配新请求，再清理安全存储。
     pub fn revoke(&self, credential: &Credential) -> Result<(), CoreError> {
         self.vault.delete(&credential.secret_ref)?;
-        self.cache.lock().expect("锁未被污染").remove(credential.id.as_str());
+        self.cache
+            .lock()
+            .expect("锁未被污染")
+            .remove(credential.id.as_str());
         Ok(())
     }
 }
 
 /// 依据探测结果更新凭据状态。401 与凭据库缺失必须区分。
-pub fn status_from_probe(http_status: Option<u16>, keystore_error: Option<ErrorCode>) -> CredentialStatus {
+pub fn status_from_probe(
+    http_status: Option<u16>,
+    keystore_error: Option<ErrorCode>,
+) -> CredentialStatus {
     if let Some(code) = keystore_error {
         return match code {
             ErrorCode::KeystoreLocked => CredentialStatus::KeystoreLocked,
@@ -237,7 +247,7 @@ mod tests {
         let (vault, credential) = seeded();
         let resolver = CredentialResolver::new(&vault);
         let secret = resolver.resolve(&credential).unwrap();
-        let rendered = format!("{:?}", secret);
+        let rendered = format!("{secret:?}");
         assert!(!rendered.contains("sk-live"));
         assert!(rendered.contains("••••••••"));
     }
@@ -268,17 +278,18 @@ mod tests {
         assert_eq!(old.secret_version, 1);
 
         resolver
-            .store_new_version(&mut credential, "sk-live-ffffffffffffffff", "2026-09-18T01:00:00Z")
+            .store_new_version(
+                &mut credential,
+                "sk-live-ffffffffffffffff",
+                "2026-09-18T01:00:00Z",
+            )
             .unwrap();
         assert_eq!(credential.secret_version, 2);
 
         let new = resolver.resolve(&credential).unwrap();
         assert_eq!(new.expose(), "sk-live-ffffffffffffffff");
         // 旧版本条目仍存在，供在途请求使用。
-        assert!(vault
-            .load("gptswitch/p_1/c_1/v1")
-            .unwrap()
-            .is_some());
+        assert!(vault.load("gptswitch/p_1/c_1/v1").unwrap().is_some());
     }
 
     #[test]
@@ -323,9 +334,18 @@ mod tests {
 
     #[test]
     fn probe_status_mapping_separates_401_from_missing_record() {
-        assert_eq!(status_from_probe(Some(200), None), CredentialStatus::Verified);
-        assert_eq!(status_from_probe(Some(401), None), CredentialStatus::AuthFailed);
-        assert_eq!(status_from_probe(Some(403), None), CredentialStatus::ScopeLimited);
+        assert_eq!(
+            status_from_probe(Some(200), None),
+            CredentialStatus::Verified
+        );
+        assert_eq!(
+            status_from_probe(Some(401), None),
+            CredentialStatus::AuthFailed
+        );
+        assert_eq!(
+            status_from_probe(Some(403), None),
+            CredentialStatus::ScopeLimited
+        );
         assert_eq!(status_from_probe(Some(500), None), CredentialStatus::Saved);
         assert_eq!(
             status_from_probe(None, Some(ErrorCode::KeystoreLocked)),

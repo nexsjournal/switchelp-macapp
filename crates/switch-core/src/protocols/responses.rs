@@ -29,7 +29,9 @@ pub fn prepare(
     );
 
     // 输出上限同样要按模型策略收口，透传不等于放任。
-    let requested = object.get("max_output_tokens").and_then(|value| value.as_u64());
+    let requested = object
+        .get("max_output_tokens")
+        .and_then(|value| value.as_u64());
     let (effective, capped) = limits.clamp_output_limit(requested);
     if let Some(limit) = effective {
         object.insert("max_output_tokens".to_owned(), serde_json::json!(limit));
@@ -67,14 +69,10 @@ pub fn prepare(
         }
     }
 
-    let bytes =
-        serde_json::to_vec(&body).map_err(|_| CoreError::internal("请求体序列化失败"))?;
+    let bytes = serde_json::to_vec(&body).map_err(|_| CoreError::internal("请求体序列化失败"))?;
     Ok(PreparedRequest {
         url: endpoint(base),
-        headers: vec![(
-            "content-type".to_owned(),
-            "application/json".to_owned(),
-        )],
+        headers: vec![("content-type".to_owned(), "application/json".to_owned())],
         body: bytes,
         losses,
     })
@@ -118,7 +116,13 @@ mod tests {
             "input": [{"type": "message", "role": "user"}],
             "reasoning": {"effort": "low"},
         });
-        let prepared = prepare("https://host/v1", "vendor/Model-X", &request, &RouteLimits::default()).unwrap();
+        let prepared = prepare(
+            "https://host/v1",
+            "vendor/Model-X",
+            &request,
+            &RouteLimits::default(),
+        )
+        .unwrap();
         let body: serde_json::Value = serde_json::from_slice(&prepared.body).unwrap();
 
         assert_eq!(body["model"], "vendor/Model-X");
@@ -130,7 +134,13 @@ mod tests {
 
     #[test]
     fn prepare_rejects_non_object_bodies() {
-        assert!(prepare("https://host/v1", "m", &json!([1, 2]), &RouteLimits::default()).is_err());
+        assert!(prepare(
+            "https://host/v1",
+            "m",
+            &json!([1, 2]),
+            &RouteLimits::default()
+        )
+        .is_err());
     }
 
     #[test]
@@ -141,7 +151,8 @@ mod tests {
         assert_eq!(bare["model"], "gs/p_a/m_1");
 
         // 流式事件：model 在嵌套的 response 里。
-        let mut event = json!({"type": "response.completed", "response": {"model": "vendor/Model-X"}});
+        let mut event =
+            json!({"type": "response.completed", "response": {"model": "vendor/Model-X"}});
         rewrite_model(&mut event, "gs/p_a/m_1");
         assert_eq!(event["response"]["model"], "gs/p_a/m_1");
 
@@ -154,8 +165,8 @@ mod tests {
 
 #[cfg(test)]
 mod reasoning_tests {
-    use super::*;
     use super::super::RouteLimits;
+    use super::*;
     use serde_json::json;
 
     fn limits(efforts: &[&str]) -> RouteLimits {
@@ -171,7 +182,13 @@ mod reasoning_tests {
 
     #[test]
     fn a_declared_effort_is_forwarded_as_is() {
-        let prepared = prepare("https://host/v1", "vendor/M", &request("high"), &limits(&["low", "high"])).unwrap();
+        let prepared = prepare(
+            "https://host/v1",
+            "vendor/M",
+            &request("high"),
+            &limits(&["low", "high"]),
+        )
+        .unwrap();
         let body: serde_json::Value = serde_json::from_slice(&prepared.body).unwrap();
         assert_eq!(body["reasoning"]["effort"], "high");
         assert!(prepared.losses.is_empty());
@@ -179,18 +196,33 @@ mod reasoning_tests {
 
     #[test]
     fn an_undeclared_effort_is_removed_rather_than_forwarded() {
-        let prepared = prepare("https://host/v1", "vendor/M", &request("max"), &limits(&["low", "high"])).unwrap();
+        let prepared = prepare(
+            "https://host/v1",
+            "vendor/M",
+            &request("max"),
+            &limits(&["low", "high"]),
+        )
+        .unwrap();
         let body: serde_json::Value = serde_json::from_slice(&prepared.body).unwrap();
 
         assert!(body.get("reasoning").is_none(), "未声明的档位不得转发");
         assert_eq!(prepared.losses.len(), 1);
-        assert_eq!(prepared.losses[0].message_key, "loss.reasoningEffortOutOfRange");
+        assert_eq!(
+            prepared.losses[0].message_key,
+            "loss.reasoningEffortOutOfRange"
+        );
     }
 
     #[test]
     fn an_unconstrained_model_keeps_the_host_choice() {
         // 没有声明任何档位时不做判断，保持透传（由用户自行承担）。
-        let prepared = prepare("https://host/v1", "vendor/M", &request("high"), &RouteLimits::default()).unwrap();
+        let prepared = prepare(
+            "https://host/v1",
+            "vendor/M",
+            &request("high"),
+            &RouteLimits::default(),
+        )
+        .unwrap();
         let body: serde_json::Value = serde_json::from_slice(&prepared.body).unwrap();
         assert_eq!(body["reasoning"]["effort"], "high");
     }
@@ -203,12 +235,21 @@ mod reasoning_tests {
             "https://host/v1",
             "vendor/M",
             &request,
-            &RouteLimits { output_limit: Some(4_096), reasoning_efforts: vec!["low".to_owned()] },
+            &RouteLimits {
+                output_limit: Some(4_096),
+                reasoning_efforts: vec!["low".to_owned()],
+            },
         )
         .unwrap();
         let body: serde_json::Value = serde_json::from_slice(&prepared.body).unwrap();
 
-        assert_eq!(body["max_output_tokens"], 4096, "透传也必须执行模型声明的上限");
-        assert!(prepared.losses.iter().any(|loss| loss.message_key == "loss.outputLimitCapped"));
+        assert_eq!(
+            body["max_output_tokens"], 4096,
+            "透传也必须执行模型声明的上限"
+        );
+        assert!(prepared
+            .losses
+            .iter()
+            .any(|loss| loss.message_key == "loss.outputLimitCapped"));
     }
 }

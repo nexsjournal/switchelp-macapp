@@ -41,7 +41,9 @@ pub struct BackupStore {
 impl BackupStore {
     /// 备份根目录固定为 `<appData>/backups`。
     pub fn new(app_data_dir: &Path) -> Self {
-        Self { root: app_data_dir.join("backups") }
+        Self {
+            root: app_data_dir.join("backups"),
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -49,10 +51,18 @@ impl BackupStore {
     }
 
     /// 备份一个文件。源文件不存在时返回 `NotFound`——没有原文件就无从备份。
-    pub fn create(&self, source: &Path, now_unix_ms: i64, created_at: &str) -> Result<BackupEntry, CoreError> {
+    pub fn create(
+        &self,
+        source: &Path,
+        now_unix_ms: i64,
+        created_at: &str,
+    ) -> Result<BackupEntry, CoreError> {
         let text = std::fs::read_to_string(source).map_err(|error| {
-            CoreError::not_found("待备份的配置文件")
-                .with_detail(format!("无法读取 {}：{}", source.display(), error))
+            CoreError::not_found("待备份的配置文件").with_detail(format!(
+                "无法读取 {}：{}",
+                source.display(),
+                error
+            ))
         })?;
         if text.len() as u64 > MAX_BACKUP_BYTES {
             return Err(CoreError::validation(format!(
@@ -63,8 +73,7 @@ impl BackupStore {
         }
         let content_hash = crate::codex::config::hash(&text);
         let id = format!("{now_unix_ms}-{}", &content_hash[..8]);
-        std::fs::create_dir_all(&self.root)
-            .map_err(|_| CoreError::internal("无法创建备份目录"))?;
+        std::fs::create_dir_all(&self.root).map_err(|_| CoreError::internal("无法创建备份目录"))?;
         platform::restrict(&self.root, platform::private_dir_mode(Platform::current()))
             .map_err(|_| CoreError::internal("无法设置备份目录权限"))?;
 
@@ -84,7 +93,8 @@ impl BackupStore {
         let meta = self.root.join(format!("{id}.json"));
         std::fs::write(
             &meta,
-            serde_json::to_vec_pretty(&entry).map_err(|_| CoreError::internal("备份元数据序列化失败"))?,
+            serde_json::to_vec_pretty(&entry)
+                .map_err(|_| CoreError::internal("备份元数据序列化失败"))?,
         )
         .map_err(|_| CoreError::internal("无法写入备份元数据"))?;
         platform::restrict(&meta, platform::private_file_mode(Platform::current()))
@@ -105,15 +115,23 @@ impl BackupStore {
             if path.extension().and_then(|value| value.to_str()) != Some("json") {
                 continue;
             }
-            let Ok(text) = std::fs::read_to_string(&path) else { continue };
-            let Ok(entry) = serde_json::from_str::<BackupEntry>(&text) else { continue };
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(entry) = serde_json::from_str::<BackupEntry>(&text) else {
+                continue;
+            };
             // 元数据在但正文不见了：跳过，避免界面给出一个点不动的恢复按钮。
             if !self.root.join(format!("{}.toml", entry.id)).exists() {
                 continue;
             }
             entries.push(entry);
         }
-        entries.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+        entries.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
         Ok(entries)
     }
 
@@ -129,11 +147,7 @@ impl BackupStore {
     /// 预览：内容里疑似密钥的部分全部遮罩。返回遮罩后的文本。
     pub fn read_masked(&self, id: &str) -> Result<String, CoreError> {
         let text = self.read(id)?;
-        Ok(text
-            .lines()
-            .map(mask_line)
-            .collect::<Vec<_>>()
-            .join("\n"))
+        Ok(text.lines().map(mask_line).collect::<Vec<_>>().join("\n"))
     }
 
     /// 保留最近 `keep` 份，其余删除。返回删除份数。
@@ -237,12 +251,18 @@ mod tests {
         let (dir, store) = store();
         let source = write_source(dir.path(), PLAIN_CONFIG);
 
-        let entry = store.create(&source, 1_700_000_000_000, "2026-09-18T00:00:00Z").unwrap();
+        let entry = store
+            .create(&source, 1_700_000_000_000, "2026-09-18T00:00:00Z")
+            .unwrap();
 
         assert_eq!(entry.source_path, source.display().to_string());
         assert_eq!(entry.bytes, PLAIN_CONFIG.len() as u64);
         assert!(!entry.may_contain_secrets);
-        assert_eq!(store.read(&entry.id).unwrap(), PLAIN_CONFIG, "备份必须是原样副本");
+        assert_eq!(
+            store.read(&entry.id).unwrap(),
+            PLAIN_CONFIG,
+            "备份必须是原样副本"
+        );
         assert_eq!(store.list().unwrap().len(), 1);
     }
 
@@ -251,19 +271,29 @@ mod tests {
         let (dir, store) = store();
         let source = write_source(dir.path(), &format!("{PLAIN_CONFIG}{SECRET_LINE}\n"));
 
-        let entry = store.create(&source, 1_700_000_000_000, "2026-09-18T00:00:00Z").unwrap();
+        let entry = store
+            .create(&source, 1_700_000_000_000, "2026-09-18T00:00:00Z")
+            .unwrap();
 
         assert!(entry.may_contain_secrets, "含疑似密钥时必须标记");
         let preview = store.read_masked(&entry.id).unwrap();
-        assert!(!preview.contains("sk-live-0123456789abcdefghijklmnop"), "预览必须遮罩");
-        assert!(preview.contains("experimental_bearer_token"), "结构要保留，否则看不出是什么字段");
+        assert!(
+            !preview.contains("sk-live-0123456789abcdefghijklmnop"),
+            "预览必须遮罩"
+        );
+        assert!(
+            preview.contains("experimental_bearer_token"),
+            "结构要保留，否则看不出是什么字段"
+        );
         // 原始内容仍然完整可读：恢复需要真值。
         assert!(store.read(&entry.id).unwrap().contains("sk-live-"));
     }
 
     #[test]
     fn env_key_names_are_not_mistaken_for_secrets() {
-        assert!(!looks_like_it_contains_secrets("env_key = \"OPENAI_API_KEY\"\n"));
+        assert!(!looks_like_it_contains_secrets(
+            "env_key = \"OPENAI_API_KEY\"\n"
+        ));
         assert!(looks_like_it_contains_secrets(SECRET_LINE));
     }
 
@@ -271,9 +301,17 @@ mod tests {
     fn listing_is_newest_first() {
         let (dir, store) = store();
         let source = write_source(dir.path(), PLAIN_CONFIG);
-        store.create(&source, 1_700_000_000_000, "2026-09-18T00:00:00Z").unwrap();
-        std::fs::write(&source, format!("{PLAIN_CONFIG}model_provider = \"gptswitch\"\n")).unwrap();
-        let newer = store.create(&source, 1_700_000_100_000, "2026-09-18T01:00:00Z").unwrap();
+        store
+            .create(&source, 1_700_000_000_000, "2026-09-18T00:00:00Z")
+            .unwrap();
+        std::fs::write(
+            &source,
+            format!("{PLAIN_CONFIG}model_provider = \"gptswitch\"\n"),
+        )
+        .unwrap();
+        let newer = store
+            .create(&source, 1_700_000_100_000, "2026-09-18T01:00:00Z")
+            .unwrap();
 
         let list = store.list().unwrap();
         assert_eq!(list.len(), 2);
@@ -286,25 +324,44 @@ mod tests {
         let source = write_source(dir.path(), PLAIN_CONFIG);
         for index in 0..5 {
             std::fs::write(&source, format!("{PLAIN_CONFIG}# {index}\n")).unwrap();
-            store.create(&source, 1_700_000_000_000 + index, &format!("2026-09-18T00:00:0{index}Z")).unwrap();
+            store
+                .create(
+                    &source,
+                    1_700_000_000_000 + index,
+                    &format!("2026-09-18T00:00:0{index}Z"),
+                )
+                .unwrap();
         }
 
         assert_eq!(store.prune(2).unwrap(), 3);
         let list = store.list().unwrap();
         assert_eq!(list.len(), 2);
         // 时间戳以 Z 结尾，所以要匹配完整秒位而不是最后一个字符。
-        assert!(list[0].created_at.ends_with(":04Z"), "保留最新的：{:?}", list[0].created_at);
-        assert!(list[1].created_at.ends_with(":03Z"), "其次是次新的：{:?}", list[1].created_at);
+        assert!(
+            list[0].created_at.ends_with(":04Z"),
+            "保留最新的：{:?}",
+            list[0].created_at
+        );
+        assert!(
+            list[1].created_at.ends_with(":03Z"),
+            "其次是次新的：{:?}",
+            list[1].created_at
+        );
     }
 
     #[test]
     fn a_missing_backup_file_is_skipped_instead_of_shown_as_restorable() {
         let (dir, store) = store();
         let source = write_source(dir.path(), PLAIN_CONFIG);
-        let entry = store.create(&source, 1_700_000_000_000, "2026-09-18T00:00:00Z").unwrap();
+        let entry = store
+            .create(&source, 1_700_000_000_000, "2026-09-18T00:00:00Z")
+            .unwrap();
         std::fs::remove_file(store.root().join(format!("{}.toml", entry.id))).unwrap();
 
-        assert!(store.list().unwrap().is_empty(), "正文没了就不该出现在列表里");
+        assert!(
+            store.list().unwrap().is_empty(),
+            "正文没了就不该出现在列表里"
+        );
     }
 
     #[test]
@@ -330,7 +387,9 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let (dir, store) = store();
         let source = write_source(dir.path(), PLAIN_CONFIG);
-        let entry = store.create(&source, 1_700_000_000_000, "2026-09-18T00:00:00Z").unwrap();
+        let entry = store
+            .create(&source, 1_700_000_000_000, "2026-09-18T00:00:00Z")
+            .unwrap();
 
         let mode = std::fs::metadata(store.root().join(format!("{}.toml", entry.id)))
             .unwrap()

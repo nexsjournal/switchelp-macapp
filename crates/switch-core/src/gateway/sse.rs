@@ -203,7 +203,10 @@ impl SseStreamState {
         match self {
             Admitted => matches!(next, Sent | Failed | Cancelled),
             Sent => matches!(next, HeadersAccepted | Failed | Cancelled),
-            HeadersAccepted => matches!(next, Streaming | Completed | Incomplete | Failed | Cancelled),
+            HeadersAccepted => matches!(
+                next,
+                Streaming | Completed | Incomplete | Failed | Cancelled
+            ),
             Streaming => matches!(next, Completed | Incomplete | Failed | Cancelled),
             Completed | Incomplete | Failed | Cancelled => false,
         }
@@ -251,9 +254,13 @@ mod tests {
     #[test]
     fn parses_single_event() {
         let mut parser = SseParser::new();
-        let events = parser.feed(b"event: response.output_text.delta\ndata: {\"delta\":\"hi\"}\n\n");
+        let events =
+            parser.feed(b"event: response.output_text.delta\ndata: {\"delta\":\"hi\"}\n\n");
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].event.as_deref(), Some("response.output_text.delta"));
+        assert_eq!(
+            events[0].event.as_deref(),
+            Some("response.output_text.delta")
+        );
         assert_eq!(events[0].data, "{\"delta\":\"hi\"}");
         assert!(!parser.has_incomplete());
     }
@@ -279,7 +286,7 @@ mod tests {
     fn decodes_utf8_character_split_across_chunks() {
         let mut parser = SseParser::new();
         let text = "中文增量";
-        let payload = format!("data: {}\n\n", text);
+        let payload = format!("data: {text}\n\n");
         let bytes = payload.as_bytes();
         // 在中文字符中间切开，模拟网络分片。
         let split = bytes
@@ -396,7 +403,7 @@ mod tests {
     fn large_payload_across_many_chunks_is_reassembled() {
         let mut parser = SseParser::new();
         let payload = "x".repeat(10_000);
-        let wire = format!("data: {}\n\n", payload);
+        let wire = format!("data: {payload}\n\n");
         let bytes = wire.as_bytes();
         let mut collected: Vec<SseEvent> = Vec::new();
         for chunk in bytes.chunks(97) {
@@ -461,7 +468,7 @@ mod tests {
         };
         let json = serde_json::to_value(&event).unwrap();
         for key in ["event", "data", "id", "retry"] {
-            assert!(json.get(key).is_some(), "缺少字段 {}", key);
+            assert!(json.get(key).is_some(), "缺少字段 {key}");
         }
     }
 }

@@ -15,8 +15,7 @@ impl TokenCount {
     pub fn new(value: u64) -> Result<Self, CoreError> {
         if value > MAX_TOKEN_VALUE {
             return Err(CoreError::validation(format!(
-                "Token 数值超过上限 {}",
-                MAX_TOKEN_VALUE
+                "Token 数值超过上限 {MAX_TOKEN_VALUE}"
             )));
         }
         Ok(Self(value))
@@ -111,17 +110,16 @@ pub fn check_budget(
 
     if let (Some(c), Some(o)) = (context_value, output_value) {
         if o >= c {
-            blocking_issues.push(format!(
-                "最大输出 {} 不能大于等于上下文 {}",
-                o, c
-            ));
+            blocking_issues.push(format!("最大输出 {o} 不能大于等于上下文 {c}"));
         }
     }
 
     let compact_suggestion = match (context_value, output_value) {
         (Some(c), Some(o)) => {
             let by_ratio = (c as f64 * 0.8).floor() as u64;
-            let by_reserve = c.checked_sub(o).and_then(|rest| rest.checked_sub(safety_margin));
+            let by_reserve = c
+                .checked_sub(o)
+                .and_then(|rest| rest.checked_sub(safety_margin));
             match by_reserve {
                 Some(reserve) if reserve > 0 => Some(by_ratio.min(reserve)),
                 _ => {
@@ -152,13 +150,22 @@ mod tests {
         assert_eq!(TokenCount::parse("32K").unwrap().unwrap().value(), 32_000);
         assert_eq!(TokenCount::parse("32Ki").unwrap().unwrap().value(), 32_768);
         assert_eq!(TokenCount::parse("1m").unwrap().unwrap().value(), 1_000_000);
-        assert_eq!(TokenCount::parse("1Mi").unwrap().unwrap().value(), 1_048_576);
+        assert_eq!(
+            TokenCount::parse("1Mi").unwrap().unwrap().value(),
+            1_048_576
+        );
     }
 
     #[test]
     fn parses_grouped_digits_and_rejects_noise() {
-        assert_eq!(TokenCount::parse("128,000").unwrap().unwrap().value(), 128_000);
-        assert_eq!(TokenCount::parse("  8192  ").unwrap().unwrap().value(), 8192);
+        assert_eq!(
+            TokenCount::parse("128,000").unwrap().unwrap().value(),
+            128_000
+        );
+        assert_eq!(
+            TokenCount::parse("  8192  ").unwrap().unwrap().value(),
+            8192
+        );
         assert!(TokenCount::parse("12.5k").is_err());
         assert!(TokenCount::parse("-1").is_err());
         assert!(TokenCount::parse("abc").is_err());
@@ -172,7 +179,10 @@ mod tests {
 
     #[test]
     fn display_keeps_unit_and_exact_value() {
-        assert_eq!(TokenCount::new(128_000).unwrap().display(), "128,000 (128k)");
+        assert_eq!(
+            TokenCount::new(128_000).unwrap().display(),
+            "128,000 (128k)"
+        );
         assert_eq!(TokenCount::new(8192).unwrap().display(), "8,192");
     }
 

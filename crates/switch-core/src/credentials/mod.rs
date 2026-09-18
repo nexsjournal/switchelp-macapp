@@ -31,5 +31,5 @@ pub trait SecretVault: Send + Sync {
 
 /// 生成凭据库条目引用。引用本身不含秘密，可以安全落库。
 pub fn secret_ref(provider_id: &str, credential_id: &str, version: u32) -> String {
-    format!("gptswitch/{}/{}/v{}", provider_id, credential_id, version)
+    format!("gptswitch/{provider_id}/{credential_id}/v{version}")
 }

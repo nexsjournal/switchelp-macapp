@@ -1,16 +1,16 @@
-use std::sync::Arc;
 use serde::Serialize;
+use std::sync::Arc;
 use switch_core::{
     application::{AppliedSummary, ModelDraft, ProviderDraft},
     codex::backup::BackupEntry,
-    diagnostics::{
-        fetch_models, DiagnosticEvent, DiscoveredModel, ExportPreview, LogLevel, ProbePlan,
-        ProbeReport, ProbeTarget,
-    },
     codex::{
         config::{ConfigSnapshot, MANAGED_KEYS},
         detect::CodexInstance,
         plan::{ApplyPlan, OperationEvent},
+    },
+    diagnostics::{
+        fetch_models, DiagnosticEvent, DiscoveredModel, ExportPreview, LogLevel, ProbePlan,
+        ProbeReport, ProbeTarget,
     },
     domain::{
         credential::Credential,
@@ -48,7 +48,10 @@ pub struct ExecuteResult {
 
 /// 当前已生效的配置摘要；从未应用过时返回 null。
 #[tauri::command]
-pub async fn apply_summary(window: WebviewWindow, state: Desktop<'_>) -> Result<Option<AppliedSummary>, CoreError> {
+pub async fn apply_summary(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<Option<AppliedSummary>, CoreError> {
     run(window, state, |desktop| desktop.apply.applied_summary()).await
 }
 
@@ -79,80 +82,185 @@ pub struct ApplyStatus {
 }
 
 fn authorize(window: &WebviewWindow) -> Result<(), CoreError> {
-    let url = window.url().map_err(|_| CoreError::new(ErrorCode::Unauthorized, "error.unauthorized"))?;
+    let url = window
+        .url()
+        .map_err(|_| CoreError::new(ErrorCode::Unauthorized, "error.unauthorized"))?;
     let packaged = (url.scheme() == "tauri" && url.host_str() == Some("localhost"))
         || (matches!(url.scheme(), "http" | "https") && url.host_str() == Some("tauri.localhost"));
-    let development = cfg!(debug_assertions) && url.scheme() == "http"
-        && matches!(url.host_str(), Some("localhost" | "127.0.0.1")) && url.port() == Some(5173);
+    let development = cfg!(debug_assertions)
+        && url.scheme() == "http"
+        && matches!(url.host_str(), Some("localhost" | "127.0.0.1"))
+        && url.port() == Some(5173);
     if window.label() != "main" || (!packaged && !development) {
-        return Err(CoreError::new(ErrorCode::Unauthorized, "error.unauthorized"));
+        return Err(CoreError::new(
+            ErrorCode::Unauthorized,
+            "error.unauthorized",
+        ));
     }
     Ok(())
 }
 
-async fn run<T: Send + 'static>(window: WebviewWindow, state: Desktop<'_>,
-    work: impl FnOnce(&DesktopState) -> Result<T, CoreError> + Send + 'static) -> Result<T, CoreError> {
+async fn run<T: Send + 'static>(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    work: impl FnOnce(&DesktopState) -> Result<T, CoreError> + Send + 'static,
+) -> Result<T, CoreError> {
     authorize(&window)?;
     let desktop = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || work(&desktop)).await
+    tauri::async_runtime::spawn_blocking(move || work(&desktop))
+        .await
         .map_err(|_| CoreError::internal("后台操作异常退出"))?
 }
 
 #[tauri::command]
-pub async fn providers_list(window: WebviewWindow, state: Desktop<'_>) -> Result<Vec<Provider>, CoreError> {
+pub async fn providers_list(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<Vec<Provider>, CoreError> {
     run(window, state, |desktop| desktop.workspace.list_providers()).await
 }
 #[tauri::command]
-pub async fn providers_save(window: WebviewWindow, state: Desktop<'_>, draft: ProviderDraft, expected_version: u64) -> Result<Provider, CoreError> {
-    run(window, state, move |desktop| desktop.workspace.save_provider(draft, expected_version)).await
+pub async fn providers_save(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    draft: ProviderDraft,
+    expected_version: u64,
+) -> Result<Provider, CoreError> {
+    run(window, state, move |desktop| {
+        desktop.workspace.save_provider(draft, expected_version)
+    })
+    .await
 }
 #[tauri::command]
-pub async fn credentials_list(window: WebviewWindow, state: Desktop<'_>, provider_id: String) -> Result<Vec<Credential>, CoreError> {
-    run(window, state, move |desktop| desktop.workspace.list_credentials(&provider_id)).await
+pub async fn credentials_list(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    provider_id: String,
+) -> Result<Vec<Credential>, CoreError> {
+    run(window, state, move |desktop| {
+        desktop.workspace.list_credentials(&provider_id)
+    })
+    .await
 }
 #[tauri::command]
-pub async fn credentials_add(window: WebviewWindow, state: Desktop<'_>, provider_id: String, label: String, secret: String) -> Result<Credential, CoreError> {
-    run(window, state, move |desktop| desktop.workspace.add_credential(&provider_id, &label, secret)).await
+pub async fn credentials_add(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    provider_id: String,
+    label: String,
+    secret: String,
+) -> Result<Credential, CoreError> {
+    run(window, state, move |desktop| {
+        desktop
+            .workspace
+            .add_credential(&provider_id, &label, secret)
+    })
+    .await
 }
 #[tauri::command]
-pub async fn credentials_replace(window: WebviewWindow, state: Desktop<'_>, credential_id: String, secret: String, expected_version: u64) -> Result<Credential, CoreError> {
-    run(window, state, move |desktop| desktop.workspace.replace_credential(&credential_id, secret, expected_version)).await
+pub async fn credentials_replace(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    credential_id: String,
+    secret: String,
+    expected_version: u64,
+) -> Result<Credential, CoreError> {
+    run(window, state, move |desktop| {
+        desktop
+            .workspace
+            .replace_credential(&credential_id, secret, expected_version)
+    })
+    .await
 }
 #[tauri::command]
-pub async fn credentials_select(window: WebviewWindow, state: Desktop<'_>, provider_id: String, credential_id: String) -> Result<(), CoreError> {
-    run(window, state, move |desktop| desktop.workspace.select_credential(&provider_id, &credential_id)).await
+pub async fn credentials_select(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    provider_id: String,
+    credential_id: String,
+) -> Result<(), CoreError> {
+    run(window, state, move |desktop| {
+        desktop
+            .workspace
+            .select_credential(&provider_id, &credential_id)
+    })
+    .await
 }
 #[tauri::command]
-pub async fn models_list(window: WebviewWindow, state: Desktop<'_>) -> Result<Vec<Model>, CoreError> {
+pub async fn models_list(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<Vec<Model>, CoreError> {
     run(window, state, |desktop| desktop.workspace.list_models()).await
 }
 #[tauri::command]
-pub async fn models_save(window: WebviewWindow, state: Desktop<'_>, draft: ModelDraft, expected_version: u64) -> Result<Model, CoreError> {
-    run(window, state, move |desktop| desktop.workspace.save_model(draft, expected_version)).await
+pub async fn models_save(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    draft: ModelDraft,
+    expected_version: u64,
+) -> Result<Model, CoreError> {
+    run(window, state, move |desktop| {
+        desktop.workspace.save_model(draft, expected_version)
+    })
+    .await
 }
 
 #[tauri::command]
-pub async fn providers_delete(window: WebviewWindow, state: Desktop<'_>, provider_id: String) -> Result<(), CoreError> {
-    run(window, state, move |desktop| desktop.workspace.delete_provider(&provider_id)).await
+pub async fn providers_delete(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    provider_id: String,
+) -> Result<(), CoreError> {
+    run(window, state, move |desktop| {
+        desktop.workspace.delete_provider(&provider_id)
+    })
+    .await
 }
 #[tauri::command]
-pub async fn credentials_delete(window: WebviewWindow, state: Desktop<'_>, credential_id: String) -> Result<(), CoreError> {
-    run(window, state, move |desktop| desktop.workspace.delete_credential(&credential_id)).await
+pub async fn credentials_delete(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    credential_id: String,
+) -> Result<(), CoreError> {
+    run(window, state, move |desktop| {
+        desktop.workspace.delete_credential(&credential_id)
+    })
+    .await
 }
 #[tauri::command]
-pub async fn models_delete(window: WebviewWindow, state: Desktop<'_>, model_id: String, expected_version: u64) -> Result<(), CoreError> {
-    run(window, state, move |desktop| desktop.workspace.delete_model(&model_id, expected_version)).await
+pub async fn models_delete(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    model_id: String,
+    expected_version: u64,
+) -> Result<(), CoreError> {
+    run(window, state, move |desktop| {
+        desktop.workspace.delete_model(&model_id, expected_version)
+    })
+    .await
 }
 
 /// 只读检测 Codex 实例；不安装、不写入、不读取任何凭据。
 #[tauri::command]
-pub async fn instances_detect(window: WebviewWindow, state: Desktop<'_>, explicit_path: Option<String>) -> Result<Vec<CodexInstance>, CoreError> {
-    run(window, state, move |desktop| desktop.detect_instances(explicit_path)).await
+pub async fn instances_detect(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    explicit_path: Option<String>,
+) -> Result<Vec<CodexInstance>, CoreError> {
+    run(window, state, move |desktop| {
+        desktop.detect_instances(explicit_path)
+    })
+    .await
 }
 
 /// 读取并脱敏当前配置，供差异页与冲突提示使用。
 #[tauri::command]
-pub async fn config_inspect(window: WebviewWindow, state: Desktop<'_>, instance_id: String) -> Result<InspectResult, CoreError> {
+pub async fn config_inspect(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    instance_id: String,
+) -> Result<InspectResult, CoreError> {
     run(window, state, move |desktop| {
         let instance = desktop.instance(&instance_id)?;
         let snapshot = ConfigSnapshot::read(&instance.config_file)?;
@@ -174,19 +282,34 @@ pub async fn config_inspect(window: WebviewWindow, state: Desktop<'_>, instance_
 
 /// 生成应用计划。只写目录草稿，绝不修改 Codex 配置。
 #[tauri::command]
-pub async fn apply_plan(window: WebviewWindow, state: Desktop<'_>, instance_id: String, default_alias: Option<String>) -> Result<ApplyPlan, CoreError> {
+pub async fn apply_plan(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    instance_id: String,
+    default_alias: Option<String>,
+) -> Result<ApplyPlan, CoreError> {
     run(window, state, move |desktop| {
         let instance = desktop.instance(&instance_id)?;
-        desktop.apply.plan_apply(&instance, default_alias.as_deref())
+        desktop
+            .apply
+            .plan_apply(&instance, default_alias.as_deref())
     })
     .await
 }
 
 /// 提交应用计划。必须携带计划摘要；CAS 失败即转入冲突。
 #[tauri::command]
-pub async fn apply_execute(window: WebviewWindow, state: Desktop<'_>, plan_id: String, plan_hash: String, idempotency_key: String) -> Result<ExecuteResult, CoreError> {
+pub async fn apply_execute(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    plan_id: String,
+    plan_hash: String,
+    idempotency_key: String,
+) -> Result<ExecuteResult, CoreError> {
     run(window, state, move |desktop| {
-        let operation_id = desktop.apply.execute_apply(&plan_id, &plan_hash, &idempotency_key)?;
+        let operation_id = desktop
+            .apply
+            .execute_apply(&plan_id, &plan_hash, &idempotency_key)?;
         Ok(ExecuteResult { operation_id })
     })
     .await
@@ -194,13 +317,25 @@ pub async fn apply_execute(window: WebviewWindow, state: Desktop<'_>, plan_id: S
 
 /// 查询事务状态。界面据此显示“等待 Codex 重载”而不是“已加载”。
 #[tauri::command]
-pub async fn apply_status(window: WebviewWindow, state: Desktop<'_>, operation_id: String) -> Result<ApplyStatus, CoreError> {
-    run(window, state, move |desktop| status_of(desktop, &operation_id)).await
+pub async fn apply_status(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    operation_id: String,
+) -> Result<ApplyStatus, CoreError> {
+    run(window, state, move |desktop| {
+        status_of(desktop, &operation_id)
+    })
+    .await
 }
 
 /// 用户确认宿主是否已经加载新目录；未确认时停在等待状态。
 #[tauri::command]
-pub async fn apply_confirm_reload(window: WebviewWindow, state: Desktop<'_>, operation_id: String, loaded: bool) -> Result<ApplyStatus, CoreError> {
+pub async fn apply_confirm_reload(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    operation_id: String,
+    loaded: bool,
+) -> Result<ApplyStatus, CoreError> {
     run(window, state, move |desktop| {
         desktop.apply.confirm_reload(&operation_id, loaded)?;
         status_of(desktop, &operation_id)
@@ -210,7 +345,11 @@ pub async fn apply_confirm_reload(window: WebviewWindow, state: Desktop<'_>, ope
 
 /// 生成还原计划。只撤销本工具写入且未被外部修改的字段。
 #[tauri::command]
-pub async fn restore_plan(window: WebviewWindow, state: Desktop<'_>, instance_id: String) -> Result<ApplyPlan, CoreError> {
+pub async fn restore_plan(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    instance_id: String,
+) -> Result<ApplyPlan, CoreError> {
     run(window, state, move |desktop| {
         let instance = desktop.instance(&instance_id)?;
         desktop.apply.plan_restore(&instance)
@@ -220,9 +359,17 @@ pub async fn restore_plan(window: WebviewWindow, state: Desktop<'_>, instance_id
 
 /// 提交还原计划。与应用共用同一套 CAS 与幂等规则。
 #[tauri::command]
-pub async fn restore_execute(window: WebviewWindow, state: Desktop<'_>, plan_id: String, plan_hash: String, idempotency_key: String) -> Result<ExecuteResult, CoreError> {
+pub async fn restore_execute(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    plan_id: String,
+    plan_hash: String,
+    idempotency_key: String,
+) -> Result<ExecuteResult, CoreError> {
     run(window, state, move |desktop| {
-        let operation_id = desktop.apply.execute_restore(&plan_id, &plan_hash, &idempotency_key)?;
+        let operation_id = desktop
+            .apply
+            .execute_restore(&plan_id, &plan_hash, &idempotency_key)?;
         Ok(ExecuteResult { operation_id })
     })
     .await
@@ -230,7 +377,10 @@ pub async fn restore_execute(window: WebviewWindow, state: Desktop<'_>, plan_id:
 
 /// 网关状态：本机网关是否在监听、服务了哪个目录版本。
 #[tauri::command]
-pub async fn gateway_status(window: WebviewWindow, state: Desktop<'_>) -> Result<GatewayReport, CoreError> {
+pub async fn gateway_status(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<GatewayReport, CoreError> {
     run(window, state, |desktop| {
         Ok(match desktop.gateway() {
             Some(gateway) => {
@@ -272,13 +422,20 @@ pub struct PlatformReport {
 
 /// 备份列表与手动备份。备份可能含其他工具写入的密钥，因此默认只给遮罩预览。
 #[tauri::command]
-pub async fn backups_list(window: WebviewWindow, state: Desktop<'_>) -> Result<Vec<BackupEntry>, CoreError> {
+pub async fn backups_list(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<Vec<BackupEntry>, CoreError> {
     run(window, state, |desktop| desktop.backups().list()).await
 }
 
 /// 手动备份一个实例的配置文件。
 #[tauri::command]
-pub async fn backups_create(window: WebviewWindow, state: Desktop<'_>, instance_id: String) -> Result<BackupEntry, CoreError> {
+pub async fn backups_create(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    instance_id: String,
+) -> Result<BackupEntry, CoreError> {
     run(window, state, move |desktop| {
         let instance = desktop.instance(&instance_id)?;
         let now = switch_core::diagnostics::now_rfc3339();
@@ -286,11 +443,14 @@ pub async fn backups_create(window: WebviewWindow, state: Desktop<'_>, instance_
             .duration_since(std::time::UNIX_EPOCH)
             .map(|elapsed| elapsed.as_millis() as i64)
             .unwrap_or_default();
-        let entry = desktop
-            .backups()
-            .create(std::path::Path::new(&instance.config_file), millis, &now)?;
+        let entry =
+            desktop
+                .backups()
+                .create(std::path::Path::new(&instance.config_file), millis, &now)?;
         // 保留策略与自动备份共用：只保留最近若干份。
-        let _ = desktop.backups().prune(switch_core::codex::backup::DEFAULT_KEEP);
+        let _ = desktop
+            .backups()
+            .prune(switch_core::codex::backup::DEFAULT_KEEP);
         Ok(entry)
     })
     .await
@@ -298,8 +458,15 @@ pub async fn backups_create(window: WebviewWindow, state: Desktop<'_>, instance_
 
 /// 备份的遮罩预览。原始内容不经过 IPC，避免明文密钥进入前端状态。
 #[tauri::command]
-pub async fn backups_preview(window: WebviewWindow, state: Desktop<'_>, backup_id: String) -> Result<String, CoreError> {
-    run(window, state, move |desktop| desktop.backups().read_masked(&backup_id)).await
+pub async fn backups_preview(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    backup_id: String,
+) -> Result<String, CoreError> {
+    run(window, state, move |desktop| {
+        desktop.backups().read_masked(&backup_id)
+    })
+    .await
 }
 
 /// 恢复一份备份。
@@ -307,7 +474,11 @@ pub async fn backups_preview(window: WebviewWindow, state: Desktop<'_>, backup_i
 /// 会先把**当前**文件再备份一次，因此恢复本身也可回退。
 /// 事务记录不跟着回退——之后可以重新生成差异。
 #[tauri::command]
-pub async fn backups_restore(window: WebviewWindow, state: Desktop<'_>, backup_id: String) -> Result<String, CoreError> {
+pub async fn backups_restore(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    backup_id: String,
+) -> Result<String, CoreError> {
     run(window, state, move |desktop| {
         let text = desktop.backups().read(&backup_id)?;
         let entry = desktop
@@ -347,7 +518,10 @@ pub struct UpdateReport {
 
 /// 检查更新。对公开仓库的 Release 做一次只读查询，不下载、不安装。
 #[tauri::command]
-pub async fn update_check(window: WebviewWindow, state: Desktop<'_>) -> Result<UpdateReport, CoreError> {
+pub async fn update_check(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<UpdateReport, CoreError> {
     run(window, state, |_desktop| {
         let status = switch_core::diagnostics::check_update(
             env!("CARGO_PKG_VERSION"),
@@ -367,7 +541,10 @@ pub async fn update_check(window: WebviewWindow, state: Desktop<'_>) -> Result<U
 
 /// 平台信息。前端据此设置 `data-platform` 与窗口相关 CSS 变量。
 #[tauri::command]
-pub async fn platform_info(window: WebviewWindow, state: Desktop<'_>) -> Result<PlatformReport, CoreError> {
+pub async fn platform_info(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<PlatformReport, CoreError> {
     run(window, state, |_desktop| {
         let platform = switch_core::platform::Platform::current();
         let chrome = switch_core::platform::window_chrome(platform);
@@ -383,7 +560,11 @@ pub async fn platform_info(window: WebviewWindow, state: Desktop<'_>) -> Result<
 
 /// 暂停或继续接受新推理请求。在途请求不受影响。
 #[tauri::command]
-pub async fn gateway_set_paused(window: WebviewWindow, state: Desktop<'_>, paused: bool) -> Result<bool, CoreError> {
+pub async fn gateway_set_paused(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    paused: bool,
+) -> Result<bool, CoreError> {
     run(window, state, move |desktop| {
         let gateway = desktop
             .gateway()
@@ -412,7 +593,11 @@ pub struct ExportResult {
 
 /// 列出诊断事件。`level` 为空表示不过滤。
 #[tauri::command]
-pub async fn diagnostics_list(window: WebviewWindow, state: Desktop<'_>, level: Option<String>) -> Result<DiagnosticList, CoreError> {
+pub async fn diagnostics_list(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    level: Option<String>,
+) -> Result<DiagnosticList, CoreError> {
     run(window, state, move |desktop| {
         let level = match level.as_deref() {
             Some("warning") => Some(LogLevel::Warning),
@@ -420,46 +605,74 @@ pub async fn diagnostics_list(window: WebviewWindow, state: Desktop<'_>, level: 
             Some("info") => Some(LogLevel::Info),
             _ => None,
         };
-        Ok(DiagnosticList { items: desktop.diagnostics().list(level), next_cursor: None })
+        Ok(DiagnosticList {
+            items: desktop.diagnostics().list(level),
+            next_cursor: None,
+        })
     })
     .await
 }
 
 /// 清空本工具自己的诊断事件。不影响 Codex 历史与配置事务记录。
 #[tauri::command]
-pub async fn diagnostics_clear(window: WebviewWindow, state: Desktop<'_>) -> Result<usize, CoreError> {
+pub async fn diagnostics_clear(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<usize, CoreError> {
     run(window, state, |desktop| Ok(desktop.diagnostics().clear())).await
 }
 
 /// 诊断包预览：列出包含项、排除项与准确体积，保存前先让用户看清楚。
 #[tauri::command]
-pub async fn diagnostics_preview(window: WebviewWindow, state: Desktop<'_>, scopes: Vec<String>) -> Result<ExportPreview, CoreError> {
+pub async fn diagnostics_preview(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    scopes: Vec<String>,
+) -> Result<ExportPreview, CoreError> {
     run(window, state, move |desktop| {
-        switch_core::diagnostics::preview_export(&desktop.diagnostics(), &scopes, env!("CARGO_PKG_VERSION"))
+        switch_core::diagnostics::preview_export(
+            &desktop.diagnostics(),
+            &scopes,
+            env!("CARGO_PKG_VERSION"),
+        )
     })
     .await
 }
 
 /// 导出诊断包到应用数据目录，返回真实保存路径。
 #[tauri::command]
-pub async fn diagnostics_export(window: WebviewWindow, state: Desktop<'_>, scopes: Vec<String>) -> Result<ExportResult, CoreError> {
+pub async fn diagnostics_export(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    scopes: Vec<String>,
+) -> Result<ExportResult, CoreError> {
     run(window, state, move |desktop| {
         let stamp = switch_core::diagnostics::now_rfc3339().replace(':', "-");
-        let path = desktop.exports_dir().join(format!("diagnostics-{stamp}.json"));
+        let path = desktop
+            .exports_dir()
+            .join(format!("diagnostics-{stamp}.json"));
         let (saved_path, bytes) = switch_core::diagnostics::write_export(
             &desktop.diagnostics(),
             &scopes,
             env!("CARGO_PKG_VERSION"),
             &path,
         )?;
-        Ok(ExportResult { saved_path: saved_path.display().to_string(), bytes })
+        Ok(ExportResult {
+            saved_path: saved_path.display().to_string(),
+            bytes,
+        })
     })
     .await
 }
 
 /// 读取上游模型列表。结果只作为发现值，不覆盖用户手工填写的显示名。
 #[tauri::command]
-pub async fn models_discover(window: WebviewWindow, state: Desktop<'_>, provider_id: String, credential_id: String) -> Result<Vec<DiscoveredModel>, CoreError> {
+pub async fn models_discover(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    provider_id: String,
+    credential_id: String,
+) -> Result<Vec<DiscoveredModel>, CoreError> {
     run(window, state, move |desktop| {
         let repository = desktop.workspace.repository.clone();
         let provider = repository
@@ -534,17 +747,28 @@ pub async fn probes_start(
                 .map(|model| model.display_name.clone())
                 .unwrap_or_else(|| provider.name.clone()),
         };
-        let plan = ProbePlan { protocol, include_generate };
+        let plan = ProbePlan {
+            protocol,
+            include_generate,
+        };
         let probe_id = probe_id
             .filter(|id| !id.trim().is_empty())
-            .unwrap_or_else(|| uuid_like());
+            .unwrap_or_else(uuid_like);
         let secret = desktop.workspace.resolve_secret(&credential_id)?;
 
-        let report = desktop
-            .probes()
-            .run(&probe_id, &provider.endpoint, &target, &plan, secret.expose());
+        let report = desktop.probes().run(
+            &probe_id,
+            &provider.endpoint,
+            &target,
+            &plan,
+            secret.expose(),
+        );
 
-        let level = if report.passed() { LogLevel::Info } else { LogLevel::Warning };
+        let level = if report.passed() {
+            LogLevel::Info
+        } else {
+            LogLevel::Warning
+        };
         desktop.diagnostics().record(
             DiagnosticEvent::new(
                 switch_core::diagnostics::now_rfc3339(),
@@ -564,8 +788,15 @@ pub async fn probes_start(
 
 /// 取消探测。已经进入的阻塞请求不会被中断，但后续阶段不再执行。
 #[tauri::command]
-pub async fn probes_cancel(window: WebviewWindow, state: Desktop<'_>, probe_id: String) -> Result<bool, CoreError> {
-    run(window, state, move |desktop| Ok(desktop.probes().cancel(&probe_id))).await
+pub async fn probes_cancel(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    probe_id: String,
+) -> Result<bool, CoreError> {
+    run(window, state, move |desktop| {
+        Ok(desktop.probes().cancel(&probe_id))
+    })
+    .await
 }
 
 /// 不引入额外依赖的随机标识，供未指定 probeId 的调用方使用。

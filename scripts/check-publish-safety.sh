@@ -105,8 +105,12 @@ else
 fi
 
 section '⑥ 签名身份与团队标识（需要人工判断）'
-# 这些不是密钥，但会公开你的真实姓名与 Apple 团队 —— 发布文档里可能是有意保留的。
-if hits=$(scan "Developer ID (Application|Installer):|Apple Distribution:[^\"']*|\([A-Z0-9]{10}\)"); then
+# 这些不是密钥，但会公开你的真实姓名与 Apple 团队。文档里用 `<你的名字>` 与
+# `TEAMID1234` 占位，这两种占位不算命中。
+# 团队 ID 的形态是括号里的 10 位大写字母数字；必须带括号，否则纯数字会误伤（如 2147483647）。
+IDENTITY="Developer ID (Application|Installer):|Apple Distribution:[[:alnum:]_ .-]*|\\([A-Z0-9]{10}\\)"
+IDENTITY_PLACEHOLDER="<你的名字>|TEAMID1234|Developer ID (Application|Installer): \\.\\.\\.|Apple Distribution: \\.\\.\\."
+if hits=$(scan "$IDENTITY" | grep -vE "$IDENTITY_PLACEHOLDER"); then
   printf '%s\n' "$hits" | head -20
   warn "签名身份/团队 ID 可能是纪实内容；确认是你要公开的信息，否则改成占位"
 else

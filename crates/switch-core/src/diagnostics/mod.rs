@@ -14,8 +14,8 @@ mod update;
 
 pub use discovery::{fetch as fetch_models, DiscoveredModel};
 pub use export::{build_export, preview_export, write_export, ExportPreview, PreviewItem};
-pub use update::{check as check_update, UpdateStatus, DEFAULT_ENDPOINT as UPDATE_ENDPOINT};
 pub use probe::{ProbePlan, ProbeReport, ProbeState, ProbeTarget, Probes, StageOutcome};
+pub use update::{check as check_update, UpdateStatus, DEFAULT_ENDPOINT as UPDATE_ENDPOINT};
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;
@@ -328,8 +328,9 @@ fn looks_like_secret(token: &str) -> bool {
 /// `prune` 依赖的“等长 RFC3339 文本字典序即时间序”不再成立（长度不等的时间戳一律
 /// 不淘汰，事件会绕过保留策略），诊断包的预览体积也会因两次调用得到不同长度的
 /// 时间戳而与实际导出对不上。
-const TIMESTAMP_FORMAT: &[time::format_description::BorrowedFormatItem<'static>] =
-    time::macros::format_description!("[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z");
+const TIMESTAMP_FORMAT: &[time::format_description::BorrowedFormatItem<'static>] = time::macros::format_description!(
+    "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+);
 
 /// 按 `TIMESTAMP_FORMAT` 格式化，供生成与比较两侧共用。
 fn format_timestamp(stamp: time::OffsetDateTime) -> Option<String> {
@@ -388,7 +389,10 @@ mod tests {
     #[test]
     fn values_are_redacted_even_under_allowed_keys() {
         let recorded = event("gs/p_a/m_1")
-            .with_metadata("error_code", "upstream said: token sk-live-0123456789abcdefghij")
+            .with_metadata(
+                "error_code",
+                "upstream said: token sk-live-0123456789abcdefghij",
+            )
             .with_metadata("alias", "Bearer 0123456789abcdef0123456789abcdef");
 
         let rendered = serde_json::to_string(&recorded).unwrap();
@@ -429,7 +433,11 @@ mod tests {
             .collect();
         assert_eq!(
             targets,
-            vec!["target-7".to_owned(), "target-8".to_owned(), "target-9".to_owned()],
+            vec![
+                "target-7".to_owned(),
+                "target-8".to_owned(),
+                "target-9".to_owned()
+            ],
             "保留最新的事件"
         );
     }
