@@ -1,3 +1,6 @@
+import { isTauri } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+
 /**
  * 主题控制。
  *
@@ -41,7 +44,22 @@ export function applyTheme(preference: ThemePreference): ResolvedTheme {
   document.documentElement.dataset.theme = resolved;
   // 让原生控件（select、滚动条、复选框）跟随主题。
   document.documentElement.style.colorScheme = resolved;
+  applyWindowTheme(resolved);
   return resolved;
+}
+
+/**
+ * 让原生窗口外观跟随应用主题。
+ *
+ * macOS 的标题栏是透明的（`titleBarStyle: Overlay`），交通灯按钮由系统按**窗口外观**取色；
+ * 只改 DOM 的话，系统是浅色而应用选了深色主题时，窗口顶部会露出一圈不协调的浅色。
+ */
+function applyWindowTheme(resolved: ResolvedTheme): void {
+  if (!isTauri()) return;
+  void getCurrentWindow()
+    .setTheme(resolved)
+    // 平台不支持或缺少权限时忽略：界面主题本身照常生效。
+    .catch(() => {});
 }
 
 export function setThemePreference(preference: ThemePreference): ResolvedTheme {
