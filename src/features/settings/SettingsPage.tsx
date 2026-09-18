@@ -117,13 +117,14 @@ export function SettingsPage({ client, gateway, onNavigate }: {
           {gateway?.error && <span className="text-muted">{gateway.error}</span>}
         </dd>
         <dt>{t('settings.listenAddress')}<span className={styles.readOnly}>{t('settings.readOnly')}</span></dt>
-        <dd className="text-mono">{gateway?.running ? `127.0.0.1:${gateway.port}` : '—'}
-          <span className="text-muted">{t('settings.listenNote')}</span></dd>
+        {/* 常显一行就够；「为什么不能改」的解释放在 title 里，不占版面。 */}
+        <dd className="text-mono" title={t('settings.listenNote')}>{gateway?.running ? `127.0.0.1:${gateway.port}` : '—'}
+          <span className="text-muted">{t('settings.listenNoteShort')}</span></dd>
         <dt>{t('settings.publishedCatalog')}</dt><dd>{gateway?.revisions.length ? t('settings.publishedCount', { count: gateway.revisions.length }) : t('settings.publishedNone')}<span className="text-muted">{t('settings.publishedNote')}</span></dd>
         <dt>{t('settings.servedRequests')}</dt><dd className="text-mono">{gateway?.served ?? 0}<span className="text-muted">{t('settings.servedNote')}</span></dd>
         <dt>{t('settings.acceptRequests')}</dt><dd>{paused ? t('settings.acceptPaused') : t('settings.acceptNormal')}
           <span className="text-muted">{t('settings.pauseNote')}</span></dd>
-        <dt>{t('settings.tokenFingerprint')}</dt><dd className="text-mono">{gateway?.tokenFingerprint || '—'}<span className="text-muted">{t('settings.tokenNote')}</span></dd>
+        <dt>{t('settings.tokenFingerprint')}</dt><dd className="text-mono" title={t('settings.tokenNote')}>{gateway?.tokenFingerprint || '—'}<span className="text-muted">{t('settings.tokenNoteShort')}</span></dd>
       </dl>
       <div className={styles.actions}>
         <button onClick={() => void togglePaused()} disabled={!gateway?.running}>

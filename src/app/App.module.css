@@ -3,9 +3,12 @@
 .shell { display: flex; height: 100%; min-width: 860px; position: relative; }
 .sidebar { width: var(--sidebar-width); flex-shrink: 0; background: var(--bg-sidebar); border-right: 1px solid var(--border-subtle); padding: 32px 16px 20px; display: flex; flex-direction: column; }
 .brand { display: flex; align-items: center; gap: 12px; padding: 0 8px 40px; }
-.brandIcon { width: 36px; height: 36px; display: grid; place-items: center; background: var(--text-primary); color: var(--bg-canvas); border-radius: 10px; }
-.brand strong { display: block; font-size: 19px; letter-spacing: -.7px; }
-.brand span { display: block; font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+.brandIcon { width: 36px; height: 36px; flex-shrink: 0; display: grid; place-items: center; background: var(--text-primary); color: var(--bg-canvas); border-radius: 10px; }
+/* 文本块允许收缩，才能在窄侧栏里省略号截断，而不是把 logo 挤扁。 */
+.brand > div:last-child { min-width: 0; }
+.brand strong { display: block; font-size: 19px; line-height: 22px; letter-spacing: -.7px; }
+/* 行高显式给值：继承正文的 22 会让 11px 的副标题上方多出一大截行距，两行看着离得远。 */
+.brand span { display: block; font-size: 11px; line-height: 14px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sidebar nav { display: grid; gap: 8px; }
 .sidebar nav button { justify-content: flex-start; border: 1px solid transparent; height: 44px; padding: 0 16px; background: transparent; color: var(--text-secondary); border-radius: var(--radius-nav); }
 .sidebar nav button:hover { background: var(--bg-hover); color: var(--text-primary); }
