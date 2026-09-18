@@ -211,6 +211,50 @@ impl Harness {
     }
 }
 
+/// 换过 Key 之后再应用一次。
+///
+/// 目录内容没变（版本号相同），但路由快照里的凭据版本变了；而 `router.publish` 的不可变
+/// 守卫是按「目录版本」比对的：同一版本、内容不同即拒绝发布。结果就是「换了 Key 再点应用」
+/// 静默失败——事务停在 prepared，Codex 配置一行都没改，界面只说闪了一下。
+#[test]
+fn applying_again_after_rotating_the_key_succeeds() {
+    let harness = Harness::with_ready_model(None);
+
+    let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+    let first = harness
+        .service
+        .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-first")
+        .unwrap();
+    assert_eq!(harness.stage(&first), ApplyStage::AwaitingReload);
+
+    // 换一个 Key：只动凭据，模型与目录内容都不变。
+    let provider = harness.workspace.list_providers().unwrap().remove(0);
+    let credential = harness
+        .workspace
+        .list_credentials(provider.id.as_str())
+        .unwrap()
+        .remove(0);
+    harness
+        .workspace
+        .replace_credential(
+            credential.id.as_str(),
+            "synthetic-rotated-secret-0123456789".into(),
+            credential.version,
+        )
+        .unwrap();
+
+    let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+    let second = harness
+        .service
+        .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-second");
+    assert!(
+        second.is_ok(),
+        "换 Key 后再应用必须成功：{:?}",
+        second.err()
+    );
+    assert_eq!(harness.stage(&second.unwrap()), ApplyStage::AwaitingReload);
+}
+
 #[test]
 fn plan_stage_never_touches_codex_config_but_writes_the_catalog() {
     let harness = Harness::with_ready_model(None);

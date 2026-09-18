@@ -230,9 +230,17 @@ impl ApplyService {
         let compiled = CatalogCompiler::compile(&selected, &options)?;
         let catalog_bytes = compiled.to_json_bytes()?;
         let catalog_hash = hash(&String::from_utf8_lossy(&catalog_bytes));
-        let catalog_revision = self
-            .layout
-            .catalog_revision(&hash(&format!("{}:{}", instance.id, catalog_hash)));
+        // 目录版本必须覆盖「本次要服务的整套状态」，不只是目录文件本身。
+        //
+        // 路由快照里还含凭据版本、协议、输出上限与模态；这些变了而目录没变时，版本号若保持
+        // 不变，`router.publish` 的不可变守卫会以 `error.catalogRevisionConflict` 拒发——
+        // 表现就是「换了 Key / 改过策略之后再点应用，界面闪一下，Codex 配置一行都没改」。
+        // 把来源摘要一并算进版本号，任何会影响服务的改动都会得到一个真正的新版本。
+        let source_hash = source_hash(&selected, &providers, &credentials)?;
+        let catalog_revision = self.layout.catalog_revision(&hash(&format!(
+            "{}:{}:{}",
+            instance.id, catalog_hash, source_hash
+        )));
         let catalog_path = self.layout.catalog_path(&catalog_revision);
 
         let aliases: Vec<String> = compiled
@@ -285,7 +293,7 @@ impl ApplyService {
         operation.transition(ApplyStage::Validating, now.clone())?;
         operation.transition(ApplyStage::Prepared, now)?;
         let prepared = PreparedDeployment {
-            source_hash: source_hash(&selected, &providers, &credentials)?,
+            source_hash,
             managed,
             routes: self.build_routes(&plan, &selected)?,
             models: selected,
