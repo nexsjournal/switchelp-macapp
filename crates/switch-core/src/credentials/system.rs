@@ -3,6 +3,9 @@ use super::SecretVault;
 use crate::domain::error::{CoreError, ErrorCode};
 
 pub struct SystemVault {
+    /// 只在 macOS / Windows 上被读取：其它平台走的是文件末尾那个显式的 unsupported 实现，
+    /// 字段因此在那里是死的。本仓库只发布这两个平台，Linux 上编译只为跑测试。
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
     service: String,
 }
 
