@@ -95,6 +95,9 @@ jobs:
         target: [aarch64-apple-darwin, x86_64-apple-darwin]
     runs-on: macos-latest
     name: macOS (${{ matrix.target }})
+    env:
+      # `if` 表达式里不能直接引用 secrets，只能引用 env；所以先在 job 级转存。
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -127,9 +130,8 @@ jobs:
           rm certificate.p12
 
       - name: 保存公证凭据
-        if: secrets.APPLE_API_KEY != ''
+        if: env.APPLE_API_KEY != ''
         env:
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
