@@ -18,16 +18,51 @@ export function plan(changes: FieldChange[], overrides: Partial<ApplyPlan> = {})
     catalogAliases: ['p_test-alias'], warnings: [], touchesActiveTasks: false, ...overrides };
 }
 
-/** 仅测试使用；未安排返回值的命令必须失败，避免模拟成功掩盖未实现流程。 */
+/**
+ * 仅测试使用；未安排返回值的命令必须失败，避免模拟成功掩盖未实现流程。
+ *
+ * 每个方法各自一个 mock：早期版本共用一个，于是对 A 方法的调用会让
+ * 「B 方法未被调用」的断言误报——而断言可靠正是这里存在的意义。
+ */
 export function testClient(overrides: Partial<DesktopClient> = {}): DesktopClient {
-  const unsupported = vi.fn().mockRejectedValue(new Error('test command not configured'));
-  return { detectInstances: unsupported, applySummary: vi.fn().mockResolvedValue(null), setGatewayPaused: vi.fn().mockResolvedValue(false), platformInfo: vi.fn().mockResolvedValue({ platform: 'macos', titlebarHeight: 44, leadingReserve: 84, systemDecorations: true }), gatewayStatus: vi.fn().mockResolvedValue({ running: true, paused: false, port: 18765, served: 0, revisions: [], tokenFingerprint: 'deadbeef', error: null }), listProviders: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
-    saveProvider: unsupported, listPresets: unsupported, listCredentials: vi.fn().mockResolvedValue([]),
-    addCredential: unsupported, replaceCredential: unsupported, selectCredential: unsupported,
-    deleteProvider: unsupported, deleteCredential: unsupported, deleteModel: unsupported,
-    discoverModels: unsupported, listModels: vi.fn().mockResolvedValue([]), saveModel: unsupported,
-    startProbe: unsupported, cancelProbe: unsupported, inspectConfig: unsupported, planApply: unsupported,
-    executeApply: unsupported, applyStatus: unsupported, confirmReload: unsupported, planRestore: unsupported,
-    executeRestore: unsupported, listDiagnostics: unsupported, previewDiagnostics: unsupported,
-    exportDiagnostics: unsupported, clearDiagnostics: vi.fn().mockResolvedValue(0), ...overrides };
+  const failing = () => vi.fn().mockRejectedValue(new Error('test command not configured'));
+  return {
+    detectInstances: failing(),
+    applySummary: vi.fn().mockResolvedValue(null),
+    setGatewayPaused: vi.fn().mockResolvedValue(false),
+    listBackups: vi.fn().mockResolvedValue([]),
+    createBackup: failing(),
+    previewBackup: failing(),
+    restoreBackup: failing(),
+    checkUpdate: failing(),
+    platformInfo: vi.fn().mockResolvedValue({ platform: 'macos', titlebarHeight: 44, leadingReserve: 84, systemDecorations: true }),
+    gatewayStatus: vi.fn().mockResolvedValue({ running: true, paused: false, port: 18765, served: 0, revisions: [], tokenFingerprint: 'deadbeef', error: null }),
+    listProviders: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+    saveProvider: failing(),
+    listPresets: failing(),
+    listCredentials: vi.fn().mockResolvedValue([]),
+    addCredential: failing(),
+    replaceCredential: failing(),
+    selectCredential: failing(),
+    deleteProvider: failing(),
+    deleteCredential: failing(),
+    deleteModel: failing(),
+    discoverModels: failing(),
+    listModels: vi.fn().mockResolvedValue([]),
+    saveModel: failing(),
+    startProbe: failing(),
+    cancelProbe: failing(),
+    inspectConfig: failing(),
+    planApply: failing(),
+    executeApply: failing(),
+    applyStatus: failing(),
+    confirmReload: failing(),
+    planRestore: failing(),
+    executeRestore: failing(),
+    listDiagnostics: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+    previewDiagnostics: failing(),
+    exportDiagnostics: failing(),
+    clearDiagnostics: vi.fn().mockResolvedValue(0),
+    ...overrides,
+  };
 }

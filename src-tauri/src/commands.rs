@@ -2,6 +2,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use switch_core::{
     application::{AppliedSummary, ModelDraft, ProviderDraft},
+    codex::backup::BackupEntry,
     diagnostics::{
         fetch_models, DiagnosticEvent, DiscoveredModel, ExportPreview, LogLevel, ProbePlan,
         ProbeReport, ProbeTarget,
@@ -267,6 +268,101 @@ pub struct PlatformReport {
     pub leading_reserve: u32,
     /// 是否由系统绘制标题栏；为真时界面不需要自绘拖拽区。
     pub system_decorations: bool,
+}
+
+/// 备份列表与手动备份。备份可能含其他工具写入的密钥，因此默认只给遮罩预览。
+#[tauri::command]
+pub async fn backups_list(window: WebviewWindow, state: Desktop<'_>) -> Result<Vec<BackupEntry>, CoreError> {
+    run(window, state, |desktop| desktop.backups().list()).await
+}
+
+/// 手动备份一个实例的配置文件。
+#[tauri::command]
+pub async fn backups_create(window: WebviewWindow, state: Desktop<'_>, instance_id: String) -> Result<BackupEntry, CoreError> {
+    run(window, state, move |desktop| {
+        let instance = desktop.instance(&instance_id)?;
+        let now = switch_core::diagnostics::now_rfc3339();
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis() as i64)
+            .unwrap_or_default();
+        let entry = desktop
+            .backups()
+            .create(std::path::Path::new(&instance.config_file), millis, &now)?;
+        // 保留策略与自动备份共用：只保留最近若干份。
+        let _ = desktop.backups().prune(switch_core::codex::backup::DEFAULT_KEEP);
+        Ok(entry)
+    })
+    .await
+}
+
+/// 备份的遮罩预览。原始内容不经过 IPC，避免明文密钥进入前端状态。
+#[tauri::command]
+pub async fn backups_preview(window: WebviewWindow, state: Desktop<'_>, backup_id: String) -> Result<String, CoreError> {
+    run(window, state, move |desktop| desktop.backups().read_masked(&backup_id)).await
+}
+
+/// 恢复一份备份。
+///
+/// 会先把**当前**文件再备份一次，因此恢复本身也可回退。
+/// 事务记录不跟着回退——之后可以重新生成差异。
+#[tauri::command]
+pub async fn backups_restore(window: WebviewWindow, state: Desktop<'_>, backup_id: String) -> Result<String, CoreError> {
+    run(window, state, move |desktop| {
+        let text = desktop.backups().read(&backup_id)?;
+        let entry = desktop
+            .backups()
+            .list()?
+            .into_iter()
+            .find(|item| item.id == backup_id)
+            .ok_or_else(|| CoreError::not_found("备份"))?;
+        let target = std::path::PathBuf::from(&entry.source_path);
+        let now = switch_core::diagnostics::now_rfc3339();
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis() as i64)
+            .unwrap_or_default();
+        // 先给当前状态留退路，再覆盖。
+        if target.exists() {
+            desktop.backups().create(&target, millis, &now)?;
+        }
+        switch_core::codex::config::write_atomic(&target, &text)?;
+        Ok(target.display().to_string())
+    })
+    .await
+}
+
+/// 更新检查结果。只做比较，不下载、不安装。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateReport {
+    pub current: String,
+    pub latest: Option<String>,
+    pub has_update: bool,
+    pub release_url: Option<String>,
+    pub published_at: Option<String>,
+    /// 查询失败的原因。有值时 `latest` 为空，界面不得显示成“已是最新”。
+    pub error: Option<String>,
+}
+
+/// 检查更新。对公开仓库的 Release 做一次只读查询，不下载、不安装。
+#[tauri::command]
+pub async fn update_check(window: WebviewWindow, state: Desktop<'_>) -> Result<UpdateReport, CoreError> {
+    run(window, state, |_desktop| {
+        let status = switch_core::diagnostics::check_update(
+            env!("CARGO_PKG_VERSION"),
+            switch_core::diagnostics::UPDATE_ENDPOINT,
+        );
+        Ok(UpdateReport {
+            current: status.current,
+            latest: status.latest,
+            has_update: status.has_update,
+            release_url: status.release_url,
+            published_at: status.published_at,
+            error: status.error,
+        })
+    })
+    .await
 }
 
 /// 平台信息。前端据此设置 `data-platform` 与窗口相关 CSS 变量。

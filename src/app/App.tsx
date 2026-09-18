@@ -6,6 +6,7 @@ import { desktopClient } from '@/desktop/transport';
 import { ProviderForm } from '@/features/providers/ProviderForm';
 import { CredentialForm } from '@/features/providers/CredentialForm';
 import { ModelEditorPage } from '@/features/models/ModelEditorPage';
+import { OnboardingPage } from '@/features/onboarding/OnboardingPage';
 import { OverviewPage } from '@/features/overview/OverviewPage';
 import { ModelsPage } from '@/features/models/ModelsPage';
 import { Dialog } from '@/components/Dialog';
@@ -80,6 +81,11 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
   const [gateway, setGateway] = useState<GatewayReport | null>(null);
   /** 当前已生效的配置；用于概览的“当前配置”卡。 */
   const [summary, setSummary] = useState<AppliedSummary | null>(null);
+  /** 首次接入向导：没有供应商时自动进入，用户可「稍后再说」并在设置里重新打开。 */
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
+    try { return localStorage.getItem('gptswitch.onboarding.dismissed') === 'true'; } catch { return false; }
+  });
+  const [onboardingForced, setOnboardingForced] = useState(false);
   const [selectedProviderId, setSelectedProviderId] = useState('');
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -97,6 +103,9 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
   const [confirm, setConfirm] = useState<{ title: string; body: string; confirmLabel: string; run: () => Promise<void> } | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const selectedProvider = providers.find(p => p.id === selectedProviderId);
+  /** 没有供应商就是首次接入；用户主动关掉之后不再自动展开。 */
+  const showOnboarding = (onboardingForced || (providers.length === 0 && !onboardingDismissed))
+    && page === 'overview' && !modelEditor && !providerEditor;
   const credentials = credentialsByProvider[selectedProviderId] ?? [];
 
   const refresh = useCallback(async () => {
@@ -172,13 +181,23 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
           onCancel={() => setModelEditor(null)}
           onViewDiff={() => { setModelEditor(null); navigate('codexConfig'); }}
           onSaved={async () => { setModelEditor(null); setNotice(t('copy.draftSaved')); await refresh(); }} /> : <>
-        <header className={styles.pageHeader}><div><h1 className="text-page-title">{t(`nav.${page}`)}</h1><p>{({ overview: '管理供应商与模型，让每一次切换都有清楚的状态。', providers: '服务地址、API Key 和模型，按供应商集中管理。', models: '定义模型身份、上下文、输入能力与思考选项。', codexConfig: '将保存的模型应用到 Codex 原生模型菜单。', diagnostics: '逐阶段检查供应商连通性与模型权限。', logs: '查看脱敏后的运行记录，定位失败原因。', settings: '外观、网关、日志保留与危险操作。' })[page]}</p></div>
+        {!showOnboarding && <header className={styles.pageHeader}><div><h1 className="text-page-title">{t(`nav.${page}`)}</h1><p>{({ overview: '管理供应商与模型，让每一次切换都有清楚的状态。', providers: '服务地址、API Key 和模型，按供应商集中管理。', models: '定义模型身份、上下文、输入能力与思考选项。', codexConfig: '将保存的模型应用到 Codex 原生模型菜单。', diagnostics: '逐阶段检查供应商连通性与模型权限。', logs: '查看脱敏后的运行记录，定位失败原因。', settings: '外观、网关、日志保留与危险操作。' })[page]}</p></div>
           <div className="actions"><button className="icon-button" aria-label="刷新数据" disabled={loading} onClick={() => void refresh()}><RefreshCw size={17} className={loading ? styles.spin : ''} /></button>
-            {page !== 'codexConfig' && page !== 'logs' && page !== 'diagnostics' && page !== 'settings' && <button className="primary" disabled={loading || (page === 'models' && !providers.length)} onClick={() => page === 'models' ? setModelEditor('new') : setProviderEditor('new')}><Plus size={17} />{page === 'models' ? '添加模型' : '添加供应商'}</button>}</div></header>
+            {page !== 'codexConfig' && page !== 'logs' && page !== 'diagnostics' && page !== 'settings' && <button className="primary" disabled={loading || (page === 'models' && !providers.length)} onClick={() => page === 'models' ? setModelEditor('new') : setProviderEditor('new')}><Plus size={17} />{page === 'models' ? '添加模型' : '添加供应商'}</button>}</div></header>}
         {error && <div className="error-message" role="alert">{error}</div>}
         {notice && <div className={styles.notice} role="status"><Check size={16} />{notice}</div>}
         {!loaded && !error ? <div className={styles.empty} role="status" aria-live="polite">正在读取本地配置…</div> : <>
-          {page === 'overview' && <OverviewPage providers={providers} models={models}
+          {showOnboarding && <OnboardingPage client={client} providers={providers} models={models}
+            credentialsByProvider={credentialsByProvider}
+            onOpenProviderForm={() => setProviderEditor('new')}
+            onOpenModelEditor={() => { if (providers.length) setModelEditor('new'); }}
+            onViewDiff={() => navigate('codexConfig')}
+            onDismiss={() => {
+              setOnboardingForced(false);
+              setOnboardingDismissed(true);
+              try { localStorage.setItem('gptswitch.onboarding.dismissed', 'true'); } catch { /* 存不了只影响下次是否自动展开 */ }
+            }} />}
+          {page === 'overview' && !showOnboarding && <OverviewPage providers={providers} models={models}
             credentialsByProvider={credentialsByProvider} gateway={gateway} summary={summary}
             pendingCount={pending.length} onNavigate={navigate} onAddProvider={() => setProviderEditor('new')} />}
           {page === 'providers' && <div className={styles.providerLayout}><section className={styles.providerList} aria-label="供应商列表">

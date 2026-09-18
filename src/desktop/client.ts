@@ -110,6 +110,26 @@ export interface AppliedSummary {
   appliedAt: string;
 }
 
+/** 一份配置备份。`mayContainSecrets` 为真时预览会被遮罩，且不要外发。 */
+export interface BackupEntry {
+  id: string;
+  sourcePath: string;
+  createdAt: string;
+  contentHash: string;
+  bytes: number;
+  mayContainSecrets: boolean;
+}
+
+/** 更新检查结果。查询失败时 `error` 有值且 `latest` 为空，界面不得显示成“已是最新”。 */
+export interface UpdateReport {
+  current: string;
+  latest: string | null;
+  hasUpdate: boolean;
+  releaseUrl: string | null;
+  publishedAt: string | null;
+  error: string | null;
+}
+
 /** 平台与窗口策略。 */
 export interface PlatformReport {
   platform: 'macos' | 'windows' | 'linux';
@@ -129,6 +149,16 @@ export interface DesktopClient {
   applySummary(): Promise<AppliedSummary | null>;
   /** 暂停或继续接受新推理请求；返回实际状态。 */
   setGatewayPaused(paused: boolean): Promise<boolean>;
+
+  listBackups(): Promise<BackupEntry[]>;
+  /** 手动备份一个实例的配置文件；提交前也会自动备份。 */
+  createBackup(instanceId: string): Promise<BackupEntry>;
+  /** 遮罩预览：原始内容不经过 IPC。 */
+  previewBackup(backupId: string): Promise<string>;
+  /** 恢复：会先把当前文件再备份一次，因此恢复本身可回退。 */
+  restoreBackup(backupId: string): Promise<string>;
+  /** 检查更新：只查询公开 Release，不下载不安装。 */
+  checkUpdate(): Promise<UpdateReport>;
 
   /** 平台与窗口策略。界面据此设置 data-platform 与窗口相关变量。 */
   platformInfo(): Promise<PlatformReport>;

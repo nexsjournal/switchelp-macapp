@@ -19,7 +19,7 @@
 .timeline li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px 0; border-top: 1px solid var(--border-subtle); }
 .timeline li:first-child { border-top: 0; }
 .marker { width: 10px; height: 10px; margin-top: 4px; border-radius: 50%; background: var(--border-control); }
-.timeline li.passed .marker { background: var(--status-success); }
+.timeline li.passed .marker { background: var(--status-success); box-shadow: 0 0 0 3px var(--status-success-bg); }
 .timeline li.failed .marker { background: var(--status-danger); }
 .timeline strong { font-size: 13px; font-weight: 500; }
 .state { margin-left: 8px; font-size: 11px; color: var(--text-muted); }

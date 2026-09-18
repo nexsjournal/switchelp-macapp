@@ -6,7 +6,7 @@ mod state;
 use std::sync::Arc;
 use switch_core::{
     application::{ApplyService, GatewayLayout, SystemClock, WorkspaceService},
-    codex::config::AUTH_HELPER_INSTANCE,
+    codex::{backup::BackupStore, config::AUTH_HELPER_INSTANCE},
     diagnostics::DiagnosticLog,
     credentials::{SecretVault, SystemVault},
     domain::ids::InstanceId,
@@ -158,6 +158,7 @@ fn main() {
             // 路由注册表必须由配置事务与网关共享：应用成功即发布，
             // 网关立刻按新目录版本服务；两个实例各建一个会让网关永远看不到路由。
             let router = Arc::new(GatewayRouter::new());
+            let backups = Arc::new(BackupStore::new(&directory));
             let apply = Arc::new(ApplyService::new(
                 repository.clone(),
                 operations,
@@ -169,7 +170,9 @@ fn main() {
                     base_instructions: "通过 GPTSwitch 本机网关访问第三方模型。".to_owned(),
                 },
                 Arc::new(SystemClock),
-            ));
+            )
+            // 提交前自动备份：写用户配置之前先留原样副本。
+            .with_backups(backups.clone()));
             // 未完成事务在下一次启动时按记录判定恢复；窗口重建不新建事务。
             for report in apply.startup_recovery()? {
                 eprintln!(
@@ -203,8 +206,17 @@ fn main() {
                 directory.clone(),
                 gateway,
                 diagnostics,
+                backups,
             )));
             Ok(())
+        })
+        // 关闭窗口隐藏到托盘而不是退出：托盘菜单里的「退出 GPTSwitch」才是出口。
+        // 这是托盘应用的常规预期，但必须让用户找得到退出口，所以托盘里保留独立项。
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::providers_list, commands::providers_save,
@@ -219,7 +231,8 @@ fn main() {
             commands::gateway_status,
             commands::diagnostics_list, commands::diagnostics_preview, commands::diagnostics_export,
             commands::diagnostics_clear, commands::gateway_set_paused,
-            commands::models_discover, commands::platform_info,
+            commands::models_discover, commands::platform_info, commands::update_check,
+            commands::backups_list, commands::backups_create, commands::backups_preview, commands::backups_restore,
             commands::probes_start, commands::probes_cancel,
         ])
         .run(tauri::generate_context!())

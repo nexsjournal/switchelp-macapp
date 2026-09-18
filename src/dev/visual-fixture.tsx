@@ -11,10 +11,13 @@ import { createRoot } from 'react-dom/client';
 import type { ApplyPlan, CodexInstance, Credential, FieldChange, Model, Provider } from '@/contracts/types';
 import type { ApplyStatus, DesktopClient, InspectResult } from '@/desktop/client';
 import { App } from '@/app/App';
+import { applyTheme, readThemePreference } from '@/theme';
 import '@/styles/tokens.css';
 import '@/styles/global.css';
 
-document.documentElement.dataset.theme = 'dark';
+// 与正式入口一样走主题模块；`?theme=light` 便于逐主题走查。
+const themeOverride = new URLSearchParams(window.location.search).get('theme');
+applyTheme(themeOverride === 'light' || themeOverride === 'dark' ? themeOverride : readThemePreference());
 
 const provider = (id: string, name: string, endpoint: string, active: string | null): Provider => ({
   id, name, endpoint, protocol: 'responses', authKind: 'api_key', activeCredentialId: active,
@@ -95,6 +98,11 @@ const client: DesktopClient = {
   applySummary: async () => ({ operationId: 'op_a', instanceId: 'inst_a', catalogRevision: 'rev_046731cc', defaultModel: 'gs/m_1', aliasCount: 2, stage: 'Verified', appliedAt: '2026-09-18T03:30:03Z' }),
   gatewayStatus: async () => ({ running: true, paused: false, port: 18765, served: 12, revisions: ['rev_046731cc'], tokenFingerprint: '3f9a1c04', error: null }),
   setGatewayPaused: async (paused: boolean) => paused,
+  listBackups: async () => ([{ id: 'b_1', sourcePath: '/Users/me/.codex/config.toml', createdAt: '2026-09-18T03:20:00Z', contentHash: 'a1b2c3d4', bytes: 412, mayContainSecrets: true }]),
+  createBackup: async () => ({ id: 'b_2', sourcePath: '/Users/me/.codex/config.toml', createdAt: '2026-09-18T04:00:00Z', contentHash: 'e5f6a7b8', bytes: 420, mayContainSecrets: true }),
+  previewBackup: async () => 'model = "gpt-5-codex"\nmodel_provider = "••••••••"\n',
+  restoreBackup: async () => '/Users/me/.codex/config.toml',
+  checkUpdate: async () => ({ current: '0.1.0', latest: '0.2.0', hasUpdate: true, releaseUrl: 'https://github.com/nexsjournal/gptswitch-macapp/releases', publishedAt: '2026-09-18T00:00:00Z', error: null }),
   listProviders: async () => ({ items: providers, nextCursor: null }),
   saveProvider: async draft => provider('p_new', draft.name, draft.endpoint, null),
   listPresets: async () => [],
@@ -126,6 +134,12 @@ const client: DesktopClient = {
 const view = new URLSearchParams(window.location.search).get('view');
 const container = document.getElementById('root');
 if (!container) throw new Error('缺少 #root 容器');
+// 走查首次接入向导：清空供应商，让向导自动展开。
+if (view === 'onboarding') {
+  (client as { listProviders: unknown }).listProviders = async () => ({ items: [], nextCursor: null });
+  (client as { listModels: unknown }).listModels = async () => [];
+}
+
 createRoot(container).render(
   <StrictMode>
     <App client={client} initialPage={view === 'codex' ? 'codexConfig' : 'overview'} />

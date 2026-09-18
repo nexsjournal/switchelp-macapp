@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { ApplyPlan, CodexInstance, Credential, DiagnosticEvent, Model, ProbeResult, Provider } from '@/contracts/types';
-import type { AppliedSummary, ApplyStatus, DesktopClient, GatewayReport, InspectResult, DiagnosticsPreview, PlatformReport } from './client';
+import type { AppliedSummary, ApplyStatus, BackupEntry, DesktopClient, GatewayReport, InspectResult, DiagnosticsPreview, PlatformReport, UpdateReport } from './client';
 import type { DiscoveredModel } from './client';
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -20,6 +20,11 @@ export const desktopClient: DesktopClient = {
   platformInfo: () => call<PlatformReport>('platform_info'),
   applySummary: () => call<AppliedSummary | null>('apply_summary'),
   setGatewayPaused: paused => call<boolean>('gateway_set_paused', { paused }),
+  listBackups: () => call<BackupEntry[]>('backups_list'),
+  createBackup: instanceId => call<BackupEntry>('backups_create', { instanceId }),
+  previewBackup: backupId => call<string>('backups_preview', { backupId }),
+  restoreBackup: backupId => call<string>('backups_restore', { backupId }),
+  checkUpdate: () => call<UpdateReport>('update_check'),
   async listProviders(filter) {
     const providers = await call<Provider[]>('providers_list');
     const query = filter?.query?.trim().toLocaleLowerCase();

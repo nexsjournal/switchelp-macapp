@@ -7,7 +7,8 @@
 .sidebar nav { display: grid; gap: 8px; }
 .sidebar nav button { justify-content: flex-start; border: 0; height: 44px; padding: 0 16px; background: transparent; color: var(--text-secondary); border-radius: var(--radius-nav); }
 .sidebar nav button:hover { background: var(--bg-hover); color: var(--text-primary); }
-.sidebar nav button.active { background: var(--bg-selected); color: var(--text-primary); }
+/* 当前页用强调色淡底 + 强调色文字：灰阶下“选中”太不显眼。 */
+.sidebar nav button.active { background: var(--accent-subtle); color: var(--accent); border: 1px solid var(--accent-border); }
 .sidebarBottom { border-top: 1px solid var(--border-subtle); padding: 20px 8px 12px; margin-top: auto; display: flex; gap: 12px; align-items: center; color: var(--text-secondary); }
 .sidebarBottom strong { font-size: 12px; font-weight: 500; display: block; }
 .sidebarBottom span { font-size: 10px; color: var(--text-muted); }
@@ -67,7 +68,7 @@
 /* 每行直接给出状态与操作入口，而不是只留一个箭头。 */
 /* 侧栏列只有 280px：状态与操作放到第二行，避免文字被裁掉。 */
 .providerItem { display: flex; flex-direction: column; align-items: stretch; gap: 10px; min-height: 76px; padding: 14px 16px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
-.providerItem.selected { background: var(--bg-selected); border-color: var(--border-control); }
+.providerItem.selected { background: var(--bg-selected); border-color: var(--accent-border); }
 .providerSelect { flex: 1; min-width: 0; height: auto; padding: 0; gap: 12px; justify-content: flex-start; text-align: left; background: transparent; border-color: transparent; }
 .providerSelect:hover:not(:disabled) { background: transparent; }
 .providerName { min-width: 0; }
@@ -103,4 +104,4 @@
 .settingsEntry { width: 100%; justify-content: flex-start; border: 0; height: 40px; padding: 0 16px; margin-bottom: 4px;
   background: transparent; color: var(--text-secondary); border-radius: var(--radius-nav); }
 .settingsEntry:hover { background: var(--bg-hover); color: var(--text-primary); }
-.settingsEntry.active { background: var(--bg-selected); color: var(--text-primary); }
+.settingsEntry.active { background: var(--accent-subtle); color: var(--accent); border: 1px solid var(--accent-border); }

@@ -2,11 +2,13 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from '@/app/App';
+import { applyTheme, readThemePreference, watchSystemTheme } from './theme';
 import '@/styles/tokens.css';
 import '@/styles/global.css';
 
-// 首版默认采用参考截图的深色主题。
-document.documentElement.dataset.theme = 'dark';
+// 首帧之前就把主题写到根元素：晚一步会先闪一下默认底色。
+applyTheme(readThemePreference());
+watchSystemTheme(() => {});
 
 const container = document.getElementById('root');
 if (!container) {

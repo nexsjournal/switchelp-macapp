@@ -1,7 +1,9 @@
 import { Cpu, Info, Network, Palette, ScrollText, ShieldAlert, Trash2, Wrench } from 'lucide-react';
+import { Dialog } from '@/components/Dialog';
 import { useCallback, useEffect, useState } from 'react';
 import type { CodexInstance } from '@/contracts/types';
-import { type DesktopClient, type GatewayReport, toCoreError } from '@/desktop/client';
+import { type BackupEntry, type DesktopClient, type GatewayReport, type UpdateReport, toCoreError } from '@/desktop/client';
+import { applyTheme, readThemePreference, setThemePreference, type ThemePreference } from '@/theme';
 import styles from './SettingsPage.module.css';
 
 /**
@@ -17,7 +19,16 @@ export function SettingsPage({ client, gateway, onNavigate }: {
 }) {
   const [instances, setInstances] = useState<CodexInstance[]>([]);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const [backups, setBackups] = useState<BackupEntry[]>([]);
+  const [previewText, setPreviewText] = useState('');
+  const [update, setUpdate] = useState<UpdateReport | null>(null);
+  const [restore, setRestore] = useState<BackupEntry | null>(null);
+  const [notice, setNotice] = useState('');
   /** 暂停状态取自后端，不在前端自己翻转，避免与托盘菜单不一致。 */
+  const [preference, setPreference] = useState<ThemePreference>(() => readThemePreference());
+  const [resolved, setResolved] = useState(() => applyTheme(readThemePreference()));
+  const applyPreference = (next: ThemePreference) => { setPreference(next); setResolved(setThemePreference(next)); };
   const [paused, setPaused] = useState(gateway?.paused ?? false);
   useEffect(() => { setPaused(gateway?.paused ?? false); }, [gateway?.paused]);
 
@@ -26,6 +37,37 @@ export function SettingsPage({ client, gateway, onNavigate }: {
     try { setPaused(await client.setGatewayPaused(!paused)); }
     catch (thrown) { setError(toCoreError(thrown).safeDetails.join('；') || '切换暂停状态失败。'); }
   }, [client, paused]);
+
+  const loadBackups = useCallback(async () => {
+    try { setBackups(await client.listBackups()); }
+    catch (thrown) { setError(toCoreError(thrown).safeDetails.join('；') || '读取备份列表失败。'); }
+  }, [client]);
+
+  useEffect(() => { void loadBackups(); }, [loadBackups]);
+
+  async function run(label: string, work: () => Promise<void>) {
+    setBusy(label); setError(''); setNotice('');
+    try { await work(); }
+    catch (thrown) { setError(toCoreError(thrown).safeDetails.join('；') || '操作失败。'); }
+    finally { setBusy(''); }
+  }
+
+  const checkUpdate = () => run('update', async () => { setUpdate(await client.checkUpdate()); });
+
+  const createBackup = () => run('backup', async () => {
+    await client.createBackup(instances[0]!.id);
+    setNotice('已创建配置备份。');
+    await loadBackups();
+  });
+
+  const showPreview = (entry: BackupEntry) => run('preview', async () => { setPreviewText(await client.previewBackup(entry.id)); });
+
+  const restoreBackup = (entry: BackupEntry) => run('restore', async () => {
+    const target = await client.restoreBackup(entry.id);
+    setRestore(null);
+    setNotice(`已恢复 ${target}；恢复前的状态也已自动备份。事务记录未回退，可到 Codex 配置页重新生成差异。`);
+    await loadBackups();
+  });
 
   useEffect(() => {
     let current = true;
@@ -37,11 +79,19 @@ export function SettingsPage({ client, gateway, onNavigate }: {
 
   return <div className={styles.page}>
     {error && <div className="error-message" role="alert">{error}</div>}
+    {notice && <div className={styles.notice} role="status">{notice}</div>}
 
     <section className={styles.card}>
       <h2><Palette size={17} />外观与语言</h2>
       <dl className={styles.rows}>
-        <dt>主题</dt><dd>暗色（固定）<span className="text-muted">参考截图以深色为主；浅色主题未实现</span></dd>
+        <dt>主题</dt><dd>
+          <select aria-label="主题" value={preference} onChange={event => applyPreference(event.target.value as ThemePreference)}>
+            <option value="dark">暗色</option>
+            <option value="light">亮色</option>
+            <option value="system">跟随系统</option>
+          </select>
+          <span className="text-muted">当前生效：{resolved === 'dark' ? '暗色' : '亮色'}；跟随系统时系统切换会立即生效</span>
+        </dd>
         <dt>语言</dt><dd>简体中文<span className="text-muted">文案层已支持多语言结构，切换入口未实现</span></dd>
         <dt>动效</dt><dd>跟随系统<span className="text-muted">已响应系统的“减少动态效果”设置</span></dd>
       </dl>
@@ -98,9 +148,36 @@ export function SettingsPage({ client, gateway, onNavigate }: {
     <section className={styles.card}>
       <h2><Wrench size={17} />备份与更新</h2>
       <dl className={styles.rows}>
-        <dt>配置备份</dt><dd>未实现<span className="text-muted">当前依赖“还原上次配置”与原子替换保证可回退；定时备份与版本列表尚未实现</span></dd>
-        <dt>应用更新</dt><dd>未实现<span className="text-muted">尚未接签名与更新通道</span></dd>
+        <dt>自动备份</dt><dd>每次提交前<span className="text-muted">写 Codex 配置之前先留一份原样副本；备份失败就不提交</span></dd>
+        <dt>保留策略</dt><dd>最近 20 份<span className="text-muted">超出后从最旧的开始清理，只清理本工具自己的备份</span></dd>
+        <dt>更新</dt><dd>
+          {update?.error ? <span className={styles.offline}>查询失败：{update.error}<small>查询不到不会显示成“已是最新”</small></span>
+            : update?.hasUpdate ? <span className={styles.online}>有新版本 {update.latest}<small>当前 {update.current}；本工具不自动下载安装</small></span>
+            : update ? <span>已是最新（{update.current}）</span>
+            : <span className="text-muted">尚未检查</span>}
+        </dd>
       </dl>
+      <div className={styles.actions}>
+        <button onClick={() => void checkUpdate()} disabled={busy === 'update'}>{busy === 'update' ? '检查中…' : '检查更新'}</button>
+        {update?.hasUpdate && update.releaseUrl && <a className={styles.linkButton} href={update.releaseUrl} target="_blank" rel="noreferrer noopener">打开发布页</a>}
+        <button onClick={() => void createBackup()} disabled={busy === 'backup' || !instances.length}>立即备份配置</button>
+      </div>
+
+      <h3 className={styles.subHeading}>最近的备份</h3>
+      {backups.length === 0
+        ? <p className="text-muted">还没有备份。首次应用配置时会自动创建一份。</p>
+        : <ul className={styles.backups}>{backups.slice(0, 8).map(item => <li key={item.id}>
+          <div>
+            <strong className="text-mono">{item.createdAt}</strong>
+            <span className="text-muted text-mono break-anywhere">{item.contentHash.slice(0, 12)} · {item.bytes} 字节</span>
+          </div>
+          {item.mayContainSecrets && <span className="badge warning">可能含密钥</span>}
+          <div className="actions">
+            <button onClick={() => void showPreview(item)}>遮罩预览</button>
+            <button className="danger" onClick={() => setRestore(item)}>恢复</button>
+          </div>
+        </li>)}</ul>}
+      {previewText && <textarea className={styles.summary} readOnly aria-label="备份遮罩预览" rows={6} value={previewText} />}
     </section>
 
     <section className={styles.card}>
@@ -121,5 +198,19 @@ export function SettingsPage({ client, gateway, onNavigate }: {
       </div>
       <p className={styles.note}>还原与清空都要在对应页面确认后才执行；这里只做入口，不重复实现第二套逻辑。</p>
     </section>
+
+    {restore && <Dialog title="恢复这份备份" busy={busy === 'restore'}
+      description={`将把 ${restore.sourcePath} 覆盖为 ${restore.createdAt} 的备份内容。覆盖前会自动再备份一次当前文件，所以这一步本身也可以回退。`}
+      onClose={() => setRestore(null)}>
+      <div className="form-fields"><div className="form-footer">
+        <span>本工具的事务记录不会跟着回退。</span>
+        <div className="actions">
+          <button onClick={() => setRestore(null)} disabled={busy === 'restore'}>取消</button>
+          <button className="danger" autoFocus disabled={busy === 'restore'} onClick={() => void restoreBackup(restore)}>
+            {busy === 'restore' ? '恢复中…' : '恢复这份备份'}
+          </button>
+        </div>
+      </div></div>
+    </Dialog>}
   </div>;
 }

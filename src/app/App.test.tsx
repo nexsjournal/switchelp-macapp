@@ -8,6 +8,8 @@ test('首次接入保存真实草稿调用，失败后保留表单且不宣称 C
   const client = testClient({ saveProvider: vi.fn().mockRejectedValue({ code: 'VALIDATION_FAILED', messageKey: 'error.validation',
     safeDetails: ['远程地址必须使用 HTTPS'], retryable: false, recoveryActions: [] }) });
   render(<App client={client} />);
+  // 没有供应商时会先进接入向导；这里要测的是供应商表单，先退出向导。
+  await user.click(await screen.findByRole('button', { name: '稍后再说' }));
   await screen.findByText('添加第一个供应商');
   await user.click(screen.getAllByRole('button', { name: '添加供应商' })[0]!);
   const dialog = screen.getByRole('dialog');
@@ -54,7 +56,9 @@ test('保存 Key 只通过专用调用传递并清空密码框，不自动切换
   expect(screen.getByLabelText('API Key')).toHaveValue('');
   expect(await screen.findByRole('alert')).toHaveTextContent('系统凭据库不可用');
   expect(client.selectCredential).not.toHaveBeenCalled();
-  expect(localStorage.length).toBe(0);
+  // 允许保存界面偏好（例如主题、向导是否已看过），但绝不允许出现秘密或 Key 明文。
+  expect(JSON.stringify(localStorage)).not.toContain('synthetic-secret');
+  expect(JSON.stringify(localStorage)).not.toContain('synthetic');
 });
 
 test('网关未启动时明确显示原因，不显示成已接通或已应用', async () => {

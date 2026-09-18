@@ -1,0 +1,73 @@
+.page { display: grid; gap: 20px; max-width: 880px; }
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.header h1 { margin: 0; }
+.header p { margin: 8px 0 0; font-size: 13px; }
+
+.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.steps li { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--border-subtle);
+  border-radius: 10px; background: var(--bg-surface); color: var(--text-muted); font-size: 13px; }
+.steps li.current { border-color: var(--accent-border); background: var(--accent-subtle); color: var(--accent); }
+.steps li.done { color: var(--text-secondary); }
+.index { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--border-control); font-size: 11px; flex-shrink: 0; }
+.steps li.current .index { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
+.steps li.done .index { border-color: var(--status-success); color: var(--status-success); }
+
+.card { border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
+.cardHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.cardHeader h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.hint { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 14px; padding: 12px 14px; border-radius: 8px;
+  background: var(--bg-input); color: var(--text-muted); font-size: 12px; line-height: 18px; }
+.hint > svg { flex-shrink: 0; margin-top: 2px; }
+
+.empty { display: flex; flex-direction: column; align-items: center; text-align: center; color: var(--text-muted); padding: 24px 12px; }
+.empty h3 { font-size: 14px; font-weight: 500; color: var(--text-primary); margin: 14px 0 4px; }
+.empty p { font-size: 12px; line-height: 20px; margin: 0 0 18px; max-width: 460px; }
+.manual { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; justify-content: center; }
+.field { display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: var(--text-secondary); min-width: 280px; text-align: left; }
+
+.instances { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.instances li { border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-input); }
+.instances li.picked { border-color: var(--accent-border); background: var(--accent-subtle); }
+/* 全局给 input 设了 width:100%，单选按钮会被拉满并把文字挤到一边。 */
+.instanceChoice { display: flex; gap: 12px; padding: 14px; cursor: pointer; align-items: flex-start; }
+.instanceChoice input[type='radio'] { width: auto; flex-shrink: 0; margin-top: 3px; }
+.instanceChoice > div { flex: 1; min-width: 0; }
+.instanceChoice strong { display: block; font-size: 13px; font-weight: 500; }
+.instanceChoice > div > span { display: block; font-size: 11px; margin-top: 3px; }
+.tags { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+.conflict { display: flex; gap: 10px; margin-top: 16px; padding: 14px; border-radius: 8px; background: var(--status-warning-bg); color: var(--status-warning); }
+.conflict strong { font-size: 13px; }
+.conflict p { margin: 4px 0 0; font-size: 12px; line-height: 18px; }
+
+.checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.checklist li { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  padding: 14px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-input); }
+.checklist li.ok { border-color: var(--status-success-bg); }
+.mark { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border-control); font-size: 11px; color: var(--text-muted); }
+.checklist li.ok .mark { border-color: var(--status-success); color: var(--status-success); }
+.checklist strong { display: block; font-size: 13px; font-weight: 500; }
+.checklist span { display: block; font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+
+.testRow { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle); }
+.testRow strong { display: block; font-size: 13px; font-weight: 500; }
+.testRow span { display: block; font-size: 12px; margin-top: 3px; }
+.verified { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--radius-pill);
+  background: var(--status-success-bg); color: var(--status-success); font-size: 11px; }
+.stages { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; }
+.stages li { display: grid; grid-template-columns: 96px 48px minmax(0, 1fr); gap: 10px; align-items: baseline;
+  padding: 10px 12px; border-radius: 8px; background: var(--bg-input); font-size: 12px; }
+.stages li.passed > span:first-of-type { color: var(--status-success); }
+.stages li.failed > span:first-of-type { color: var(--status-danger); }
+.stages li.skipped > span:first-of-type { color: var(--text-muted); }
+
+.finish { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-top: 20px; padding: 16px;
+  border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-elevated); }
+.finish strong { display: block; font-size: 14px; font-weight: 500; }
+.finish span { display: block; font-size: 12px; margin-top: 4px; }
+.stateOk { color: var(--status-success); }
+.stateWait { color: var(--status-warning); }
+.finishActions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+.footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; }

@@ -1,6 +1,14 @@
 /* GPTSwitch 设计 token。数值来源：docs/design/01-foundations.md */
-:root {
-  /* ---- 色彩：深色默认 ---- */
+/*
+ * 主题通过 `data-theme` 切换，变量名在两套主题里完全一致——
+ * 组件只引用变量，不写 `data-theme` 分支，避免两套样式各自漂移。
+ * 解析后的主题值由 src/theme.ts 写入（system 会解析成 dark / light）。
+ */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* 底色：画布最暗，卡片最亮，层级靠亮度差而不是描边堆叠 */
   --bg-canvas: #09090b;
   --bg-sidebar: #101012;
   --bg-surface: #18181b;
@@ -16,10 +24,17 @@
   --border-subtle: #303036;
   --border-control: #777783;
 
-  --action-primary-bg: #f4f4f5;
-  --action-primary-fg: #111114;
+  /* 强调色：唯一的“亮色”，只用在需要吸引注意的地方 */
+  --accent: #38bdf8;
+  --accent-strong: #0ea5e9;
+  --accent-fg: #06202e;
+  --accent-subtle: #0e2a3a;
+  --accent-border: #1d5f7d;
 
-  --focus-ring: #7dd3fc;
+  --action-primary-bg: #38bdf8;
+  --action-primary-fg: #06202e;
+
+  --focus-ring: #38bdf8;
 
   --status-success: #6ee7b7;
   --status-warning: #fcd34d;
@@ -32,7 +47,62 @@
   --status-info-bg: #14242d;
 
   --overlay: rgba(0, 0, 0, 0.56);
+  --shadow-color: rgba(0, 0, 0, 0.28);
+}
 
+/*
+ * 亮色主题：不是把深色反相，而是重新取一套灰阶——
+ * 反相会让卡片描边过重、语义色对比不足。
+ */
+/*
+ * 亮色主题：不是把深色反相，而是重新取一套灰阶——
+ * 反相会让卡片描边过重、语义色对比不足。灰阶沿用既有取值，强调色与深色同源。
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg-canvas: #f6f6f7;
+  --bg-sidebar: #efeff1;
+  --bg-surface: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-input: #ffffff;
+  --bg-hover: #e8e8ec;
+  --bg-selected: #e0e0e6;
+
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-muted: #656570;
+
+  --border-subtle: #dadae0;
+  --border-control: #777783;
+
+  /* 强调色：亮色下用更深的同类色，保证白字对比度 */
+  --accent: #0284c7;
+  --accent-strong: #0369a1;
+  --accent-fg: #ffffff;
+  --accent-subtle: #e3f2fd;
+  --accent-border: #9dc9e8;
+
+  --action-primary-bg: #0284c7;
+  --action-primary-fg: #ffffff;
+
+  --focus-ring: #0284c7;
+
+  --status-success: #166534;
+  --status-warning: #854d0e;
+  --status-danger: #9f1239;
+  --status-info: #075985;
+
+  --status-success-bg: #e7f5ee;
+  --status-warning-bg: #fbf3dd;
+  --status-danger-bg: #fce8ec;
+  --status-info-bg: #e4f0f7;
+
+  --overlay: rgba(24, 24, 27, 0.32);
+  --shadow-color: rgba(24, 24, 27, 0.12);
+}
+
+:root {
   /* ---- 布局与尺寸 ---- */
   --window-width: 1280px;
   --window-height: 840px;
@@ -95,7 +165,7 @@
   --radius-pill: 999px;
 
   /* ---- 阴影 ---- */
-  --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.28);
+  --shadow-popover: 0 12px 32px var(--shadow-color);
 
   /* ---- 层级 ---- */
   --z-page: 0;
@@ -139,39 +209,4 @@
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
   --font-weight-strong: 650;
-}
-
-/* 浅色属于同一系统；随系统偏好切换，未设计过的默认白不会出现。 */
-:root[data-theme='light'] {
-  --bg-canvas: #f6f6f7;
-  --bg-sidebar: #efeff1;
-  --bg-surface: #ffffff;
-  --bg-elevated: #ffffff;
-  --bg-input: #ffffff;
-  --bg-hover: #e8e8ec;
-  --bg-selected: #e0e0e6;
-
-  --text-primary: #18181b;
-  --text-secondary: #52525b;
-  --text-muted: #656570;
-
-  --border-subtle: #dadae0;
-  --border-control: #777783;
-
-  --action-primary-bg: #202024;
-  --action-primary-fg: #ffffff;
-
-  --focus-ring: #0369a1;
-
-  --status-success: #166534;
-  --status-warning: #854d0e;
-  --status-danger: #9f1239;
-  --status-info: #075985;
-
-  --status-success-bg: #e7f5ee;
-  --status-warning-bg: #fbf3dd;
-  --status-danger-bg: #fce8ec;
-  --status-info-bg: #e4f0f7;
-
-  --overlay: rgba(24, 24, 27, 0.32);
 }

@@ -2,9 +2,11 @@
 //!
 //! 本模块只处理文件与 schema，不发起网络请求，也不读取会话正文。
 
+pub mod backup;
 pub mod catalog;
 pub mod config;
 pub mod detect;
 pub mod plan;
 
+pub use backup::{BackupEntry, BackupStore};
 pub use config::{ConfigSnapshot, ManagedConfig, ManagedProvider};

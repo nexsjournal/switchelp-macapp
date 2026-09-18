@@ -35,6 +35,10 @@ a {
   color: var(--status-info);
 }
 
+/* 链接用强调色：灰阶体系里链接否则看不出可点。 */
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
 button { display: inline-flex; gap: 8px; align-items: center; justify-content: center; height: var(--control-height); padding: 0 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-primary); font-size: 13px; cursor: pointer; white-space: nowrap; transition: background var(--motion-hover); }
 button:hover:not(:disabled) { background: var(--bg-hover); }
 button:disabled { opacity: .5; cursor: not-allowed; }

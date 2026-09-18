@@ -12,6 +12,7 @@ use switch_core::{
     application::{ApplyService, WorkspaceService},
     codex::detect::{CodexInstance, DetectInput, InstanceDetector, RealFs},
     diagnostics::{DiagnosticLog, Probes},
+    codex::backup::BackupStore,
     domain::error::CoreError,
     gateway::Gateway,
 };
@@ -33,6 +34,8 @@ pub struct DesktopState {
     diagnostics: Arc<DiagnosticLog>,
     /// 连接与模型探测。持可取消集合，跨命令保持同一个实例。
     probes: Arc<Probes>,
+    /// 配置备份存储。
+    backups: Arc<BackupStore>,
 }
 
 fn now_unix() -> i64 {
@@ -50,6 +53,7 @@ impl DesktopState {
         app_data_dir: PathBuf,
         gateway: Result<Arc<Gateway>, CoreError>,
         diagnostics: Arc<DiagnosticLog>,
+        backups: Arc<BackupStore>,
     ) -> Self {
         let (gateway, gateway_error) = match gateway {
             Ok(gateway) => (Some(gateway), None),
@@ -74,6 +78,7 @@ impl DesktopState {
             gateway_error,
             diagnostics,
             probes: Arc::new(Probes::new()),
+            backups,
         }
     }
 
@@ -88,6 +93,10 @@ impl DesktopState {
 
     pub fn probes(&self) -> Arc<Probes> {
         self.probes.clone()
+    }
+
+    pub fn backups(&self) -> Arc<BackupStore> {
+        self.backups.clone()
     }
 
     pub fn gateway(&self) -> Option<&Arc<Gateway>> {

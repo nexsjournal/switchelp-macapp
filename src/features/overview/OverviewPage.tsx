@@ -100,8 +100,10 @@ export function OverviewPage({ providers, models, credentialsByProvider, gateway
           <button onClick={() => onNavigate('models')}>查看模型</button>
           <button className="primary" onClick={() => onNavigate('codexConfig')}>Codex 配置</button>
         </div>
-        <p className={styles.note}><ShieldCheck size={15} />
-          这里显示的是**本工具已发布**的默认路由，不代表 Codex 每个会话正在使用的模型。切换只影响后续新请求。</p>
+        {/* 外层 flex 只放图标与文字块；行内元素必须包在同一个子元素里，
+            否则文字与 <b> 会各自成为 flex 项而被块化、排版打散。 */}
+        <div className={styles.note}><ShieldCheck size={15} />
+          <p>这里显示的是本工具<b>已发布</b>的默认路由，不代表 Codex 每个会话正在使用的模型。切换只影响后续新请求。</p></div>
       </section>
 
       <section className={styles.card}>

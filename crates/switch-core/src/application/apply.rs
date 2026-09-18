@@ -7,6 +7,7 @@
 
 use crate::{
     codex::{
+        backup::BackupStore,
         catalog::{CatalogCompiler, CompileOptions},
         config::{
             apply_managed, diff_managed, execute_restore, hash, plan_restore, write_atomic,
@@ -125,6 +126,8 @@ pub struct RecoveryReport {
 
 /// 应用编排服务。壳层只做装配与 DTO 映射，业务判定全部在这里。
 pub struct ApplyService {
+    /// 提交前自动备份配置文件。未注入时不备份（测试与探针走这条路径）。
+    backups: Option<Arc<BackupStore>>,
     repository: Arc<dyn Repository>,
     operations: Arc<dyn OperationStore>,
     router: Arc<GatewayRouter>,
@@ -134,6 +137,12 @@ pub struct ApplyService {
 }
 
 impl ApplyService {
+    /// 注入备份存储：之后每次提交前都会先留一份原样副本。
+    pub fn with_backups(mut self, backups: Arc<BackupStore>) -> Self {
+        self.backups = Some(backups);
+        self
+    }
+
     pub fn new(
         repository: Arc<dyn Repository>,
         operations: Arc<dyn OperationStore>,
@@ -141,7 +150,8 @@ impl ApplyService {
         layout: GatewayLayout,
         clock: Arc<dyn Clock>,
     ) -> Self {
-        Self { repository, operations, router, layout, clock, commits: Mutex::new(()) }
+        Self {
+            backups: None, repository, operations, router, layout, clock, commits: Mutex::new(()) }
     }
 
     pub fn layout(&self) -> &GatewayLayout {
@@ -338,6 +348,16 @@ impl ApplyService {
         state.publication = Some(self.publication_for(&state, &prepared.managed)?);
         state.operation.transition(ApplyStage::Committing, self.clock.now())?;
         self.operations.save(state.clone())?; // 写前日志：崩溃后可根据目标摘要补记。
+        // 写之前先备份原文件。备份失败就不写：宁可不提交，也不能在没有退路时改用户配置。
+        if let Some(backups) = &self.backups {
+            if Path::new(&state.plan.config_path).exists() {
+                backups.create(
+                    Path::new(&state.plan.config_path),
+                    self.clock.now_unix() * 1000,
+                    &self.clock.now(),
+                )?;
+            }
+        }
         write_atomic(Path::new(&state.plan.config_path), &text)?;
         state.operation.transition(ApplyStage::AwaitingReload, self.clock.now())?;
         let operation_id = state.operation.id.as_str().to_owned();

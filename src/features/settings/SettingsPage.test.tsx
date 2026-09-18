@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SettingsPage } from './SettingsPage';
 import { instance, testClient } from '../../../tests/helpers/client';
@@ -29,13 +29,63 @@ test('检测到的实例展示配置路径与冲突工具', async () => {
   expect(screen.getByText('配置存在')).toBeInTheDocument();
 });
 
-test('未实现的能力明说未实现，不放看不到效果的开关', async () => {
+test('备份与更新是真实控制，不是占位说明', async () => {
   render(<SettingsPage client={testClient()} gateway={gateway} onNavigate={() => {}} />);
 
   expect(await screen.findByText('备份与更新')).toBeInTheDocument();
-  expect(screen.getAllByText('未实现').length).toBeGreaterThanOrEqual(2);
+  expect(screen.getByText(/每次提交前/)).toBeInTheDocument();
+  expect(screen.getByText(/最近 20 份/)).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: '检查更新' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '立即备份配置' })).toBeInTheDocument();
   // 危险操作只做入口，不在这里直接执行。
   expect(screen.getByRole('button', { name: '还原 Codex 配置' })).toBeInTheDocument();
+});
+
+test('更新查询失败时不显示成“已是最新”', async () => {
+  const user = userEvent.setup();
+  const checkUpdate = vi.fn().mockResolvedValue({ current: '0.1.0', latest: null, hasUpdate: false,
+    releaseUrl: null, publishedAt: null, error: '无法查询发布信息：timeout' });
+  render(<SettingsPage client={testClient({ checkUpdate })} gateway={gateway} onNavigate={() => {}} />);
+
+  await user.click(await screen.findByRole('button', { name: '检查更新' }));
+
+  expect(await screen.findByText(/查询失败：无法查询发布信息/)).toBeInTheDocument();
+  // 说明文案里本来就有“已是最新”四个字，所以这里断言的是状态行本身（带括号版本号）。
+  expect(screen.queryByText(/已是最新（/)).not.toBeInTheDocument();
+});
+
+test('有新版本时显示版本号与发布页，并说明不会自动安装', async () => {
+  const user = userEvent.setup();
+  const checkUpdate = vi.fn().mockResolvedValue({ current: '0.1.0', latest: '0.2.0', hasUpdate: true,
+    releaseUrl: 'https://example.test/releases/v0.2.0', publishedAt: '2026-09-18T00:00:00Z', error: null });
+  render(<SettingsPage client={testClient({ checkUpdate })} gateway={gateway} onNavigate={() => {}} />);
+
+  await user.click(await screen.findByRole('button', { name: '检查更新' }));
+
+  expect(await screen.findByText(/有新版本 0.2.0/)).toBeInTheDocument();
+  expect(screen.getByText(/不自动下载安装/)).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: '打开发布页' })).toHaveAttribute('href', 'https://example.test/releases/v0.2.0');
+});
+
+test('备份列表标注可能含密钥，恢复要走确认', async () => {
+  const user = userEvent.setup();
+  const restoreBackup = vi.fn().mockResolvedValue('/Users/example/.codex/config.toml');
+  render(<SettingsPage client={testClient({
+    listBackups: vi.fn().mockResolvedValue([{ id: 'b_1', sourcePath: '/Users/example/.codex/config.toml',
+      createdAt: '2026-09-18T03:20:00Z', contentHash: 'a1b2c3d4e5f6', bytes: 412, mayContainSecrets: true }]),
+    restoreBackup,
+  })} gateway={gateway} onNavigate={() => {}} />);
+
+  expect(await screen.findByText('可能含密钥')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '恢复' }));
+
+  const dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getByText(/覆盖前会自动再备份一次当前文件/)).toBeInTheDocument();
+  expect(restoreBackup).not.toHaveBeenCalled();
+
+  await user.click(within(dialog).getByRole('button', { name: '恢复这份备份' }));
+  expect(restoreBackup).toHaveBeenCalledWith('b_1');
+  expect(await screen.findByText(/事务记录未回退/)).toBeInTheDocument();
 });
 
 test('危险操作的入口会跳到对应页面执行', async () => {
