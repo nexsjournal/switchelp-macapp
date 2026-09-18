@@ -1189,7 +1189,7 @@ dependencies = [
 
 [[package]]
 name = "gptswitch"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -3173,7 +3173,7 @@ dependencies = [
 
 [[package]]
 name = "switch-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "keyring",
  "percent-encoding",
