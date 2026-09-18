@@ -14,3 +14,4 @@ playwright-report/
 # 若要随仓库分发，请先确认这些截图的使用授权，然后删除下面这一行。
 referimg/
 *.log
+dist-release/

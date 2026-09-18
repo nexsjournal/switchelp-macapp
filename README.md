@@ -17,6 +17,24 @@ Codex  →  ~/.codex/config.toml（本工具受管字段）
 - 写 Codex 配置一律走 **计划 → 摘要校验（CAS）→ 原子替换**，提交成功最多到"等待宿主重载"，不自行宣称已加载。
 - 上游是 `chat/completions` 时由网关双向翻译成 Responses；无法表达的字段**明确记为损失**，不假装生效。
 
+## 下载与安装
+
+从 [Releases](https://github.com/nexsjournal/gptswitch-macapp/releases) 下载：
+
+| 平台 | 文件 | 首次打开 |
+| --- | --- | --- |
+| macOS（Apple Silicon） | `GPTSwitch_0.1.0_aarch64.dmg` | 已用 Developer ID 签名，但**尚未公证**：首次打开需**右键 → 打开**，或执行一次 `xattr -dr com.apple.quarantine /Applications/GPTSwitch.app` |
+| macOS（Apple Silicon） | `GPTSwitch-0.1.0-arm64.zip` | 同上，解压后把 `.app` 拖进 `/Applications` |
+| Windows（x64） | CI 产出的 `.msi` / `.exe` | 未签名，SmartScreen 会提示“未知发布者”，点“仍要运行” |
+
+**为什么 macOS 会提示**：签名与公证是两道关卡，本项目目前只有前者。
+补齐公证需要账号所有者提供凭据，步骤见 [签名、公证与发布](docs/development/03-signing-and-release.md)；
+配好之后双击即可打开，且 CI 会自动产出带公证的包。
+
+**Windows 现状**：应用能打开，但**第三方模型在 Windows 上尚不可用**——凭据 helper 的 `.cmd`
+实现仍是显式未完成的桩，只保证失败可诊断，不假装可用。详见
+[证据索引](docs/appendix/01-source-index.md)。
+
 ## 构建与验证
 
 ```bash
