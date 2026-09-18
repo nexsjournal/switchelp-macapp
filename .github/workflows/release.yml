@@ -1,12 +1,12 @@
 name: release
 
-# 打标签即出包：macOS 与 Windows 各自在原生 runner 上构建，然后附到 Release。
+# 打标签（v*）自动出包；也可以在 Actions 页手动触发并指定要附加产物的标签。
 #
-# 为什么不在 macOS 上交叉编译 Windows：Tauri 的 Windows 安装包要 NSIS/WiX 与
+# 为什么不在 macOS 上交叉编译 Windows：Tauri 的 Windows 安装包需要 NSIS/WiX 与
 # Windows SDK，交叉构建官方不支持且极易产出有问题的安装器。用原生 runner 是唯一可靠做法。
 #
-# 签名：macOS 需要 Developer ID 证书 + 公证凭据，Windows 需要代码签名证书。
-# 没配置 secrets 时也能出包，只是产物未签名——下面的步骤会自动跳过签名而不是失败。
+# 签名：macOS 需要 Developer ID 证书（再加公证凭据才能双击打开），Windows 需要
+# 另一张代码签名证书。凭据配置步骤见 docs/development/03-signing-and-release.md。
 
 on:
   push:
@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '把产物附加到哪个标签（留空则用当前 ref）'
+        description: '把产物附加到哪个标签'
         type: string
         default: 'v0.1.0'
       draft:
@@ -26,7 +26,28 @@ permissions:
   contents: write
 
 jobs:
+  # 单独一个 job 把「有没有签名身份」算成输出。
+  # 不能在 job 级 `if` 里用 `matrix`（矩阵展开前就求值了），`needs` 才可以。
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      signed: ${{ steps.check.outputs.signed }}
+    steps:
+      - id: check
+        env:
+          IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          if [ -n "$IDENTITY" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::未配置 APPLE_SIGNING_IDENTITY，跳过 macOS 构建：未签名的 macOS 包下载后会被 Gatekeeper 拦下，发布它比不发布更糟。"
+          fi
+
   build:
+    needs: gate
+    # macOS 任务只在配置了签名身份时运行；Windows 任务始终运行。
+    if: ${{ !matrix.requires_signing || needs.gate.outputs.signed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -34,8 +55,6 @@ jobs:
           - platform: macos-latest
             target: aarch64-apple-darwin
             label: macOS (Apple Silicon)
-            # 需要配 APPLE_SIGNING_IDENTITY 才会跑：未签名的 macOS 包下载后
-            # 会被 Gatekeeper 拦下，发布这种东西比不发布更糟。
             requires_signing: true
           - platform: macos-latest
             target: x86_64-apple-darwin
@@ -48,8 +67,6 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     name: ${{ matrix.label }}
-    # 未配置签名时跳过 macOS 构建，而不是产出一个用户打不开的包。
-    if: ${{ !matrix.requires_signing || secrets.APPLE_SIGNING_IDENTITY != '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -74,57 +91,58 @@ jobs:
       - name: 安装前端依赖
         run: pnpm install --frozen-lockfile
 
-      # --- macOS 签名与公证 ------------------------------------------------
-      # 只有一个平台上做公证：两份产物共用同一套凭据，重复提交没有意义。
-      - name: 准备 macOS 签名证书
-        if: startsWith(matrix.platform, 'macos') && env.APPLE_CERTIFICATE != ''
+      # --- macOS：证书与公证凭据 -------------------------------------------
+      - name: 导入 macOS 签名证书
+        if: startsWith(matrix.platform, 'macos')
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
           security create-keychain -p actions build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p actions build.keychain
-          security import certificate.p12 -k build.keychain -P "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions build.keychain
           rm certificate.p12
 
       - name: 保存公证凭据到钥匙串
-        if: startsWith(matrix.platform, 'macos') && env.APPLE_API_KEY != ''
+        if: startsWith(matrix.platform, 'macos') && secrets.APPLE_API_KEY != ''
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           mkdir -p ~/private_keys
           echo "$APPLE_API_KEY" | base64 --decode > ~/private_keys/AuthKey.p8
           xcrun notarytool store-credentials gptswitch \
             --key ~/private_keys/AuthKey.p8 \
-            --key-id "${{ secrets.APPLE_API_KEY_ID }}" \
-            --issuer "${{ secrets.APPLE_API_ISSUER }}"
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER"
 
-      # --- 构建 ------------------------------------------------------------
-      - name: 构建（macOS）
+      - name: 构建（macOS，签名并公证）
         if: startsWith(matrix.platform, 'macos')
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # tauri 会自动用这个 profile 提交公证并 staple。
-          APPLE_KEYCHAIN_PROFILE: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && 'gptswitch' || '' }}
+          APPLE_KEYCHAIN_PROFILE: gptswitch
         run: pnpm exec tauri build --target ${{ matrix.target }}
 
       - name: 构建（Windows）
         if: matrix.platform == 'windows-latest'
         env:
-          # 未配置证书时就跳过签名，仍然出包；配置后自动签名。
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: pnpm exec tauri build --target ${{ matrix.target }}
 
-      # --- 归集产物 --------------------------------------------------------
+      # --- 归集产物 ---------------------------------------------------------
       - name: 归集 macOS 产物
         if: startsWith(matrix.platform, 'macos')
         run: |
           mkdir -p out
-          find target -maxdepth 4 -type f \( -name '*.dmg' -o -name '*.app.zip' \) -exec cp {} out/ \;
-          cd target/${{ matrix.target }}/release/bundle/macos 2>/dev/null && zip -qry ../../../../../out/GPTSwitch-${{ matrix.target }}.app.zip GPTSwitch.app && cd -
+          find target -type f -name '*.dmg' -exec cp {} out/ \;
+          ditto -c -k --keepParent "target/${{ matrix.target }}/release/bundle/macos/GPTSwitch.app" \
+            "out/GPTSwitch-${{ matrix.target }}.zip"
           ls -la out
 
       - name: 归集 Windows 产物
@@ -133,7 +151,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path out | Out-Null
           Get-ChildItem -Path target -Recurse -Include *.msi,*.exe |
-            Where-Object { $_.FullName -notmatch 'deps|build' } |
+            Where-Object { $_.FullName -notmatch '\\deps\\|\\build\\' } |
             Copy-Item -Destination out
           Get-ChildItem out
 
@@ -159,7 +177,6 @@ jobs:
         with:
           # 手动触发时可以指定要附加产物的标签；打标签时用触发它的那个标签。
           tag_name: ${{ inputs.tag || github.ref_name }}
-          # 手动触发时默认草稿，核对过再发布；打标签时直接发布。
           draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
           generate_release_notes: true
           files: artifacts/*
