@@ -1,1 +1,1 @@
-{"main":{"identifier":"main","description":"仅本地配置窗口使用核心桌面能力","local":true,"windows":["main"],"permissions":["core:default","core:window:allow-set-theme"]}}
+{"main":{"identifier":"main","description":"仅本地配置窗口使用核心桌面能力","local":true,"windows":["main"],"permissions":["core:default","core:window:allow-set-theme","core:window:allow-start-dragging","core:window:allow-internal-toggle-maximize"]}}

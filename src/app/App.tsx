@@ -171,10 +171,17 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
   const visibleProviders = providers.filter(p => `${p.name} ${p.endpoint}`.toLocaleLowerCase().includes(search));
 
   return <div className={styles.shell} data-locale={locale}>
+    {/*
+      透明的窗口拖拽区。
+      macOS 的标题栏是 overlay（透明），鼠标事件全部由 webview 接收——没有这一条，窗口就
+      没法用鼠标移动了。它不画任何东西：露出来的就是侧栏与顶栏自己的主题色，所以不存在
+      配色问题。高度取 --titlebar-height（非 macOS 平台是 0，等于不存在）。
+    */}
+    <div className={styles.dragRegion} data-tauri-drag-region aria-hidden="true" />
     {/* 显式把焦点交给主内容：部分引擎不会为片段链接移动焦点。 */}
     <a className="skip-link" href="#main-content" onClick={() => document.getElementById('main-content')?.focus()}>{t('common.skipToContent')}</a>
     <aside className={styles.sidebar}>
-      <div className={styles.brand}><div className={styles.brandIcon}><AppLogo size={20} /></div><div><strong>{t('app.name')}</strong><span>{t('app.subtitle')}</span></div></div>
+      <div className={styles.brand} data-tauri-drag-region="deep"><div className={styles.brandIcon}><AppLogo size={20} /></div><div><strong>{t('app.name')}</strong><span>{t('app.subtitle')}</span></div></div>
       <nav aria-label={t('shell.navLabel')}>{navigation.map(({ id, icon: Icon }) => <button key={id} className={page === id ? styles.active : ''} aria-current={page === id ? 'page' : undefined} onClick={() => navigate(id)}><Icon size={18} />{t(`nav.${id}`)}</button>)}</nav>
       {/* 设置按设计放在侧栏底部，与日常导航分开。 */}
       <button className={`${styles.settingsEntry} ${page === 'settings' ? styles.active : ''}`}
@@ -185,7 +192,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
       <div className={styles.version}>{t('app.name')} <span>{__APP_VERSION__} · {t('app.inDevelopment')}</span></div>
     </aside>
     <div className={styles.workspace}>
-      <div className={styles.topbar}><span>{t('common.workspace')}<ChevronRight size={14} /> {t(`nav.${page}`)}</span>{gateway && !gateway.running ? <span className="badge warning">{t('overview.loadStateGatewayDown')}</span> : pending.length ? <span className="badge warning">{t('shell.pendingCountBadge', { count: pending.length })}</span> : gateway?.revisions.length ? <span className="badge">{t('shell.applied')}</span> : <span className="badge">{t('shell.notApplied')}</span>}</div>
+      <div className={styles.topbar} data-tauri-drag-region="deep"><span>{t('common.workspace')}<ChevronRight size={14} /> {t(`nav.${page}`)}</span>{gateway && !gateway.running ? <span className="badge warning">{t('overview.loadStateGatewayDown')}</span> : pending.length ? <span className="badge warning">{t('shell.pendingCountBadge', { count: pending.length })}</span> : gateway?.revisions.length ? <span className="badge">{t('shell.applied')}</span> : <span className="badge">{t('shell.notApplied')}</span>}</div>
       <main className={styles.main} id="main-content" tabIndex={-1}>
         {modelEditor ? <ModelEditorPage client={client} providers={providers}
           model={modelEditor === 'new' ? undefined : modelEditor}

@@ -1,4 +1,6 @@
-.shell { display: flex; height: 100%; min-width: 860px; }
+/* 透明拖拽区：见 App.tsx 的说明。贴窗口顶部、铺满整宽，本身不画任何东西。 */
+.dragRegion { position: absolute; top: 0; left: 0; right: 0; height: var(--titlebar-height); z-index: var(--z-toolbar); }
+.shell { display: flex; height: 100%; min-width: 860px; position: relative; }
 .sidebar { width: var(--sidebar-width); flex-shrink: 0; background: var(--bg-sidebar); border-right: 1px solid var(--border-subtle); padding: 32px 16px 20px; display: flex; flex-direction: column; }
 .brand { display: flex; align-items: center; gap: 12px; padding: 0 8px 40px; }
 .brandIcon { width: 36px; height: 36px; display: grid; place-items: center; background: var(--text-primary); color: var(--bg-canvas); border-radius: 10px; }
