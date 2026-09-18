@@ -38,7 +38,11 @@ test('主导航有可读名称，模型表格的表头带列作用域', async ()
       capabilityRevision: 1, version: 1, createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z',
     }]),
   });
+  const user = userEvent.setup();
   render(<App client={client} />);
+  await screen.findByText('测试供应商');
+  // 模型表格已归到模型页（概览只留卡片）。
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '模型' }));
   await screen.findByText('测试模型');
 
   expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();

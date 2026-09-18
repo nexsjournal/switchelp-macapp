@@ -61,6 +61,8 @@ pub struct Gateway {
     local_addr: Mutex<Option<SocketAddr>>,
     running: AtomicBool,
     served: AtomicU64,
+    /// 暂停新推理请求。用于“先停新的，再换 Key”，不影响在途请求。
+    paused: AtomicBool,
 }
 
 impl Gateway {
@@ -97,6 +99,7 @@ impl Gateway {
             local_addr: Mutex::new(None),
             running: AtomicBool::new(false),
             served: AtomicU64::new(0),
+            paused: AtomicBool::new(false),
         }
     }
 
@@ -171,6 +174,17 @@ impl Gateway {
 
     pub fn shutdown(&self) {
         self.running.store(false, Ordering::Relaxed);
+    }
+
+    /// 暂停 / 继续接受**新**推理请求。
+    ///
+    /// 暂停只影响新请求：在途请求继续跑完，符合“不默认中断正在生成的任务”。
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
     }
 
     /// 处理一个连接。错误在这里被翻译成 HTTP 响应，绝不把 `CoreError` 细节直接吐出。
@@ -308,6 +322,12 @@ impl Gateway {
             Ok(secret) => secret,
             Err(error) => return write_error(writer, &error),
         };
+
+        if self.is_paused() {
+            let error = CoreError::new(ErrorCode::Internal, "error.gatewayPaused")
+                .with_detail("本机网关已暂停接受新请求；在途请求不受影响。".to_owned());
+            return write_error(writer, &error);
+        }
 
         // 模态在执行前判定：把图片塞给只声明文本的模型属于模态虚报，
         // 也等于偷偷借用另一个模型的能力，必须显式拒绝而不是转发。
@@ -882,6 +902,8 @@ fn redact(text: &str, secret: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GatewayStatus {
     pub running: bool,
+    /// 是否已暂停接受新请求。
+    pub paused: bool,
     pub port: Option<u16>,
     pub served: u64,
     pub instance_id: String,
@@ -895,6 +917,7 @@ impl Gateway {
         let address = self.local_addr();
         GatewayStatus {
             running: self.running.load(Ordering::Relaxed),
+            paused: self.is_paused(),
             port: address.map(|value| value.port()),
             served: self.served_requests(),
             instance_id: self.config.instance_id.as_str().to_owned(),

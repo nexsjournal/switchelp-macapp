@@ -1,0 +1,22 @@
+.page { display: grid; gap: 20px; }
+.card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
+.card h2 { margin: 0 0 16px; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+.card h2 > svg { color: var(--text-muted); }
+.rows { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 14px 16px; margin: 0; font-size: 13px; }
+.rows dt { color: var(--text-muted); }
+.rows dd { margin: 0; }
+.rows dd > span { display: block; font-size: 11px; line-height: 18px; margin-top: 2px; }
+.online { color: var(--status-success); }
+.offline { color: var(--status-warning); }
+
+.instances { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.instances li { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 14px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-input); }
+.instances strong { display: block; font-size: 13px; font-weight: 500; }
+.instances span { display: block; font-size: 11px; margin-top: 3px; }
+.tags { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+.note { margin: 14px 0 0; color: var(--text-muted); font-size: 12px; line-height: 18px; }
+.dangerZone { border-color: var(--status-danger-bg); }
+.dangerZone h2 > svg { color: var(--status-danger); }

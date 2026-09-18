@@ -23,7 +23,8 @@
 .stat > span { color: var(--text-secondary); font-size: 12px; }
 .stat strong { display: block; font-size: 30px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 40px; margin-top: 8px; }
 .stat small { display: block; color: var(--text-muted); font-size: 11px; margin-top: 4px; }
-.overviewGrid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 24px; margin-bottom: 24px; }
+/* 顶对齐、各自贴合内容：两张卡内容量不同，拉伸会在短的一侧留出大片空白。 */
+.overviewGrid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 24px; margin-bottom: 24px; align-items: start; }
 .card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
 .cardHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
 .cardHeader h2, .cardHeader h3 { margin: 0; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
@@ -47,11 +48,15 @@
 .empty p { font-size: 12px; margin: 4px 0 16px; max-width: 330px; }
 .tableWrap { overflow-x: auto; }
 .tableWrap table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+/* 操作列按内容收窄：自动布局会把剩余宽度按比例摊给所有列，
+   结果操作列比任何数据列都宽，数据反被挤窄。 */
+.tableWrap th:last-child, .tableWrap td:last-child { width: 1%; white-space: nowrap; }
 .tableWrap th { color: var(--text-muted); font-size: 11px; font-weight: 500; padding: 0 12px 14px; white-space: nowrap; }
 .tableWrap td { border-top: 1px solid var(--border-subtle); padding: 16px 12px; }
-.tableWrap td:first-child { min-width: 140px; max-width: 240px; }
+.tableWrap td:first-child { min-width: 150px; max-width: 300px; }
 .tableWrap td strong { display: block; font-weight: 500; margin-bottom: 2px; }
-.tableWrap td > span.text-muted { display: block; }
+/* 按结构选择：CSS Module 会把 .text-muted 这类全局工具类一起哈希，写它永远不匹配。 */
+.tableWrap td > span { display: block; font-size: 11px; color: var(--text-muted); }
 .tableWrap td:first-child > span, .tableWrap td:nth-child(3) > span { display: block; font-size: 11px; }
 .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-bottom: 20px; color: var(--text-muted); font-size: 12px; }
 .search { display: flex; align-items: center; position: relative; width: min(420px, 75%); }
@@ -93,3 +98,9 @@
 .spin { animation: rotate 1s linear infinite; }
 @keyframes rotate { to { transform: rotate(360deg); } }
 @media (max-width: 1120px) { .sidebar { width: 184px; } .main { padding: 24px; } .overviewGrid { gap: 16px; } .providerLayout { grid-template-columns: 230px minmax(0, 1fr); gap: 16px; } .card { padding: 20px; } }
+
+/* 侧栏底部的设置入口：与主导航同样的交互，但位置上分开。 */
+.settingsEntry { width: 100%; justify-content: flex-start; border: 0; height: 40px; padding: 0 16px; margin-bottom: 4px;
+  background: transparent; color: var(--text-secondary); border-radius: var(--radius-nav); }
+.settingsEntry:hover { background: var(--bg-hover); color: var(--text-primary); }
+.settingsEntry.active { background: var(--bg-selected); color: var(--text-primary); }

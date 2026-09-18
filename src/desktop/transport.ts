@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { ApplyPlan, CodexInstance, Credential, DiagnosticEvent, Model, ProbeResult, Provider } from '@/contracts/types';
-import type { ApplyStatus, DesktopClient, GatewayReport, InspectResult, DiagnosticsPreview, PlatformReport } from './client';
+import type { AppliedSummary, ApplyStatus, DesktopClient, GatewayReport, InspectResult, DiagnosticsPreview, PlatformReport } from './client';
 import type { DiscoveredModel } from './client';
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -18,6 +18,8 @@ export const desktopClient: DesktopClient = {
   detectInstances: explicitPath => call<CodexInstance[]>('instances_detect', { explicitPath: explicitPath ?? null }),
   gatewayStatus: () => call<GatewayReport>('gateway_status'),
   platformInfo: () => call<PlatformReport>('platform_info'),
+  applySummary: () => call<AppliedSummary | null>('apply_summary'),
+  setGatewayPaused: paused => call<boolean>('gateway_set_paused', { paused }),
   async listProviders(filter) {
     const providers = await call<Provider[]>('providers_list');
     const query = filter?.query?.trim().toLocaleLowerCase();
@@ -31,6 +33,9 @@ export const desktopClient: DesktopClient = {
   selectCredential: (providerId, credentialId) => call<void>('credentials_select', { providerId, credentialId }),
   listModels: () => call<Model[]>('models_list'),
   saveModel: (draft, expectedVersion) => call<Model>('models_save', { draft, expectedVersion }),
+  deleteModel: (modelId, expectedVersion) => call<void>('models_delete', { modelId, expectedVersion }),
+  deleteCredential: credentialId => call<void>('credentials_delete', { credentialId }),
+  deleteProvider: providerId => call<void>('providers_delete', { providerId }),
   discoverModels: (providerId, credentialId) => call<DiscoveredModel[]>('models_discover', { providerId, credentialId }),
   // probeId 由界面生成：探测是阻塞调用，等返回再拿 id 就来不及取消了。
   startProbe: (target, options) => call<ProbeResult>('probes_start', {
@@ -55,4 +60,5 @@ export const desktopClient: DesktopClient = {
   },
   previewDiagnostics: request => call<DiagnosticsPreview>('diagnostics_preview', { scopes: request.scopes }),
   exportDiagnostics: request => call<{ savedPath: string }>('diagnostics_export', { scopes: request.scopes }),
+  clearDiagnostics: () => call<number>('diagnostics_clear'),
 };

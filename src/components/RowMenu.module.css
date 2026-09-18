@@ -1,0 +1,28 @@
+.root { position: relative; display: inline-flex; }
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  min-width: 176px;
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.menu button {
+  justify-content: flex-start;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  background: transparent;
+  border-color: transparent;
+  border-radius: 6px;
+}
+.menu button:hover:not(:disabled) { background: var(--bg-hover); }
+.menu button:disabled { color: var(--text-muted); }
+.danger { color: var(--status-danger); }
+.hint { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 18px; }

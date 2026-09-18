@@ -75,12 +75,18 @@ fn install_tray(app: &tauri::AppHandle, gateway_running: bool, port: Option<u16>
     let show = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
     // 状态项只读：它是信息，不是命令。
     let status_item = MenuItem::with_id(app, "status", &status, false, None::<&str>)?;
+    // 暂停只拦新请求：在途请求继续跑完，符合“不默认中断正在生成的任务”。
+    let pause = MenuItem::with_id(app, "pause", "暂停新请求", true, None::<&str>)?;
+    let open_codex = MenuItem::with_id(app, "open_codex", "打开 Codex", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出 GPTSwitch", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
             &show,
             &status_item,
+            &PredefinedMenuItem::separator(app)?,
+            &pause,
+            &open_codex,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
@@ -94,6 +100,26 @@ fn install_tray(app: &tauri::AppHandle, gateway_running: bool, port: Option<u16>
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
+            }
+            "pause" => {
+                if let Some(state) = app.try_state::<Arc<DesktopState>>() {
+                    if let Some(gateway) = state.gateway() {
+                        let next = !gateway.is_paused();
+                        gateway.set_paused(next);
+                        // 菜单文字必须跟着状态走，否则用户会以为点了没反应。
+                        if let Some(item) = app.menu().and_then(|menu| menu.get("pause")) {
+                            if let Some(item) = item.as_menuitem() {
+                                let _ = item.set_text(if next { "继续接受新请求" } else { "暂停新请求" });
+                            }
+                        }
+                    }
+                }
+            }
+            "open_codex" => {
+                // 只在本机打开宿主应用；不安装、不修改它的配置。
+                let _ = std::process::Command::new("open")
+                    .args(["-a", "ChatGPT"])
+                    .spawn();
             }
             "quit" => app.exit(0),
             _ => {}
@@ -185,12 +211,14 @@ fn main() {
             commands::credentials_list, commands::credentials_add,
             commands::credentials_replace, commands::credentials_select,
             commands::models_list, commands::models_save,
+            commands::providers_delete, commands::credentials_delete, commands::models_delete,
             commands::instances_detect, commands::config_inspect,
             commands::apply_plan, commands::apply_execute,
-            commands::apply_status, commands::apply_confirm_reload,
+            commands::apply_status, commands::apply_confirm_reload, commands::apply_summary,
             commands::restore_plan, commands::restore_execute,
             commands::gateway_status,
             commands::diagnostics_list, commands::diagnostics_preview, commands::diagnostics_export,
+            commands::diagnostics_clear, commands::gateway_set_paused,
             commands::models_discover, commands::platform_info,
             commands::probes_start, commands::probes_cancel,
         ])

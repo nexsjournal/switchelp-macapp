@@ -21,12 +21,13 @@ export function plan(changes: FieldChange[], overrides: Partial<ApplyPlan> = {})
 /** 仅测试使用；未安排返回值的命令必须失败，避免模拟成功掩盖未实现流程。 */
 export function testClient(overrides: Partial<DesktopClient> = {}): DesktopClient {
   const unsupported = vi.fn().mockRejectedValue(new Error('test command not configured'));
-  return { detectInstances: unsupported, platformInfo: vi.fn().mockResolvedValue({ platform: 'macos', titlebarHeight: 44, leadingReserve: 84, systemDecorations: true }), gatewayStatus: vi.fn().mockResolvedValue({ running: true, port: 18765, served: 0, revisions: [], tokenFingerprint: 'deadbeef', error: null }), listProviders: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+  return { detectInstances: unsupported, applySummary: vi.fn().mockResolvedValue(null), setGatewayPaused: vi.fn().mockResolvedValue(false), platformInfo: vi.fn().mockResolvedValue({ platform: 'macos', titlebarHeight: 44, leadingReserve: 84, systemDecorations: true }), gatewayStatus: vi.fn().mockResolvedValue({ running: true, paused: false, port: 18765, served: 0, revisions: [], tokenFingerprint: 'deadbeef', error: null }), listProviders: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     saveProvider: unsupported, listPresets: unsupported, listCredentials: vi.fn().mockResolvedValue([]),
     addCredential: unsupported, replaceCredential: unsupported, selectCredential: unsupported,
+    deleteProvider: unsupported, deleteCredential: unsupported, deleteModel: unsupported,
     discoverModels: unsupported, listModels: vi.fn().mockResolvedValue([]), saveModel: unsupported,
     startProbe: unsupported, cancelProbe: unsupported, inspectConfig: unsupported, planApply: unsupported,
     executeApply: unsupported, applyStatus: unsupported, confirmReload: unsupported, planRestore: unsupported,
     executeRestore: unsupported, listDiagnostics: unsupported, previewDiagnostics: unsupported,
-    exportDiagnostics: unsupported, ...overrides };
+    exportDiagnostics: unsupported, clearDiagnostics: vi.fn().mockResolvedValue(0), ...overrides };
 }

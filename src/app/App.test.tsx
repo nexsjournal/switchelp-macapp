@@ -8,7 +8,7 @@ test('首次接入保存真实草稿调用，失败后保留表单且不宣称 C
   const client = testClient({ saveProvider: vi.fn().mockRejectedValue({ code: 'VALIDATION_FAILED', messageKey: 'error.validation',
     safeDetails: ['远程地址必须使用 HTTPS'], retryable: false, recoveryActions: [] }) });
   render(<App client={client} />);
-  await screen.findByText('从第一家供应商开始');
+  await screen.findByText('添加第一个供应商');
   await user.click(screen.getAllByRole('button', { name: '添加供应商' })[0]!);
   const dialog = screen.getByRole('dialog');
   await user.type(within(dialog).getByLabelText('供应商名称'), '测试服务');
@@ -24,7 +24,7 @@ test('首次接入保存真实草稿调用，失败后保留表单且不宣称 C
 test('编辑脏表单按 Escape 需要确认，放弃后焦点返回入口', async () => {
   const user = userEvent.setup();
   render(<App client={testClient()} />);
-  await screen.findByText('从第一家供应商开始');
+  await screen.findByText('添加第一个供应商');
   const trigger = screen.getAllByRole('button', { name: '添加供应商' })[0]!;
   await user.click(trigger);
   await user.type(screen.getByLabelText('供应商名称'), '草稿');
@@ -75,4 +75,71 @@ test('网关运行中且未发布目录时，不宣称已应用到 Codex', async
   expect(await screen.findByText(/网关运行中 · 127.0.0.1:18765 · 尚未发布目录/)).toBeInTheDocument();
   expect(screen.queryByText('已应用到 Codex')).not.toBeInTheDocument();
   expect(screen.getByText('尚未应用到 Codex')).toBeInTheDocument();
+});
+
+test('纳入目录的模型不能直接删除，必须先移出', async () => {
+  const model = { id: 'm_1', providerId: 'p_test', upstreamId: 'vendor/a', catalogAlias: 'gs/m_1',
+    displayName: '目录中的模型', lifecycle: 'saved' as const, hostState: 'pending_apply' as const, inCatalog: true,
+    policy: { contextLimit: 128_000, outputLimit: 8_192, compactLimit: null,
+      reasoning: { support: 'unknown' as const, control: 'none' as const, allowedValues: [], defaultValue: null, budgetTokens: null, mappingId: null },
+      inputs: [], tools: { functionTools: 'unknown' as const, parallelTools: 'unknown' as const, customTools: 'unknown' as const, verification: 'declared' as const } },
+    displayNameLayer: { discovered: null, userValue: null, overridden: false }, capabilityRevision: 1, version: 3,
+    createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z' };
+  const client = testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
+    listModels: vi.fn().mockResolvedValue([model]) });
+  const user = userEvent.setup();
+  render(<App client={client} />);
+  await screen.findByText('目录中的模型');
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '模型' }));
+  await user.click(await screen.findByRole('button', { name: '更多操作 目录中的模型' }));
+
+  // 菜单里能看到删除，但已纳入目录时禁用。
+  expect(screen.getByRole('menuitem', { name: '删除模型' })).toBeDisabled();
+  expect(screen.getByRole('menuitem', { name: '移出 Codex 目录' })).toBeEnabled();
+});
+
+test('移出目录要确认，并按版本号提交 inCatalog=false', async () => {
+  const user = userEvent.setup();
+  const saveModel = vi.fn().mockResolvedValue({});
+  const model = { id: 'm_1', providerId: 'p_test', upstreamId: 'vendor/a', catalogAlias: 'gs/m_1',
+    displayName: '目录中的模型', lifecycle: 'saved' as const, hostState: 'pending_apply' as const, inCatalog: true,
+    policy: { contextLimit: 128_000, outputLimit: 8_192, compactLimit: null,
+      reasoning: { support: 'unknown' as const, control: 'none' as const, allowedValues: [], defaultValue: null, budgetTokens: null, mappingId: null },
+      inputs: [], tools: { functionTools: 'unknown' as const, parallelTools: 'unknown' as const, customTools: 'unknown' as const, verification: 'declared' as const } },
+    displayNameLayer: { discovered: null, userValue: null, overridden: false }, capabilityRevision: 1, version: 3,
+    createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z' };
+  const client = testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
+    listModels: vi.fn().mockResolvedValue([model]), saveModel });
+  render(<App client={client} />);
+  await screen.findByText('目录中的模型');
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '模型' }));
+  await user.click(await screen.findByRole('button', { name: '更多操作 目录中的模型' }));
+  await user.click(screen.getByRole('menuitem', { name: '移出 Codex 目录' }));
+  const dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getByText(/需要重新生成差异并应用/)).toBeInTheDocument();
+  expect(saveModel).not.toHaveBeenCalled();
+
+  await user.click(within(dialog).getByRole('button', { name: '移出目录' }));
+  expect(saveModel).toHaveBeenCalledWith(expect.objectContaining({ id: 'm_1', inCatalog: false }), 3);
+});
+
+test('删除 Key 会说明撤销凭据库条目，并只在确认后调用', async () => {
+  const user = userEvent.setup();
+  const deleteCredential = vi.fn().mockResolvedValue(undefined);
+  const credential = { id: 'k_1', providerId: 'p_test', label: '备用', secretRef: 'r', secretVersion: 1,
+    maskedSuffix: '••••1c7', status: 'saved' as const, scope: null, lastVerifiedAt: null, version: 1,
+    createdAt: '2026-09-18T00:00:00Z' };
+  const client = testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
+    listCredentials: vi.fn().mockResolvedValue([credential]), deleteCredential });
+  render(<App client={client} />);
+  await screen.findByText('测试供应商');
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商' }));
+  await user.click(await screen.findByRole('button', { name: '删除 备用' }));
+
+  const dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getByText(/撤销系统凭据库里的条目/)).toBeInTheDocument();
+  expect(deleteCredential).not.toHaveBeenCalled();
+
+  await user.click(within(dialog).getByRole('button', { name: '删除 Key' }));
+  expect(deleteCredential).toHaveBeenCalledWith('k_1');
 });

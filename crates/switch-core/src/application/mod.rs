@@ -1,7 +1,7 @@
 //! 壳无关用例。桌面端不能用完整实体覆盖宿主状态、版本或验证结果。
 
 pub mod apply;
-pub use apply::{ApplyService, Clock, GatewayLayout, RecoveryReport, SystemClock};
+pub use apply::{AppliedSummary, ApplyService, Clock, GatewayLayout, RecoveryReport, SystemClock};
 use crate::{
     credentials::{CredentialResolver, ResolvedSecret, SecretVault, secret_ref},
     domain::{
@@ -173,6 +173,85 @@ impl WorkspaceService {
         }
         model.updated_at = now();
         self.repository.save_model(model, expected_version)
+    }
+
+    /// 删除模型。
+    ///
+    /// 已纳入目录的模型必须先移出：原生菜单里还挂着它的身份，
+    /// 直接删会让宿主指向一个不存在的条目。
+    pub fn delete_model(&self, id: &str, expected_version: u64) -> Result<(), CoreError> {
+        let _guard = self.mutations.lock().map_err(|_| CoreError::internal("写入锁不可用"))?;
+        let model = self
+            .repository
+            .get_model(&ModelId::new(id))?
+            .ok_or_else(|| CoreError::not_found("模型"))?;
+        if model.version != expected_version {
+            return Err(CoreError::conflict("error.modelVersionConflict"));
+        }
+        if model.in_catalog {
+            return Err(
+                CoreError::validation("该模型已纳入 Codex 目录，请先移出目录再删除")
+                    .with_recovery("openModels", "action.openModels"),
+            );
+        }
+        self.repository.delete_model(&model.id)
+    }
+
+    /// 删除一个 Key。
+    ///
+    /// 正在使用的 Key 不能直接删；并且**先撤销安全条目再删元数据**——
+    /// 反过来一旦中途失败，会留下“元数据已删但秘密还在凭据库”的组合。
+    pub fn delete_credential(&self, id: &str) -> Result<(), CoreError> {
+        let _guard = self.mutations.lock().map_err(|_| CoreError::internal("写入锁不可用"))?;
+        let credential = self
+            .repository
+            .get_credential(&CredentialId::new(id))?
+            .ok_or_else(|| CoreError::not_found("Key"))?;
+        let provider = self
+            .repository
+            .get_provider(&credential.provider_id)?
+            .ok_or_else(|| CoreError::not_found("供应商"))?;
+        if provider.active_credential_id.as_ref() == Some(&credential.id) {
+            return Err(CoreError::validation(
+                "该 Key 正被供应商使用，请先选择另一个 Key 再删除",
+            ));
+        }
+        CredentialResolver::without_cache(self.vault.as_ref()).revoke(&credential)?;
+        match self.repository.delete_credential(&credential.id) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                // 秘密已经撤销，元数据还在：状态是“此 Key 的安全记录不存在”，
+                // 界面按 credentialMissing 处理，用户可重试删除。
+                let mut error = error;
+                error.safe_details.push("安全条目已撤销，但元数据未删除，请重试".to_owned());
+                Err(error)
+            }
+        }
+    }
+
+    /// 删除供应商。还有 Key 或模型时明确拒绝，不做静默级联删除。
+    pub fn delete_provider(&self, id: &str) -> Result<(), CoreError> {
+        let _guard = self.mutations.lock().map_err(|_| CoreError::internal("写入锁不可用"))?;
+        let provider_id = ProviderId::new(id);
+        let provider = self
+            .repository
+            .get_provider(&provider_id)?
+            .ok_or_else(|| CoreError::not_found("供应商"))?;
+        let credentials = self.repository.list_credentials(&provider_id)?.len();
+        let models = self
+            .repository
+            .list_models()?
+            .into_iter()
+            .filter(|model| model.provider_id == provider_id)
+            .count();
+        if credentials > 0 || models > 0 {
+            return Err(CoreError::validation(format!(
+                "该供应商还有 {} 个 Key、{} 个模型；请先删除它们再删除供应商",
+                credentials, models
+            )));
+        }
+        let _ = provider;
+        self.repository.delete_provider(&provider_id)
     }
 
     /// 解析某个 Key 的明文，仅供本机网关与探测这一条路径使用。

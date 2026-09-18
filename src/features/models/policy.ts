@@ -1,4 +1,5 @@
-import type { InputKind, ModelPolicy, Support } from '@/contracts/types';
+import type { InputKind, Model, ModelPolicy, Support } from '@/contracts/types';
+import type { ModelDraft } from '@/desktop/client';
 
 export const inputLabels: Record<InputKind, string> = { text: '文本', image: '图像', audio: '音频', video: '视频', pdf: 'PDF', document: '其他文档' };
 export const inputKinds = Object.keys(inputLabels) as InputKind[];
@@ -41,4 +42,20 @@ export function policyFromForm(data: FormData, previous = defaultPolicy()): Mode
   if (policy.contextLimit !== null && policy.outputLimit !== null && policy.outputLimit >= policy.contextLimit) throw new Error('最大输出必须小于上下文窗口。');
   if (policy.reasoning.defaultValue && !allowedValues.includes(policy.reasoning.defaultValue)) throw new Error('默认思考档位必须属于支持的档位。');
   return policy;
+}
+
+/** 由已有模型构造保存草稿。界面上的「纳入 / 移出目录」等快捷操作复用它，
+ *  避免与编辑器各写一份字段映射。 */
+export function modelDraft(model: Model, overrides: Partial<ModelDraft> = {}): ModelDraft {
+  return {
+    id: model.id,
+    providerId: model.providerId,
+    upstreamId: model.upstreamId,
+    catalogAlias: model.catalogAlias,
+    displayName: model.displayName,
+    policy: model.policy,
+    inCatalog: model.inCatalog,
+    displayNameOverridden: true,
+    ...overrides,
+  };
 }

@@ -61,6 +61,24 @@ impl Clock for SystemClock {
     }
 }
 
+/// 当前已生效的配置摘要。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppliedSummary {
+    pub operation_id: String,
+    pub instance_id: String,
+    /// 已发布的目录修订。
+    pub catalog_revision: String,
+    /// 受管配置里的默认模型；未记录时为空（不会用当前表单值顶替）。
+    pub default_model: Option<String>,
+    /// 本次目录包含的 alias 数量。
+    pub alias_count: usize,
+    /// 事务阶段。`AwaitingReload` 表示已提交但尚未确认宿主已加载。
+    pub stage: ApplyStage,
+    /// 应用时间（取自事务记录）。
+    pub applied_at: String,
+}
+
 /// 本机网关与目录的布局。端口与 app 数据目录由装配层探测后注入。
 #[derive(Debug, Clone)]
 pub struct GatewayLayout {
@@ -441,6 +459,42 @@ impl ApplyService {
             }
         }
         Ok(operation_id)
+    }
+
+    /// 当前已生效的配置摘要：界面用它回答“现在 Codex 用的是哪个模型、哪个目录版本”。
+    ///
+    /// 只读取最近一次**已发布且仍生效**的事务，不猜测、不按当前表单重算。
+    pub fn applied_summary(&self) -> Result<Option<AppliedSummary>, CoreError> {
+        let mut latest: Option<OperationState> = None;
+        for state in self.operations.list()? {
+            if state.kind != OperationKind::Apply || state.publication.is_none() {
+                continue;
+            }
+            if !matches!(
+                state.operation.stage,
+                ApplyStage::AwaitingReload | ApplyStage::Pending | ApplyStage::Verified
+            ) {
+                continue;
+            }
+            latest = Some(state);
+        }
+        let Some(state) = latest else {
+            return Ok(None);
+        };
+        let revision = state.plan.catalog_revision.clone();
+        Ok(Some(AppliedSummary {
+            operation_id: state.operation.id.as_str().to_owned(),
+            instance_id: state.plan.instance_id.as_str().to_owned(),
+            catalog_revision: revision,
+            // 默认模型来自冻结输入，不是当前表单值。
+            default_model: state
+                .prepared
+                .as_ref()
+                .and_then(|prepared| prepared.managed.model.clone()),
+            alias_count: state.plan.catalog_aliases.len(),
+            stage: state.operation.stage,
+            applied_at: state.operation.id.as_str().to_owned(),
+        }))
     }
 
     /// 启动恢复：只处理本工具未完成的事务，不覆盖外部修改。

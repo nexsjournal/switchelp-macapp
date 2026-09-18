@@ -89,12 +89,25 @@ export interface DiagnosticsPreview {
 /** 本机网关状态。未启动时 `error` 必须带出原因，界面不得显示成正常。 */
 export interface GatewayReport {
   running: boolean;
+  /** 是否已暂停接受新请求（在途请求不受影响）。 */
+  paused: boolean;
   port: number | null;
   served: number;
   /** 已发布的目录版本；空表示尚未应用过任何配置。 */
   revisions: string[];
   tokenFingerprint: string;
   error: string | null;
+}
+
+/** 当前已生效的配置摘要。`defaultModel` 为空表示历史事务没有记录，不用当前表单值顶替。 */
+export interface AppliedSummary {
+  operationId: string;
+  instanceId: string;
+  catalogRevision: string;
+  defaultModel: string | null;
+  aliasCount: number;
+  stage: string;
+  appliedAt: string;
 }
 
 /** 平台与窗口策略。 */
@@ -112,6 +125,11 @@ export interface DesktopClient {
   /** 本机网关是否在监听。 */
   gatewayStatus(): Promise<GatewayReport>;
 
+  /** 当前已生效的配置；从未应用过时为 null。 */
+  applySummary(): Promise<AppliedSummary | null>;
+  /** 暂停或继续接受新推理请求；返回实际状态。 */
+  setGatewayPaused(paused: boolean): Promise<boolean>;
+
   /** 平台与窗口策略。界面据此设置 data-platform 与窗口相关变量。 */
   platformInfo(): Promise<PlatformReport>;
 
@@ -128,6 +146,12 @@ export interface DesktopClient {
   discoverModels(providerId: string, credentialId: string): Promise<DiscoveredModel[]>;
   listModels(): Promise<Model[]>;
   saveModel(draft: ModelDraft, expectedVersion: number): Promise<Model>;
+  /** 已纳入目录的模型必须先移出，删除会被拒绝。 */
+  deleteModel(modelId: string, expectedVersion: number): Promise<void>;
+  /** 正在使用的 Key 不能删除；删除会同时撤销系统凭据库里的条目。 */
+  deleteCredential(credentialId: string): Promise<void>;
+  /** 还有 Key 或模型时会拒绝，不做级联删除。 */
+  deleteProvider(providerId: string): Promise<void>;
 
   /** 探测只读阶段默认不发真实请求；`includeGenerate` 才会产生费用与副作用。 */
   startProbe(target: { providerId: string; modelId?: string; credentialId: string }, options?: { includeGenerate?: boolean }): Promise<ProbeResult>;
@@ -145,6 +169,8 @@ export interface DesktopClient {
   listDiagnostics(filter?: { level?: DiagnosticEvent['level'] }): Promise<ListResult<DiagnosticEvent>>;
   previewDiagnostics(request: DiagnosticsRequest): Promise<DiagnosticsPreview>;
   exportDiagnostics(request: DiagnosticsRequest): Promise<{ savedPath: string }>;
+  /** 清空本工具自己的诊断事件；不影响 Codex 历史。返回清掉的条数。 */
+  clearDiagnostics(): Promise<number>;
 }
 
 /** 错误归一化：后端 CoreError 与前端未知错误都收敛成同一形状。 */

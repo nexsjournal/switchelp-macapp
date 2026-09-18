@@ -174,3 +174,83 @@ fn discovery_leaves_models_it_did_not_see_untouched() {
     assert_eq!(after.display_name, "已下线模型");
     assert!(after.display_name_layer.discovered.is_none());
 }
+
+/// 删除模型：纳入目录后必须先移出，不能删掉宿主菜单里挂着的身份。
+#[test]
+fn deleting_a_model_requires_leaving_the_catalog_first() {
+    let (service, _vault, _repo) = setup();
+    let provider = service.save_provider(provider_draft(), 0).unwrap();
+    let saved = service
+        .save_model(ready_model(provider.id.as_str(), "vendor/a", "模型"), 0)
+        .unwrap();
+    assert!(saved.in_catalog, "默认纳入目录");
+
+    let error = service.delete_model(saved.id.as_str(), saved.version).unwrap_err();
+    assert_eq!(error.code, ErrorCode::ValidationFailed);
+    assert!(error.safe_details.iter().any(|detail| detail.contains("先移出目录")));
+
+    // 移出目录后即可删除。
+    let mut draft = ready_model(provider.id.as_str(), "vendor/a", "模型");
+    draft.id = Some(saved.id.as_str().to_owned());
+    draft.in_catalog = false;
+    let left = service.save_model(draft, saved.version).unwrap();
+    service.delete_model(left.id.as_str(), left.version).unwrap();
+    assert!(service.list_models().unwrap().is_empty());
+}
+
+/// 版本不符时拒绝删除，避免删掉别人刚改过的那一条。
+#[test]
+fn deleting_a_model_rejects_a_stale_version() {
+    let (service, _vault, _repo) = setup();
+    let provider = service.save_provider(provider_draft(), 0).unwrap();
+    let mut draft = ready_model(provider.id.as_str(), "vendor/a", "模型");
+    draft.in_catalog = false;
+    let saved = service.save_model(draft, 0).unwrap();
+
+    let error = service.delete_model(saved.id.as_str(), saved.version + 1).unwrap_err();
+    assert_eq!(error.code, ErrorCode::Conflict);
+    assert_eq!(service.list_models().unwrap().len(), 1, "拒绝时必须什么都没删");
+}
+
+/// 删除 Key：正在使用的不能删；删掉后安全条目必须一起消失。
+#[test]
+fn deleting_a_credential_revokes_its_secret_and_refuses_the_active_one() {
+    let (service, vault, _repo) = setup();
+    let provider = service.save_provider(provider_draft(), 0).unwrap();
+    let active = service.add_credential(provider.id.as_str(), "日常", "synthetic-active".into()).unwrap();
+    let spare = service.add_credential(provider.id.as_str(), "备用", "synthetic-spare".into()).unwrap();
+    service.select_credential(provider.id.as_str(), active.id.as_str()).unwrap();
+
+    // 正在使用的 Key 不能删。
+    let error = service.delete_credential(active.id.as_str()).unwrap_err();
+    assert_eq!(error.code, ErrorCode::ValidationFailed);
+    assert!(error.safe_details.iter().any(|detail| detail.contains("先选择另一个 Key")));
+
+    let before = vault.len();
+    assert_eq!(before, 2);
+    service.delete_credential(spare.id.as_str()).unwrap();
+
+    assert_eq!(service.list_credentials(provider.id.as_str()).unwrap().len(), 1);
+    assert_eq!(vault.len(), 1, "秘密必须随元数据一起撤销");
+    assert!(vault.load(&spare.secret_ref).unwrap().is_none());
+}
+
+/// 删除供应商：还有 Key 或模型时明确拒绝，不静默级联。
+#[test]
+fn deleting_a_provider_refuses_until_its_children_are_gone() {
+    let (service, _vault, _repo) = setup();
+    let provider = service.save_provider(provider_draft(), 0).unwrap();
+    let credential = service.add_credential(provider.id.as_str(), "日常", "synthetic".into()).unwrap();
+
+    let error = service.delete_provider(provider.id.as_str()).unwrap_err();
+    assert!(error.safe_details.iter().any(|detail| detail.contains("请先删除它们")));
+
+    service.delete_credential(credential.id.as_str()).unwrap();
+    let mut draft = ready_model(provider.id.as_str(), "vendor/a", "模型");
+    draft.in_catalog = false;
+    let model = service.save_model(draft, 0).unwrap();
+    service.delete_model(model.id.as_str(), model.version).unwrap();
+
+    service.delete_provider(provider.id.as_str()).unwrap();
+    assert!(service.list_providers().unwrap().is_empty());
+}

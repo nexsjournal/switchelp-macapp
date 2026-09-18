@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use serde::Serialize;
 use switch_core::{
-    application::{ModelDraft, ProviderDraft},
+    application::{AppliedSummary, ModelDraft, ProviderDraft},
     diagnostics::{
         fetch_models, DiagnosticEvent, DiscoveredModel, ExportPreview, LogLevel, ProbePlan,
         ProbeReport, ProbeTarget,
@@ -45,11 +45,19 @@ pub struct ExecuteResult {
     pub operation_id: String,
 }
 
+/// 当前已生效的配置摘要；从未应用过时返回 null。
+#[tauri::command]
+pub async fn apply_summary(window: WebviewWindow, state: Desktop<'_>) -> Result<Option<AppliedSummary>, CoreError> {
+    run(window, state, |desktop| desktop.apply.applied_summary()).await
+}
+
 /// 本机网关状态。未启动时必须带出原因，界面不得显示成“正常”。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewayReport {
     pub running: bool,
+    /// 是否已暂停接受新请求。
+    pub paused: bool,
     pub port: Option<u16>,
     pub served: u64,
     /// 已发布的目录版本；空表示还没应用过任何配置。
@@ -120,6 +128,19 @@ pub async fn models_list(window: WebviewWindow, state: Desktop<'_>) -> Result<Ve
 #[tauri::command]
 pub async fn models_save(window: WebviewWindow, state: Desktop<'_>, draft: ModelDraft, expected_version: u64) -> Result<Model, CoreError> {
     run(window, state, move |desktop| desktop.workspace.save_model(draft, expected_version)).await
+}
+
+#[tauri::command]
+pub async fn providers_delete(window: WebviewWindow, state: Desktop<'_>, provider_id: String) -> Result<(), CoreError> {
+    run(window, state, move |desktop| desktop.workspace.delete_provider(&provider_id)).await
+}
+#[tauri::command]
+pub async fn credentials_delete(window: WebviewWindow, state: Desktop<'_>, credential_id: String) -> Result<(), CoreError> {
+    run(window, state, move |desktop| desktop.workspace.delete_credential(&credential_id)).await
+}
+#[tauri::command]
+pub async fn models_delete(window: WebviewWindow, state: Desktop<'_>, model_id: String, expected_version: u64) -> Result<(), CoreError> {
+    run(window, state, move |desktop| desktop.workspace.delete_model(&model_id, expected_version)).await
 }
 
 /// 只读检测 Codex 实例；不安装、不写入、不读取任何凭据。
@@ -215,6 +236,7 @@ pub async fn gateway_status(window: WebviewWindow, state: Desktop<'_>) -> Result
                 let status = gateway.status();
                 GatewayReport {
                     running: status.running,
+                    paused: status.paused,
                     port: status.port,
                     served: status.served,
                     revisions: status.revisions,
@@ -224,6 +246,7 @@ pub async fn gateway_status(window: WebviewWindow, state: Desktop<'_>) -> Result
             }
             None => GatewayReport {
                 running: false,
+                paused: false,
                 port: None,
                 served: 0,
                 revisions: Vec::new(),
@@ -262,6 +285,19 @@ pub async fn platform_info(window: WebviewWindow, state: Desktop<'_>) -> Result<
     .await
 }
 
+/// 暂停或继续接受新推理请求。在途请求不受影响。
+#[tauri::command]
+pub async fn gateway_set_paused(window: WebviewWindow, state: Desktop<'_>, paused: bool) -> Result<bool, CoreError> {
+    run(window, state, move |desktop| {
+        let gateway = desktop
+            .gateway()
+            .ok_or_else(|| CoreError::internal("本机网关未启动"))?;
+        gateway.set_paused(paused);
+        Ok(gateway.is_paused())
+    })
+    .await
+}
+
 /// 诊断事件列表。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -291,6 +327,12 @@ pub async fn diagnostics_list(window: WebviewWindow, state: Desktop<'_>, level: 
         Ok(DiagnosticList { items: desktop.diagnostics().list(level), next_cursor: None })
     })
     .await
+}
+
+/// 清空本工具自己的诊断事件。不影响 Codex 历史与配置事务记录。
+#[tauri::command]
+pub async fn diagnostics_clear(window: WebviewWindow, state: Desktop<'_>) -> Result<usize, CoreError> {
+    run(window, state, |desktop| Ok(desktop.diagnostics().clear())).await
 }
 
 /// 诊断包预览：列出包含项、排除项与准确体积，保存前先让用户看清楚。

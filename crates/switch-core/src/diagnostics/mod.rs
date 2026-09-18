@@ -239,6 +239,16 @@ impl DiagnosticLog {
         *self.dropped.lock().expect("诊断锁未被污染")
     }
 
+    /// 清空本工具自己的诊断事件。返回清掉的条数。
+    ///
+    /// 只影响本工具的诊断记录，不触碰 Codex 历史、不触碰配置事务记录。
+    pub fn clear(&self) -> usize {
+        let removed = self.events.lock().expect("诊断锁未被污染").len();
+        self.events.lock().expect("诊断锁未被污染").clear();
+        *self.bytes.lock().expect("诊断锁未被污染") = 0;
+        removed
+    }
+
     /// 按级别过滤的事件列表，最新在后。
     pub fn list(&self, level: Option<LogLevel>) -> Vec<DiagnosticEvent> {
         self.events
@@ -333,6 +343,19 @@ mod tests {
             target,
             "result.ok",
         )
+    }
+
+    #[test]
+    fn clear_removes_only_retained_events_and_resets_the_budget() {
+        let log = DiagnosticLog::default();
+        log.record(event("a"));
+        log.record(event("b"));
+        assert!(log.bytes() > 0);
+
+        assert_eq!(log.clear(), 2);
+        assert!(log.is_empty());
+        assert_eq!(log.bytes(), 0);
+        assert_eq!(log.clear(), 0, "重复清空不报错");
     }
 
     #[test]

@@ -704,3 +704,25 @@ fn a_client_disconnect_stops_the_upstream_stream() {
             .collect::<Vec<_>>()
     );
 }
+
+/// 暂停只拦新请求：在途请求不受影响，新请求得到明确的 503 而不是等待超时。
+#[test]
+fn pausing_the_gateway_rejects_new_requests_without_affecting_in_flight_ones() {
+    let harness = Harness::start(CHAT_COMPLETIONS_V1, MockReply::Sse(CHAT_SSE), Protocol::ChatCompletions);
+    let token = harness.token.expose().to_owned();
+
+    let (status, _) = harness.post("responses", Some(&token), &harness.request_body());
+    assert_eq!(status, 200, "暂停前应正常");
+    assert_eq!(harness.upstream.requests(), 1);
+
+    harness.gateway.set_paused(true);
+    assert!(harness.gateway.status().paused);
+    let (status, text) = harness.post("responses", Some(&token), &harness.request_body());
+    assert_eq!(status, 500);
+    assert!(text.contains("error.gatewayPaused"), "必须给出暂停原因：{text}");
+    assert_eq!(harness.upstream.requests(), 1, "暂停时不得触达上游");
+
+    harness.gateway.set_paused(false);
+    let (status, _) = harness.post("responses", Some(&token), &harness.request_body());
+    assert_eq!(status, 200, "恢复后应可继续");
+}

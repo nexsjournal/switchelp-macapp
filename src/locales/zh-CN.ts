@@ -12,8 +12,9 @@ export const zhCN = {
     providers: '供应商',
     models: '模型',
     codexConfig: 'Codex 配置',
-    diagnostics: '连接诊断',
+    /** P08：脱敏日志与诊断包。P07 的独立连接诊断页尚未实现。 */
     logs: '日志',
+    diagnostics: '连接诊断',
     settings: '设置',
   },
   mode: {

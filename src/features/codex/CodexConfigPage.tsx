@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, FileSearch, History, RefreshCw, ShieldAlert, SlidersHorizontal } from 'lucide-react';
-import type { ApplyPlan, ApplyStage, CodexInstance, FieldChange } from '@/contracts/types';
-import { type ApplyStatus, type DesktopClient, type InspectResult, toCoreError } from '@/desktop/client';
+import type { ApplyPlan, ApplyStage, CodexInstance, FieldChange, Model } from '@/contracts/types';
+import { type AppliedSummary, type ApplyStatus, type DesktopClient, type InspectResult, toCoreError } from '@/desktop/client';
 import { t } from '@/locales/zh-CN';
 import styles from './CodexConfigPage.module.css';
 
@@ -46,6 +46,13 @@ function reasonLabel(reasonKey: string): string {
   return label === `reason.${short}` ? t('reason.other') : label;
 }
 
+/** 事务阶段的可读文案。 */
+function stageLabelOf(stage: string): string {
+  const key = `stage.${stage.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())}`;
+  const label = t(key);
+  return label === key ? stage : label;
+}
+
 /** ApplyStage 序列化为 snake_case，文案表使用 camelCase。 */
 function stageKey(phase: ApplyStage): string {
   return `stage.${phase.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())}`;
@@ -73,7 +80,13 @@ function groups(changes: FieldChange[]): { key: GroupKey; changes: FieldChange[]
     .filter(group => group.changes.length > 0);
 }
 
-export function CodexConfigPage({ client, onApplied }: { client: DesktopClient; onApplied?: () => void }) {
+export function CodexConfigPage({ client, models, summary, onApplied }: {
+  client: DesktopClient;
+  models: Model[];
+  /** 当前已生效的配置；用于三项版本状态。 */
+  summary: AppliedSummary | null;
+  onApplied?: () => void;
+}) {
   const [instances, setInstances] = useState<CodexInstance[]>([]);
   const [instanceId, setInstanceId] = useState('');
   const [manualPath, setManualPath] = useState('');
@@ -197,6 +210,24 @@ export function CodexConfigPage({ client, onApplied }: { client: DesktopClient; 
         <dt>CLI</dt><dd className="text-mono break-anywhere">{selected.cliPath ?? '未检测到'}</dd>
         <dt>兼容性</dt><dd>{t(`compat.${selected.compatibility}`)}{selected.blockedReasonKey ? ` · ${selected.blockedReasonKey}` : ''}</dd>
       </dl>}
+      <ul className={styles.versions} aria-label="版本状态">
+        <li>
+          <span>已保存版本</span>
+          <strong>{models.filter(model => model.inCatalog).length} 个模型在待应用目录</strong>
+          <small>本工具内的当前配置；共 {models.length} 个已保存模型</small>
+        </li>
+        <li>
+          <span>已发布版本</span>
+          <strong>{summary ? summary.catalogRevision : '尚未发布'}</strong>
+          <small>{summary ? `${summary.aliasCount} 个模型 · ${stageLabelOf(summary.stage)}` : '应用成功后发布到本机网关'}</small>
+        </li>
+        <li>
+          <span>Codex 已观测版本</span>
+          <strong>未观测</strong>
+          <small>本工具不读取 Codex 的运行状态；请在 Codex 里重新加载后确认</small>
+        </li>
+      </ul>
+
       <div className={styles.actions} style={{ marginTop: 20 }}>
         <button onClick={loadInspect} disabled={!instanceId || busy === 'inspect'}>检查当前配置</button>
         <button className="primary" onClick={() => void makePlan('apply')} disabled={!instanceId || busy === 'plan'}>{t('action.applyToCodex')}</button>
