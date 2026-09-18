@@ -26,9 +26,9 @@ Codex  →  ~/.codex/config.toml（本工具受管字段）
 
 | 平台 | 文件 | 首次打开 |
 | --- | --- | --- |
-| macOS（Apple Silicon） | `Switchelp_0.1.2_aarch64.dmg` | 已用 Developer ID 签名，但**尚未公证**：首次打开需**右键 → 打开**，或执行一次 `xattr -dr com.apple.quarantine /Applications/Switchelp.app` |
-| macOS（Apple Silicon） | `Switchelp-0.1.2-arm64.zip` | 同上，解压后把 `Switchelp.app` 拖进 `/Applications` |
-| Windows（x64） | `Switchelp_0.1.2_x64-setup.exe`（NSIS 安装器）<br>`Switchelp_0.1.2_x64_en-US.msi` | 未签名，SmartScreen 会提示“未知发布者”，点“仍要运行” |
+| macOS（Apple Silicon） | `Switchelp_0.1.3_aarch64.dmg` | 已用 Developer ID 签名，但**尚未公证**：首次打开需**右键 → 打开**，或执行一次 `xattr -dr com.apple.quarantine /Applications/Switchelp.app` |
+| macOS（Apple Silicon） | `Switchelp-0.1.3-arm64.zip` | 同上，解压后把 `Switchelp.app` 拖进 `/Applications` |
+| Windows（x64） | `Switchelp_0.1.3_x64-setup.exe`（NSIS 安装器）<br>`Switchelp_0.1.3_x64_en-US.msi` | 未签名，SmartScreen 会提示“未知发布者”，点“仍要运行” |
 
 更早的 0.1.0 产物名仍是旧的 `GPTSwitch`——它们是在产品与仓库改名之前构建的。应用标识仍是 `app.gptswitch.desktop`（有意保留，让旧版本的应用数据与凭据继续可用）。
 

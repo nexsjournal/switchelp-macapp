@@ -33,9 +33,9 @@ Grab a build from [Releases](https://github.com/nexsjournal/switchelp-macapp/rel
 
 | Platform | File | First launch |
 | --- | --- | --- |
-| macOS (Apple Silicon) | `Switchelp_0.1.2_aarch64.dmg` | Signed with a Developer ID but **not notarized**: use **right-click → Open**, or run `xattr -dr com.apple.quarantine /Applications/Switchelp.app` once |
-| macOS (Apple Silicon) | `Switchelp-0.1.2-arm64.zip` | Same as above; unzip and drag `Switchelp.app` into `/Applications` |
-| Windows (x64) | `Switchelp_0.1.2_x64-setup.exe` (NSIS installer)<br>`Switchelp_0.1.2_x64_en-US.msi` | Unsigned, so SmartScreen reports "Unknown publisher" — choose "Run anyway" |
+| macOS (Apple Silicon) | `Switchelp_0.1.3_aarch64.dmg` | Signed with a Developer ID but **not notarized**: use **right-click → Open**, or run `xattr -dr com.apple.quarantine /Applications/Switchelp.app` once |
+| macOS (Apple Silicon) | `Switchelp-0.1.3-arm64.zip` | Same as above; unzip and drag `Switchelp.app` into `/Applications` |
+| Windows (x64) | `Switchelp_0.1.3_x64-setup.exe` (NSIS installer)<br>`Switchelp_0.1.3_x64_en-US.msi` | Unsigned, so SmartScreen reports "Unknown publisher" — choose "Run anyway" |
 
 The 0.1.0 artifacts still carry the old `GPTSwitch` name: they were built before the product and the repository
 were renamed. The bundle identifier stays `app.gptswitch.desktop` on purpose, so app data and stored credentials
