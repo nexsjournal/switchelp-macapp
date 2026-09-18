@@ -10,8 +10,10 @@ test('展示真实网关状态，未启动时给原因而不是假装正常', as
   const { rerender } = render(<SettingsPage client={stopped} gateway={gateway} onNavigate={() => {}} />);
 
   expect(await screen.findByText('运行中')).toBeInTheDocument();
-  expect(screen.getByText('127.0.0.1:18765')).toBeInTheDocument();
-  expect(screen.getByText('3f9a1c04')).toBeInTheDocument();
+  // 只展示用户能据以判断的状态，不摆内部实现细节（监听地址、令牌指纹）。
+  expect(screen.queryByText('127.0.0.1:18765')).not.toBeInTheDocument();
+  expect(screen.queryByText('3f9a1c04')).not.toBeInTheDocument();
+  expect(screen.getByText('已发布目录')).toBeInTheDocument();
 
   rerender(<SettingsPage client={stopped} gateway={{ ...gateway, running: false, port: null, error: '端口被占用' }} onNavigate={() => {}} />);
   expect(screen.getByText('未启动')).toBeInTheDocument();

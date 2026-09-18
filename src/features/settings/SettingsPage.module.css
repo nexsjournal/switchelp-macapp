@@ -37,5 +37,3 @@
   color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; line-height: 20px; resize: vertical; }
 
 /* 只读标识：放在字段名旁边，避免用户以为这里可以填。 */
-.readOnly { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: var(--radius-pill);
-  background: var(--bg-selected); color: var(--text-muted); font-size: 10px; font-weight: 400; vertical-align: 1px; }

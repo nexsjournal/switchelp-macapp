@@ -86,4 +86,4 @@ scripts/check-publish-safety.sh
 
 `referimg/` 中的 9 张界面参考截图是用户提供的第三方产品素材，**不在本仓库内**（已由 `.gitignore` 排除）；若要随仓库分发，请先确认使用授权。
 
-本仓库目前未附带开源许可证。
+以 [MIT 许可证](LICENSE) 发布。

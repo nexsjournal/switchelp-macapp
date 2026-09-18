@@ -6,7 +6,7 @@ members = ["crates/switch-core", "src-tauri"]
 version = "0.1.2"
 edition = "2021"
 rust-version = "1.88"
-license = "UNLICENSED"
+license = "MIT"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

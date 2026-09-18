@@ -100,4 +100,4 @@ Design and research documents live in [`docs/`](docs/README.md); they are curren
 The nine UI reference screenshots under `referimg/` are third-party product material provided by the user and are
 **not part of this repository** (excluded via `.gitignore`). Confirm usage rights before distributing them.
 
-This repository currently ships without an open-source license.
+[MIT licensed](LICENSE).
