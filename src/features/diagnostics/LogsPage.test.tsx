@@ -40,6 +40,25 @@ test('说明收集边界，并把事件渲染成可点开的行', async () => {
   expect(screen.getByRole('button', { name: '查看事件详情 result.upstreamFailed' })).toBeInTheDocument();
 });
 
+
+test('改动导出范围后预览作废，避免导出与预览过的清单不一致', async () => {
+  const user = userEvent.setup();
+  const previewDiagnostics = vi.fn().mockResolvedValue({ items: [], totalBytes: 0 });
+  const exportDiagnostics = vi.fn().mockResolvedValue({ savedPath: '/tmp/diagnostics.json' });
+  render(<LogsPage client={testClient({ listDiagnostics: vi.fn().mockResolvedValue({ items: [warningEvent], nextCursor: null }),
+    previewDiagnostics, exportDiagnostics })} />);
+  await screen.findByText('result.upstreamFailed');
+
+  await user.click(screen.getByRole('button', { name: '生成预览' }));
+  const save = await screen.findByRole('button', { name: /保存到本地/ });
+  expect(save).toBeEnabled();
+
+  // 预览之后取消勾选一类：清单已经不代表将要导出的内容，必须先重新预览。
+  await user.click(screen.getByRole('checkbox', { name: 'gateway' }));
+  expect(screen.getByRole('button', { name: /保存到本地/ })).toBeDisabled();
+  expect(exportDiagnostics).not.toHaveBeenCalled();
+});
+
 test('级别过滤传给后端，类别与时间只影响展示', async () => {
   const user = userEvent.setup();
   const listDiagnostics = vi.fn().mockResolvedValue({ items: [olderApplyEvent, warningEvent], nextCursor: null });

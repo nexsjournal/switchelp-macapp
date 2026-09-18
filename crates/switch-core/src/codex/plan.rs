@@ -872,9 +872,11 @@ mod tests {
         operation.transition(ApplyStage::AwaitingReload, "t").unwrap();
         operation.transition(ApplyStage::Pending, "t").unwrap();
         assert_eq!(operation.stage, ApplyStage::Pending);
-        assert!(!operation.stage.is_terminal() || operation.stage == ApplyStage::Pending);
-        // Pending 允许在未来被宿主回执提升为 Verified。
+        // 提交成功不等于宿主已加载：Pending 与 Verified 是两个阶段。
+        assert_ne!(operation.stage, ApplyStage::Verified);
+        // Pending 允许在未来被宿主回执提升为 Verified，且已核验不能再退回等待。
         assert!(ApplyStage::Pending.can_transition_to(ApplyStage::Verified));
+        assert!(!ApplyStage::Verified.can_transition_to(ApplyStage::Pending));
     }
 
     #[test]

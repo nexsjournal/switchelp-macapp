@@ -95,7 +95,8 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
   const [showPreview, setShowPreview] = useState(false);
   const [draft, setDraft] = useState<{ kind: 'apply' | 'restore'; plan: ApplyPlan } | null>(null);
   const [status, setStatus] = useState<ApplyStatus | null>(null);
-  const [busy, setBusy] = useState('');
+  // 初始即视为「正在检测」：挂载后立刻就会检测，先渲染空态会闪一下。
+  const [busy, setBusy] = useState('detect');
   const [error, setError] = useState('');
   /** 核心给出的恢复动作；界面只呈现自己确实能执行的那些。 */
   const [recovery, setRecovery] = useState<string[]>([]);
@@ -165,6 +166,8 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
 
   if (!instances.length && busy !== 'detect') {
     return <section className={styles.card}>
+      {/* 检测失败时这里过去没有错误出口：界面永远停在「未检测到 Codex」，原因看不见。 */}
+      {error && <div className="error-message" role="alert">{error}</div>}
       <div className={styles.empty}>
         <FileSearch size={28} />
         <h3>{t('empty.noInstanceTitle')}</h3>
@@ -277,7 +280,12 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
         <button className="primary" onClick={() => void commit()} disabled={busy === 'commit'}>
           {busy === 'commit' ? t('codex.committing') : commitLabel}
         </button>
-        <button onClick={() => { setDraft(null); setError(''); }}>{t('action.cancel')}</button>
+        <button
+          onClick={() => { setDraft(null); setError(''); }}
+          disabled={busy === 'commit'}
+          title={busy === 'commit' ? t('codex.commitNotCancellable') : undefined}
+        >{t('action.cancel')}</button>
+        {busy === 'commit' && <span className="text-muted">{t('codex.commitNotCancellable')}</span>}
       </div>
     </section>}
 

@@ -1,0 +1,18 @@
+# 基线里已经有本工具的 provider 子表（用户此前装过、或再次接管本工具）。
+# base_url 指向旧目录版本，还原时应当连同子表一起回到这一版。
+model = "gpt-5-codex"
+model_provider = "gptswitch"
+
+[model_providers.gptswitch]
+name = "Switchelp"
+base_url = "http://127.0.0.1:18765/i/local-main/c/rev_0006/v1"
+wire_api = "responses"
+
+[model_providers.gptswitch.auth]
+command = "/Applications/Switchelp.app/Contents/MacOS/gptswitch-auth"
+args = ["--instance", "local-main"]
+timeout_ms = 5000
+refresh_interval_ms = 300000
+
+[mcp_servers.docs]
+command = "npx"

@@ -106,11 +106,22 @@ export function ModelsPage({ client, providers, models, onChanged, onViewDiff }:
       label: kind === 'leave' ? t('models.moveOutShort') : t('action.delete'),
       danger: kind === 'delete',
       run: async () => {
-        for (const model of targets) {
-          if (kind === 'leave') await client.saveModel(modelDraft(model, { inCatalog: false }), model.version);
-          else await client.deleteModel(model.id, model.version);
+        let done = 0;
+        try {
+          for (const model of targets) {
+            if (kind === 'leave') await client.saveModel(modelDraft(model, { inCatalog: false }), model.version);
+            else await client.deleteModel(model.id, model.version);
+            done += 1;
+          }
+        } finally {
+          // 中途失败也必须刷新：前面已经成功的改动要出现在列表里，否则界面与服务端不一致，
+          // 用户会以为整批都没生效。
+          setSelected([]);
+          await onChanged();
+          setNotice(done === targets.length
+            ? t(kind === 'leave' ? 'models.bulkLeaveDone' : 'models.bulkDeleteDone', { count: done })
+            : t('models.bulkPartial', { done, total: targets.length }));
         }
-        await finish(t(kind === 'leave' ? 'models.bulkLeaveDone' : 'models.bulkDeleteDone', { count: targets.length }));
       },
     });
   }

@@ -113,9 +113,15 @@ impl ConfigSnapshot {
             return self.read_provider().and_then(|p| serialized_provider(&p));
         }
         self.document.get(key).map(|item| {
-            item.as_str()
-                .map(|s| s.to_owned())
-                .unwrap_or_else(|| item.to_string().trim().to_owned())
+            if let Some(text) = item.as_str() {
+                return text.to_owned();
+            }
+            // 整数按十进制规范化：语法树保留用户原始写法（128_000），直接取字符串会把
+            // 「数值相同、写法不同」误判成外部修改，从让还原被无谓挡下。
+            if let Some(number) = item.as_integer() {
+                return number.to_string();
+            }
+            item.to_string().trim().to_owned()
         })
     }
 
@@ -510,14 +516,10 @@ pub fn apply_managed(
     };
 
     // 顶层标量字段
-    let scalars: [(&str, Option<String>); 5] = [
+    let scalars: [(&str, Option<String>); 4] = [
         ("model", managed.model.clone()),
         ("model_provider", managed.model_provider.clone()),
         ("model_catalog_json", managed.model_catalog_json.clone()),
-        (
-            "model_context_window",
-            managed.model_context_window.map(|v| v.to_string()),
-        ),
         (
             "model_reasoning_effort",
             managed.model_reasoning_effort.clone(),
@@ -538,17 +540,99 @@ pub fn apply_managed(
         }
     }
 
+    // 上下文窗口是唯一的整数受管字段：写成字符串宿主读不出来，必须按整数写。
+    match managed.model_context_window {
+        Some(window) => {
+            document["model_context_window"] = value(window as i64);
+            record(
+                &document,
+                "model_context_window",
+                Some(window.to_string()),
+                &mut updated,
+            );
+        }
+        None => {
+            if document.contains_key("model_context_window")
+                && ownership.iter().any(|o| o.key_path == "model_context_window")
+            {
+                document.remove("model_context_window");
+                record(&document, "model_context_window", None, &mut updated);
+            }
+        }
+    }
+
     // provider 子表：仅在明确接管时写入
     if let Some(provider) = &managed.provider {
         let key_path = "model_providers.gptswitch";
-        if !document.contains_key("model_providers") {
-            document["model_providers"] = Item::Table(Table::new());
-        }
-        document["model_providers"][PROVIDER_ID] = Item::Table(provider_table(provider));
+        set_gateway_provider(&mut document, Some(&provider_table(provider)))?;
         record(&document, key_path, serialized_provider(provider), &mut updated);
     }
 
     Ok((render(&document, &snapshot.line_ending), updated))
+}
+
+/// 把网关 provider 子表写进文档（`None` 表示删掉）。
+///
+/// 不能用 `document["model_providers.gptswitch"] = ...`：那按**字面量键**插入，会得到一条
+/// `"model_providers.gptswitch" = "..."` 的垃圾键，而真正的子表原封不动——既不生效又污染
+/// 用户文件。用户把 `model_providers` 写成内联表时同理：内联表只能装值，塞进去的表会被
+/// 静默丢弃，所以先把它还原成普通表。
+fn set_gateway_provider(
+    document: &mut DocumentMut,
+    provider: Option<&Table>,
+) -> Result<(), CoreError> {
+    if document
+        .get("model_providers")
+        .map(|item| item.is_inline_table())
+        .unwrap_or(false)
+    {
+        let inline = document
+            .remove("model_providers")
+            .and_then(|item| item.into_value().ok())
+            .and_then(|value| value.as_inline_table().cloned())
+            .ok_or_else(|| CoreError::internal("model_providers 内联表无法转换"))?;
+        document["model_providers"] = Item::Table(inline.into_table());
+    }
+
+    match provider {
+        Some(table) => {
+            if !document.contains_key("model_providers") {
+                document["model_providers"] = Item::Table(Table::new());
+            }
+            let providers = document["model_providers"]
+                .as_table_mut()
+                .ok_or_else(|| CoreError::internal("model_providers 不是表"))?;
+            providers.insert(PROVIDER_ID, Item::Table(table.clone()));
+        }
+        None => {
+            if let Some(providers) = document["model_providers"].as_table_mut() {
+                providers.remove(PROVIDER_ID);
+                if providers.is_empty() {
+                    document.remove("model_providers");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 把「provider 子表的规范化片段」解析回表结构。
+///
+/// 所有权里记的是 `serialized_provider()` 产出的片段（字段行 + `[auth]` 子节），不带 section 头。
+/// 直接补一个 `[model_providers.gptswitch]` 再解析是不行的：片段里的 `[auth]` 会变成**顶层**同名
+/// 节而不是子表。这里先按片段本身解析出顶层键，再整体搬进一张表——子节自然成为子表。
+fn parse_gateway_provider(fragment: &str) -> Result<Table, CoreError> {
+    let document: DocumentMut = fragment
+        .parse()
+        .map_err(|error| CoreError::internal(format!("provider 基线无法解析：{error}")))?;
+    let mut table = Table::new();
+    for (key, item) in document.iter() {
+        table.insert(key, item.clone());
+    }
+    if table.get("base_url").and_then(|item| item.as_str()).is_none() {
+        return Err(CoreError::internal("provider 基线缺少 base_url"));
+    }
+    Ok(table)
 }
 
 /// 计算字段级差异，供“查看差异”页面使用。
@@ -643,6 +727,19 @@ pub fn execute_restore(
     let outcomes = plan_restore(snapshot, ownership);
     let mut document = snapshot.document().clone();
     for (record, outcome) in ownership.iter().zip(outcomes.iter()) {
+        // provider 子表是唯一「键路径不是字面量键」的受管字段：写入与删除都必须按表操作，
+        // 走下面的字面量分支会得到 `"model_providers.gptswitch" = "…"` 这种垃圾键。
+        if record.key_path == "model_providers.gptswitch" {
+            match outcome {
+                RestoreOutcome::Restore { .. } => {
+                    let table = parse_gateway_provider(record.baseline_value.as_deref().unwrap_or_default())?;
+                    set_gateway_provider(&mut document, Some(&table))?;
+                }
+                RestoreOutcome::Delete { .. } => set_gateway_provider(&mut document, None)?,
+                RestoreOutcome::Conflict { .. } | RestoreOutcome::Unchanged { .. } => {}
+            }
+            continue;
+        }
         match outcome {
             RestoreOutcome::Restore { .. } => match &record.baseline_value {
                 Some(baseline) => {
@@ -653,16 +750,7 @@ pub fn execute_restore(
                 }
             },
             RestoreOutcome::Delete { .. } => {
-                if record.key_path == "model_providers.gptswitch" {
-                    if let Some(providers) = document["model_providers"].as_table_mut() {
-                        providers.remove(PROVIDER_ID);
-                        if providers.is_empty() {
-                            document.remove("model_providers");
-                        }
-                    }
-                } else {
-                    document.remove(record.key_path.as_str());
-                }
+                document.remove(record.key_path.as_str());
             }
             RestoreOutcome::Conflict { .. } | RestoreOutcome::Unchanged { .. } => {}
         }
@@ -692,10 +780,22 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), CoreError> {
     ));
     {
         let mut file = std::fs::File::create(&temp)?;
+        // 目标已存在时沿用它的权限。config.toml 可能被用户或其它工具设成 0600（里面可能有
+        // 别的工具写入的密钥），而 create + rename 会把它换成 umask 推导值（通常 0644），
+        // 等于悄悄把「只有本人可读」放宽给同机其他用户。权限复制失败就宁可写入失败。
+        if let Ok(metadata) = std::fs::metadata(path) {
+            std::fs::set_permissions(&temp, metadata.permissions())?;
+        }
         file.write_all(content.as_bytes())?;
         file.sync_all()?;
     }
     std::fs::rename(&temp, path)?;
+    // rename 只是目录项变更，掉电可能丢；同步父目录才算落盘。
+    #[cfg(unix)]
+    {
+        let parent_handle = std::fs::File::open(parent)?;
+        parent_handle.sync_all()?;
+    }
     Ok(())
 }
 

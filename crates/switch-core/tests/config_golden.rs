@@ -142,6 +142,111 @@ fn missing_keys_are_recorded_as_absent_baseline() {
     assert!(restored.contains("[mcp_servers.docs]"));
 }
 
+/// provider 子表是唯一「键路径不是字面量键」的受管字段。
+///
+/// 回归：`execute_restore` 的 Restore 分支曾统一走 `document["model_providers.gptswitch"] = …`，
+/// 而 toml_edit 的索引赋值不做点号拆分，于是还原写出一条 `"model_providers.gptswitch" = "…"`
+/// 的垃圾键，真正的子表原封不动——还原报告成功，宿主配置却仍指向本工具。
+#[test]
+fn restore_writes_an_existing_gateway_provider_back_as_a_table() {
+    let snapshot = load("existing-gateway-provider.toml");
+    assert!(snapshot.read_provider().is_some(), "fixture 的基线 provider 必须可读");
+
+    let (applied_text, ownership) = apply_managed(&snapshot, &managed(), &[]).unwrap();
+    let applied = ConfigSnapshot::parse(fixture("existing-gateway-provider.toml"), &applied_text).unwrap();
+    // 接管后 base_url 指向新目录版本。
+    assert!(applied.read_provider().unwrap().base_url.contains("rev_0007"));
+
+    let outcomes = plan_restore(&applied, &ownership);
+    let provider = outcomes.iter().find(|o| o.key_path() == "model_providers.gptswitch").unwrap();
+    assert!(matches!(provider, RestoreOutcome::Restore { .. }), "本次应可安全恢复基线：{provider:?}");
+
+    let (restored, _) = execute_restore(&applied, &ownership).unwrap();
+    assert!(
+        !restored.contains("\"model_providers.gptswitch\""),
+        "不得写入字面点号键：\n{restored}"
+    );
+    let reparsed = ConfigSnapshot::parse(fixture("existing-gateway-provider.toml"), &restored).unwrap();
+    let provider = reparsed.read_provider().expect("还原后 provider 子表必须仍然可读");
+    assert!(provider.base_url.contains("rev_0006"), "应回到基线版本：{}", provider.base_url);
+    // 无关内容保留。
+    assert!(restored.contains("[mcp_servers.docs]"));
+}
+
+/// 回归：`model_providers` 是内联表时，往里塞普通子表会被 toml_edit 丢弃，
+/// 于是写了等于没写，而所有权却记成「已写入」。
+#[test]
+fn writes_provider_when_model_providers_is_an_inline_table() {
+    let snapshot = load("inline-model-providers.toml");
+    let (text, ownership) = apply_managed(&snapshot, &managed(), &[]).unwrap();
+
+    let reparsed = ConfigSnapshot::parse(fixture("inline-model-providers.toml"), &text).unwrap();
+    assert!(
+        reparsed.read_provider().is_some(),
+        "内联表下 provider 必须真的写进去：\n{text}"
+    );
+    // 用户原有的内联表内容不能被吞掉。
+    assert!(text.contains("other-tool"));
+    assert!(text.contains("Other Manager"));
+    assert_eq!(
+        ownership
+            .iter()
+            .find(|o| o.key_path == "model_providers.gptswitch")
+            .and_then(|o| o.last_written_value.clone())
+            .is_some(),
+        true
+    );
+}
+
+/// 回归：`model_context_window` 是整数受管字段，写成字符串宿主读不出来。
+#[test]
+fn context_window_is_written_as_an_integer() {
+    let snapshot = load("missing-keys.toml");
+    let mut config = managed();
+    config.model_context_window = Some(128_000);
+    let (text, _) = apply_managed(&snapshot, &config, &[]).unwrap();
+    assert!(text.contains("model_context_window = 128000"), "必须是整数：\n{text}");
+    assert!(!text.contains("model_context_window = \"128000\""), "不能写成字符串");
+}
+
+/// 回归：用户把整数写成 `128_000` 时，写法差异不能被当成「外部已修改」。
+#[test]
+fn integer_notation_is_not_an_external_change() {
+    let source = "model = \"gpt-5-codex\"\nmodel_context_window = 128_000\n";
+    let snapshot = ConfigSnapshot::parse(fixture("missing-keys.toml"), source).unwrap();
+    let mut config = managed();
+    config.model_context_window = Some(128_000);
+    let (applied_text, ownership) = apply_managed(&snapshot, &config, &[]).unwrap();
+    let applied = ConfigSnapshot::parse(fixture("missing-keys.toml"), &applied_text).unwrap();
+
+    let outcomes = plan_restore(&applied, &ownership);
+    let window = outcomes.iter().find(|o| o.key_path() == "model_context_window").unwrap();
+    assert!(
+        !window.is_conflict(),
+        "数值相同、写法不同不应判成冲突：{window:?}"
+    );
+}
+
+/// 原子写入不能放宽目标文件的权限：config.toml 里可能有其它工具写入的密钥。
+#[cfg(unix)]
+#[test]
+fn atomic_write_preserves_file_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = std::env::temp_dir().join(format!("switchelp-perm-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let target = dir.join("config.toml");
+    std::fs::write(&target, "model = \"gpt-5-codex\"\n").unwrap();
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+    config::write_atomic(&target, "model = \"gs/p_a/m_1\"\n").unwrap();
+
+    let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "写入后权限被放宽成 {mode:o}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn restore_detects_external_modification_and_keeps_current_value() {
     let snapshot = load("commented.toml");

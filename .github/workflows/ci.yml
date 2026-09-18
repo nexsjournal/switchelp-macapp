@@ -1,0 +1,68 @@
+name: ci
+
+# 提交与 PR 的门禁。
+#
+# 发布工作流只在打标签或手动触发时跑，因此不能替代这一层：没有它的话，一次回归可以一路
+# 合进 main，再直接被打了标签发布出去，全程没有任何测试被执行过。
+#
+# 这里跑的是「改坏了会静默出错」的那几项：类型、前端单元测试、生产构建、核心测试、
+# 发布前隐私扫描。rustfmt / clippy 尚未纳入门禁——仓库现在还有约 95 条风格级 clippy
+# 告警且不是 rustfmt 干净状态，先把它们清掉再开这两个开关，否则第一天就是红的。
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: 前端（类型 + 测试 + 构建）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: 类型检查
+        run: pnpm typecheck
+      - name: 单元测试
+        run: pnpm test
+      - name: 生产构建
+        run: pnpm build
+
+  core:
+    name: 核心（cargo test）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          # 工作区根在仓库根目录，不是 src-tauri——写成 src-tauri 会让缓存键只看成员清单，
+          # crates/switch-core 的改动不使缓存失效。
+          workspaces: .
+      - name: 核心测试
+        run: cargo test -p switch-core
+
+  privacy:
+    name: 发布前隐私扫描
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 扫描脚本只依赖 git 与基础命令，任意 runner 都能跑；规则是通用的，
+      # 个人私有特征放在仓库外的清单里，这里不配置也不会漏掉通用规则。
+      - name: 扫描
+        run: scripts/check-publish-safety.sh

@@ -40,7 +40,7 @@ test('已发布配置显示默认路由与后续请求使用的 Key，并说明�
     credentialsByProvider: { p_test: [{ id: 'k_1', providerId: 'p_test', label: '日常', secretRef: 'r', secretVersion: 1,
       maskedSuffix: '••••4f2a', status: 'verified', scope: null, lastVerifiedAt: new Date().toISOString(), version: 1, createdAt: '2026-09-18T00:00:00Z' }] },
     providers: [{ ...provider, activeCredentialId: 'k_1' }],
-    summary: { operationId: 'op_1', instanceId: 'i', catalogRevision: 'rev_a', defaultModel: 'gs/m_1', aliasCount: 2, stage: 'Verified', appliedAt: '2026-09-18T00:00:00Z' },
+    summary: { operationId: 'op_1', instanceId: 'i', catalogRevision: 'rev_a', defaultModel: 'gs/m_1', aliasCount: 2, stage: 'verified', appliedAt: '2026-09-18T00:00:00Z' },
   });
 
   // 当前配置卡与待应用列表都会出现这个模型名，断言至少一次。

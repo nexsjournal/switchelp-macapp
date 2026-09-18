@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { ChevronLeft, CircleHelp, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import type { Model, Provider } from '@/contracts/types';
 import { type DesktopClient, isCoreError } from '@/desktop/client';
@@ -54,8 +54,6 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
   const [showPreview, setShowPreview] = useState(true);
   const [discard, setDiscard] = useState(false);
   const [live, setLive] = useState({ context: policy.contextLimit?.toString() ?? '', output: policy.outputLimit?.toString() ?? '' });
-  /** 两个提交按钮的差别只有“保存后是否跳去看差异”，用 ref 传意图最直接。 */
-  const thenDiff = useRef(false);
 
   const rows = useMemo(() => effectRows(model), [model]);
 
@@ -64,7 +62,7 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
     else onCancel();
   }
 
-  async function save(event: FormEvent<HTMLFormElement>, thenDiff: boolean) {
+  async function save(event: FormEvent<HTMLFormElement>, viewDiff: boolean) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
@@ -81,7 +79,9 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
         displayNameOverridden: true,
       }, model?.version ?? 0);
       await onSaved();
-      if (thenDiff) onViewDiff?.();
+      // 只在“保存并查看差异”那个按钮真正提交成功后才跳转。以前用 ref 在 onClick 里
+      // 置位，表单校验没过时 ref 已经置上，之后点“保存草稿”也会被带去差异页。
+      if (viewDiff) onViewDiff?.();
     } catch (thrown) {
       setError(isCoreError(thrown) ? thrown.safeDetails.join(t('common.listSeparator')) || t('providers.saveFailed') : thrown instanceof Error ? thrown.message : t('editor.invalid'));
     } finally { setBusy(false); }
@@ -102,9 +102,14 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
 
     {error && <div className="error-message" role="alert">{error}</div>}
 
+    {/* 提交意图取自真正触发提交的那个按钮：onSubmit 只在表单校验通过后触发，
+        所以标志位不会像过去那样残留下来污染下一次提交。 */}
     <div className={showPreview ? styles.layout : styles.single}>
       <form className={styles.form} onChange={() => setDirty(true)}
-        onSubmit={event => { const diff = thenDiff.current; thenDiff.current = false; void save(event, diff); }}>
+        onSubmit={event => {
+          const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+          void save(event, submitter?.value === 'true');
+        }}>
         <fieldset className="form-fields" disabled={busy}>
           <h3 className="form-section">{t('editor.basics')}</h3>
           <div className="form-grid">
@@ -162,7 +167,7 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
             <div className="actions">
               <button type="button" onClick={leave} disabled={busy}>{t('action.cancel')}</button>
               <button type="submit" disabled={busy}>{busy ? t('editor.saving') : t('action.saveDraft')}</button>
-              <button type="submit" className="primary" disabled={busy} onClick={() => { thenDiff.current = true; }}>{t('action.saveAndViewDiff')}</button>
+              <button type="submit" className="primary" disabled={busy} name="viewDiff" value="true">{t('action.saveAndViewDiff')}</button>
             </div>
           </div>
         </fieldset>

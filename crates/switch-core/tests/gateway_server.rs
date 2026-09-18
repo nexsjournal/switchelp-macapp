@@ -368,6 +368,37 @@ fn chat_upstream_is_translated_into_responses_events() {
     assert_eq!(upstream_body["stream"], true);
 }
 
+/// 上游把错误当成流里的数据帧发出来（限流、内容过滤、内部错误）。
+///
+/// 回归：翻译器只认 `choices`/`delta`，这种帧过去被当成「没有内容」继续，
+/// 最后照发 `response.completed` —— 半句话被伪装成完整回复。
+#[test]
+fn mid_stream_error_frame_is_surfaced_instead_of_reported_as_completed() {
+    const SSE_WITH_ERROR: &str = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"前半句\"},\"finish_reason\":null}]}\n\n",
+        "data: {\"error\":{\"type\":\"rate_limit_exceeded\",\"message\":\"too many requests\"}}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(SSE_WITH_ERROR),
+        Protocol::ChatCompletions,
+    );
+    let token = harness.token.expose().to_owned();
+
+    let (status, text) = harness.post("responses", Some(&token), &harness.request_body());
+
+    assert_eq!(status, 200, "响应头早已发出，只能用事件收尾");
+    assert!(text.contains("event: error"), "必须给出明确的终止事件：\n{text}");
+    assert!(
+        !text.contains("response.completed"),
+        "不得把截断伪装成完整回复：\n{text}"
+    );
+    assert!(text.contains("rate_limit_exceeded"), "错误原因要可读：\n{text}");
+    // 上游地址里的 Key 不得出现在外发内容里。
+    assert!(!text.contains(SECRET), "错误详情不得泄漏上游 Key");
+}
+
 #[test]
 fn responses_upstream_passes_through_and_hides_the_upstream_id() {
     let harness = Harness::start(RESPONSES_V1, MockReply::Sse(RESPONSES_SSE), Protocol::Responses);

@@ -123,6 +123,36 @@ test('编译警告显示可读文案，不把内部 messageKey 摆给用户', as
   expect(screen.getByText(/完全未知的警告正文/)).toBeInTheDocument();
 });
 
+
+test('实例检测失败要能看到原因，而不是只显示空态', async () => {
+  const user = userEvent.setup();
+  render(<App client={testClient({ detectInstances: vi.fn().mockRejectedValue({ code: 'INTERNAL',
+    messageKey: 'error.internal', safeDetails: ['无法读取 /Applications'], retryable: false, recoveryActions: [] }) })} />);
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'Codex 配置' }));
+
+  // 回归：这条分支过去没有任何错误出口，界面永远停在「未检测到 Codex」，原因看不见。
+  expect(await screen.findByRole('alert')).toHaveTextContent('无法读取 /Applications');
+  expect(screen.getByText('未检测到 Codex')).toBeInTheDocument();
+});
+
+test('提交进行中不能取消：写入不可安全中断', async () => {
+  let releaseCommit: () => void = () => {};
+  const user = await openCodexPage({
+    detectInstances: vi.fn().mockResolvedValue([instance]),
+    planApply: vi.fn().mockResolvedValue(plan([modelChange])),
+    executeApply: vi.fn().mockImplementation(() => new Promise<void>(resolve => { releaseCommit = () => resolve(); })
+      .then(() => ({ operationId: 'op_1' }))),
+    applyStatus: vi.fn().mockResolvedValue({ operationId: 'op_1', open: true, events: [event('committing')] }),
+  });
+
+  await user.click(screen.getByRole('button', { name: '应用到 Codex' }));
+  await user.click(await screen.findByRole('button', { name: '应用并重新加载' }));
+
+  expect(screen.getByRole('button', { name: '取消' })).toBeDisabled();
+  expect(screen.getAllByText(/写入不可安全中断/).length).toBeGreaterThan(0);
+  releaseCommit();
+});
+
 test('未检测到实例时显示安装指引而不显示应用入口', async () => {
   await openEmptyCodexPage();
 

@@ -1,0 +1,5 @@
+# model_providers 被用户写成了内联表：往里插入普通子表会被静默丢弃，
+# 必须先把它还原成普通表，否则宿主拿到 model_provider 却找不到 provider 定义。
+model = "gpt-5-codex"
+model_provider = "openai"
+model_providers = { "other-tool" = { name = "Other Manager", base_url = "https://other.example.com/v1" } }

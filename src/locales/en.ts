@@ -5,6 +5,7 @@
  * are identical so a missing translation fails the build instead of silently
  * falling back to Chinese.
  */
+
 export const en: Record<string, string> = {
   'action.addKey': "Add key",
   'action.addModel': "Add model",
@@ -88,6 +89,7 @@ export const en: Record<string, string> = {
   'codex.changeField': "Field",
   'codex.changeReason': "Reason",
   'codex.checkConfig': "Inspect current config",
+  'codex.commitNotCancellable': "The commit has started; writing cannot be safely interrupted, so it cannot be cancelled.",
   'codex.committing': "Committing…",
   'codex.compatibility': "Compatibility",
   'codex.compileWarnings': "Compile warnings",
@@ -426,6 +428,7 @@ export const en: Record<string, string> = {
   'models.bulkLeaveNote': "After removing, regenerate and apply the diff for the Codex menu to update.",
   'models.bulkLeaveTitle': "Remove several from the Codex catalog",
   'models.bulkNothing': "There is nothing to process.",
+  'models.bulkPartial': "Completed {done} of {total}; the rest failed and can be retried.",
   'models.bulkRegion': "Bulk actions",
   'models.cancelSelection': "Clear selection",
   'models.catalog': "Catalog",

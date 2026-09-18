@@ -331,7 +331,21 @@ fn commit_awaits_host_reload_and_never_writes_upstream_secrets() {
     assert!(text.contains("model_catalog_json"), "必须指向编译后的目录文件");
     assert!(text.contains("base_url"), "必须指向本机网关地址");
     assert!(!text.contains(SYNTHETIC_SECRET), "上游 Key 绝不能写入 Codex 配置");
-    assert!(!text.contains("127.0.0.1:18765/i/") == false, "base_url 会带本实例前缀");
+    assert!(
+        text.contains(&format!("http://127.0.0.1:18765/i/{}/", harness.instance.id.as_str())),
+        "base_url 必须带实例前缀，网关按前缀做目录版本准入：\n{text}"
+    );
+
+    // 生效摘要里的时间必须是时间，不是事务 id（界面用它显示「当前生效时间」）。
+    let summary = harness.service.applied_summary().unwrap().expect("提交后应有生效摘要");
+    assert_eq!(summary.operation_id, operation_id);
+    assert_ne!(summary.applied_at, summary.operation_id, "applied_at 不能是事务 id");
+    assert!(
+        summary.applied_at.contains('T') && summary.applied_at.ends_with('Z'),
+        "applied_at 应是 RFC3339 时刻：{}",
+        summary.applied_at
+    );
+    assert_eq!(summary.stage, ApplyStage::AwaitingReload, "提交成功不等于宿主已加载");
 
     let publication = harness.service.publication(&operation_id).unwrap();
     let publication = publication.expect("提交后必须发布运行快照");

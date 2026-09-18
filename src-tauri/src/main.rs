@@ -65,8 +65,9 @@ fn start_gateway(
 
 /// 托盘菜单。
 ///
-/// 刻意**不**把关闭窗口改成“隐藏到托盘”：那会改变用户对“关闭”的预期，
-/// 而托盘本身的价值是状态可见与快速回到窗口，不是拦截关闭。
+/// 关闭窗口按设计**隐藏到托盘**而不是退出（见 `on_window_event`）：托盘常驻，
+/// 退出只从托盘菜单走。托盘本身的价值是状态可见 + 快速回到窗口，以及一个明确的
+/// 退出出口——正在使用本机网关的第三方模型会随进程退出而断开。
 fn install_tray(app: &tauri::AppHandle, gateway_running: bool, port: Option<u16>) -> tauri::Result<()> {
     let status = match (gateway_running, port) {
         (true, Some(port)) => format!("网关运行中 · 127.0.0.1:{port}"),

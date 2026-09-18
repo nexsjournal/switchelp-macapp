@@ -513,7 +513,14 @@ impl ApplyService {
                 .and_then(|prepared| prepared.managed.model.clone()),
             alias_count: state.plan.catalog_aliases.len(),
             stage: state.operation.stage,
-            applied_at: state.operation.id.as_str().to_owned(),
+            // 应用时间取事务最后一个事件的时刻。这里原来写的是 operation id，
+            // 界面上「当前生效时间」显示的是一串 op_xxxx。
+            applied_at: state
+                .operation
+                .events
+                .last()
+                .map(|event| event.timestamp.clone())
+                .unwrap_or_default(),
         }))
     }
 

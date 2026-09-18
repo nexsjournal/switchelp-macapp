@@ -5,6 +5,7 @@
  */
 import type {
   ApplyPlan,
+  ApplyStage,
   CodexInstance,
   CoreError,
   Credential,
@@ -108,7 +109,8 @@ export interface AppliedSummary {
   catalogRevision: string;
   defaultModel: string | null;
   aliasCount: number;
-  stage: string;
+  /** 事务阶段。用契约类型而不是 string：写成 'Verified' 这种错值时编译期就能发现。 */
+  stage: ApplyStage;
   appliedAt: string;
 }
 

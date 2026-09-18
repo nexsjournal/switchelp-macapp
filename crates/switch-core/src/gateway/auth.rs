@@ -68,15 +68,18 @@ impl std::fmt::Debug for GatewayToken {
 }
 
 /// 常量时间字节比较：长度不同也走完固定轮次，只由异或累加决定结果。
+///
+/// 长度差不能折进 `u8`：`(a.len() ^ b.len()) as u8` 在相差 256 的倍数时截断成 0，
+/// 「长度不同必然不等」这条性质就不成立了。长度单独在 usize 上比一次。
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    let mut diff: u8 = (a.len() ^ b.len()) as u8;
+    let mut diff: u8 = 0;
     let len = a.len().max(b.len());
     for index in 0..len {
         let left = a.get(index).copied().unwrap_or(0);
         let right = b.get(index).copied().unwrap_or(0);
         diff |= left ^ right;
     }
-    diff == 0
+    diff == 0 && a.len() == b.len()
 }
 
 /// 入站请求头。字段全部为可选，便于显式判断“缺失”与“空值”。
@@ -233,6 +236,20 @@ pub fn is_loopback_host(host: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    /// 回归：长度差曾经折进 `u8`，相差 256 的倍数时截断成 0，
+    /// 「长度不同必然不等」这条性质就不成立了。
+    #[test]
+    fn length_difference_never_compares_equal() {
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abcd"));
+        assert!(!constant_time_eq(b"", b"a"));
+        let mut padded = b"abc".to_vec();
+        padded.extend(std::iter::repeat(0u8).take(256));
+        assert_eq!(padded.len() - 3, 256, "构造 256 字节的长度差");
+        assert!(!constant_time_eq(b"abc", &padded), "长度差 256 不能被截断成相等");
+    }
 
     fn guard() -> (RequestGuard, GatewayToken) {
         let token = GatewayToken::generate();

@@ -31,8 +31,10 @@ function relativeTime(value: string | null | undefined): string {
 function codexState(summary: AppliedSummary | null, gateway: GatewayReport | null): { text: string; tone: 'ok' | 'warn' | 'muted' } {
   if (!gateway?.running) return { text: t('overview.loadStateGatewayDown'), tone: 'warn' };
   if (!summary) return { text: t('overview.loadStateNotApplied'), tone: 'muted' };
-  if (summary.stage === 'Verified') return { text: t('overview.loadStateVerified'), tone: 'ok' };
-  if (summary.stage === 'Pending') return { text: t('overview.loadStatePending'), tone: 'warn' };
+  // 阶段由 Rust 序列化成 snake_case：写成 'Verified' 这个分支永远不会命中，
+  // 已核验的配置会被显示成「等待重新加载」。类型上也已收紧，写错编译不过。
+  if (summary.stage === 'verified') return { text: t('overview.loadStateVerified'), tone: 'ok' };
+  if (summary.stage === 'pending') return { text: t('overview.loadStatePending'), tone: 'warn' };
   return { text: t('codex.awaitingReload'), tone: 'warn' };
 }
 

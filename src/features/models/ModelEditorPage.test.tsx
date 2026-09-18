@@ -59,6 +59,28 @@ test('只保存草稿时不上报跳转', async () => {
   expect(onViewDiff).not.toHaveBeenCalled();
 });
 
+
+test('校验没过时点“保存并查看差异”，不会污染下一次“保存草稿”', async () => {
+  const user = userEvent.setup();
+  const onViewDiff = vi.fn();
+  render(<ModelEditorPage client={testClient({ saveModel: vi.fn().mockResolvedValue(model) })} providers={[provider]} model={model}
+    onSaved={() => {}} onCancel={() => {}} onViewDiff={onViewDiff} />);
+
+  // 清空必填的显示名称，再点“保存并查看应用差异”：浏览器会拦下提交。
+  await user.clear(screen.getByLabelText('显示名称'));
+  await user.click(screen.getByRole('button', { name: '保存并查看应用差异' }));
+  expect(onViewDiff).not.toHaveBeenCalled();
+
+  // 补全后点“保存草稿”：提交意图来自当前按钮，不应该被上一次的点击带偏。
+  await user.type(screen.getByLabelText('显示名称'), '补上的名字');
+  await user.click(screen.getByRole('button', { name: '保存草稿' }));
+  expect(onViewDiff).not.toHaveBeenCalled();
+
+  // 反过来：真的点“保存并查看应用差异”时仍然要跳转。
+  await user.click(screen.getByRole('button', { name: '保存并查看应用差异' }));
+  expect(onViewDiff).toHaveBeenCalledTimes(1);
+});
+
 test('有未保存修改时取消要确认，避免一次点击丢掉填写', async () => {
   const user = userEvent.setup();
   const onCancel = vi.fn();

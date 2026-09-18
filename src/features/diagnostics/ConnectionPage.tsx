@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Check, ClipboardCopy, Play, TriangleAlert } from 'lucide-react';
 import type { Credential, Model, ProbeResult, Provider } from '@/contracts/types';
 import { type DesktopClient, toCoreError } from '@/desktop/client';
@@ -82,21 +82,49 @@ export function ConnectionPage({ client, providers }: { client: DesktopClient; p
   const locale = useLocale();
   const provider = providers.find(item => item.id === providerId);
 
-  /** 选择供应商后加载它的模型与 Key；Key 默认取当前使用的那个。 */
-  async function pickProvider(id: string) {
-    setProviderId(id); setReport(null); setError('');
+  /** 加载序号：切换供应商或卸载后，旧响应直接丢弃，不覆盖新选择。 */
+  const pendingLoad = useRef(0);
+
+  /** 加载某个供应商的模型与 Key；Key 默认取当前使用的那个。 */
+  const loadProvider = useCallback(async (id: string) => {
+    const ticket = ++pendingLoad.current;
     setModelId(''); setCredentialId('');
     setModels([]); setCredentials([]);
     try {
       const [allModels, allCredentials] = await Promise.all([client.listModels(), client.listCredentials(id)]);
+      if (ticket !== pendingLoad.current) return;
       const own = allModels.filter(model => model.providerId === id);
       setModels(own);
       setCredentials(allCredentials);
       const active = providers.find(item => item.id === id)?.activeCredentialId;
       setCredentialId(allCredentials.find(item => item.id === active)?.id ?? allCredentials[0]?.id ?? '');
       setModelId(own[0]?.id ?? '');
-    } catch (thrown) { setError(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('diag.loadFailed')); }
+    } catch (thrown) {
+      if (ticket !== pendingLoad.current) return;
+      setError(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('diag.loadFailed'));
+    }
+  }, [client, providers]);
+
+  function pickProvider(id: string) {
+    setProviderId(id); setReport(null); setError(''); setCopied(false);
+    void loadProvider(id);
   }
+
+  /**
+   * 首屏与供应商列表变化时也要加载：过去只在 `<select>` 的 onChange 里加载，
+   * 进页面时已经选中了第一个供应商，但模型与 Key 下拉是空的、开始按钮点不了，
+   * 页面上也不说明原因。
+   */
+  const providerIds = providers.map(item => item.id).join(',');
+  useEffect(() => {
+    const selected = providers.some(item => item.id === providerId) ? providerId : (providers[0]?.id ?? '');
+    if (selected !== providerId) setProviderId(selected);
+    if (selected) void loadProvider(selected);
+    // 列表变化或组件卸载时让在途加载作废。
+    return () => { pendingLoad.current += 1; };
+    // 只跟列表身份走：providerId 由用户操作驱动，不放进依赖以免重复加载。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providerIds]);
 
   const start = async () => {
     if (!providerId || !credentialId) return;

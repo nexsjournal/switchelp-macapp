@@ -7,6 +7,7 @@
  * 键集合由 src/i18n.test.ts 守住两头：代码里用到的键必须在这里，这里的键也必须有人用——
  * 包括 Rust 核心通过 messageKey 动态查表的那批（error./stage./warning./reason. 等）。
  */
+
 export const zhCN: Record<string, string> = {
   'action.addKey': "添加 Key",
   'action.addModel': "添加模型",
@@ -90,6 +91,7 @@ export const zhCN: Record<string, string> = {
   'codex.changeField': "字段",
   'codex.changeReason': "原因",
   'codex.checkConfig': "检查当前配置",
+  'codex.commitNotCancellable': "提交已经开始，写入不可安全中断，完成前不能取消。",
   'codex.committing': "提交中…",
   'codex.compatibility': "兼容性",
   'codex.compileWarnings': "编译警告",
@@ -428,6 +430,7 @@ export const zhCN: Record<string, string> = {
   'models.bulkLeaveNote': "移出后需要重新生成差异并应用，Codex 菜单才会更新。",
   'models.bulkLeaveTitle': "批量移出 Codex 目录",
   'models.bulkNothing': "当前没有可执行的目标。",
+  'models.bulkPartial': "已完成 {done} / {total} 项，其余失败，可重试。",
   'models.bulkRegion': "批量操作",
   'models.cancelSelection': "取消选择",
   'models.catalog': "目录",

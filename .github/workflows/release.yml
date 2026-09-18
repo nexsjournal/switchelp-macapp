@@ -14,18 +14,64 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '把产物附加到哪个标签'
+        description: '把产物附加到哪个标签（必填，形如 v0.1.1）'
         type: string
-        default: 'v0.1.0'
+        required: true
       draft:
         description: '发布为草稿'
         type: boolean
         default: false
 
 permissions:
-  contents: write
+  contents: read
+
+# 两次发布（打标签与手动触发撞上、或连推两个标签）会同时写同一个 release。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  # 发布前先跑测试：标签构建不能把没测过的代码发出去。
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+      - name: 类型与前端测试
+        run: |
+          pnpm typecheck
+          pnpm test
+      - name: 核心测试
+        run: cargo test -p switch-core
+      - name: 版本号一致（package.json / tauri.conf.json / Cargo.toml）
+        run: |
+          pkg=$(node -p "require('./package.json').version")
+          conf=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          cargo_ver=$(cargo metadata --no-deps --format-version 1 | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const m=JSON.parse(s).packages.find(p=>p.name==='switch-core');console.log(m.version)})")
+          echo "package.json=$pkg tauri=$conf switch-core=$cargo_ver"
+          if [ "$pkg" != "$conf" ] || [ "$conf" != "$cargo_ver" ]; then
+            echo "::error::版本号不一致：三处必须同步，否则安装包与界面会报不同的版本"
+            exit 1
+          fi
+          # 打标签触发的构建：标签必须与版本号对得上，否则发出去的包与标签名互相矛盾。
+          if [ "${{ github.event_name }}" = "push" ] && [ "${GITHUB_REF_NAME}" != "v$pkg" ]; then
+            echo "::error::标签 ${GITHUB_REF_NAME} 与版本 $pkg 不一致（应为 v$pkg）"
+            exit 1
+          fi
+
+  gate:
   # 单独一个 job 把「有没有签名身份」算成输出。
   # 不能在 job 级 `if` 里用 `matrix`（矩阵展开前就求值了），`needs` 才可以。
   gate:
@@ -45,7 +91,7 @@ jobs:
           fi
 
   build-windows:
-    needs: gate
+    needs: [gate, test]
     runs-on: windows-latest
     name: Windows (x64)
     steps:
@@ -62,7 +108,8 @@ jobs:
           targets: x86_64-pc-windows-msvc
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          # 工作区根在仓库根：写成 src-tauri 时 crates/switch-core 的改动不使缓存失效。
+          workspaces: .
       - name: 安装前端依赖
         run: pnpm install --frozen-lockfile
       - name: 构建（Windows）
@@ -90,7 +137,7 @@ jobs:
   # macOS 只在配置了签名身份时构建：未签名的 macOS 包下载后会被 Gatekeeper 拦下。
   # job 级 `if` 不能用 `matrix`（解析期就报错），所以这里用 `needs` 判断。
   build-macos:
-    needs: gate
+    needs: [gate, test]
     if: ${{ needs.gate.outputs.signed == 'true' }}
     strategy:
       fail-fast: false
@@ -115,7 +162,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: .
       - name: 安装前端依赖
         run: pnpm install --frozen-lockfile
 
@@ -153,10 +200,22 @@ jobs:
         run: pnpm exec tauri build --target ${{ matrix.target }}
 
       - name: 校验签名与公证
+        env:
+          # `if` 里不能直接用 secrets，先转存到环境变量。
+          NOTARIZATION_CONFIGURED: ${{ secrets.APPLE_API_KEY != '' && 'true' || 'false' }}
         run: |
           APP="target/${{ matrix.target }}/release/bundle/macos/Switchelp.app"
           codesign --verify --deep --strict --verbose=2 "$APP"
-          spctl --assess --type execute -vv "$APP" || echo "::warning::Gatekeeper 未通过：多半是还没有配置公证凭据，用户首次打开需右键打开。"
+          if spctl --assess --type execute -vv "$APP"; then
+            echo "Gatekeeper 通过"
+          elif [ "$NOTARIZATION_CONFIGURED" = "true" ]; then
+            # 配了公证凭据却仍被拦：这是真的坏了，不能只发一条 warning 就当成功，
+            # 否则 CI 一片绿而用户双击打不开。
+            echo "::error::已配置公证凭据，但 Gatekeeper 仍未通过"
+            exit 1
+          else
+            echo "::warning::未配置公证凭据：用户首次打开需右键打开（或去掉隔离标记）。"
+          fi
 
       - name: 归集产物
         run: |
@@ -173,7 +232,9 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [build-windows, build-macos]
+    needs: [test, build-windows, build-macos]
+    permissions:
+      contents: write
     # 被跳过的依赖会让下游默认也跳过，所以这里显式判断：
     # Windows 必须成功；macOS 成功或（未配签名而）跳过都可以。
     if: ${{ always() && !cancelled()

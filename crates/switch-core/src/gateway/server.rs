@@ -458,7 +458,7 @@ impl Gateway {
                 alias: alias.to_owned(),
             }
         };
-        self.pipe_stream(writer, upstream.into_body(), translator)
+        self.pipe_stream(writer, upstream.into_body(), translator, secret.expose())
     }
 
     /// 上游 SSE → 宿主 SSE。逐事件转发并立即 flush，保证宿主能增量看到输出。
@@ -467,6 +467,7 @@ impl Gateway {
         writer: &mut TcpStream,
         body: ureq::Body,
         mut translator: Translator,
+        secret: &str,
     ) -> Result<(), CoreError> {
         write_head(writer, 200, "OK", "text/event-stream")?;
         let mut chunked = Chunked::new(writer);
@@ -481,6 +482,8 @@ impl Gateway {
         // 上游连接随之关闭，不再继续消耗供应商额度。检测延迟取决于下一次写——
         // 流式响应每来一个上游事件就写一次，因此延迟有界。
         let mut client_gone = false;
+        // 已经用 error 事件收尾：之后不能再补完成事件，否则截断会看起来像完整回复。
+        let mut upstream_failed = false;
 
         if let Some(events) = translator.start() {
             for event in events {
@@ -499,6 +502,7 @@ impl Gateway {
                     let error = stream_read_error(&error);
                     let _ = chunked.write_frame("error", &error_payload(&error));
                     client_gone = chunked.failed();
+                    upstream_failed = true;
                     break;
                 }
             };
@@ -506,6 +510,7 @@ impl Gateway {
                 let error = CoreError::internal("上游流空闲超时");
                 let _ = chunked.write_frame("error", &error_payload(&error));
                 client_gone = chunked.failed();
+                upstream_failed = true;
                 break;
             }
             last_frame = Instant::now();
@@ -517,6 +522,16 @@ impl Gateway {
                 let Ok(data) = serde_json::from_str::<Value>(&event.data) else {
                     continue;
                 };
+                // 上游会把错误也当成流里的数据帧发出来（限流、内容过滤、内部错误）。
+                // 翻译器只认 choices/delta，这种帧过去被当成「没有内容」而继续，
+                // 最后照发 response.completed —— 半句话被伪装成完整回复。
+                if let Some(payload) = data.get("error").filter(|value| !value.is_null()) {
+                    let error = upstream_stream_error(payload, secret);
+                    let _ = chunked.write_frame("error", &error_payload(&error));
+                    client_gone = chunked.failed();
+                    upstream_failed = true;
+                    break 'stream;
+                }
                 for frame in translator.feed(&data) {
                     if chunked.write_frame(&frame.name, &frame.payload).is_err() {
                         client_gone = true;
@@ -544,6 +559,12 @@ impl Gateway {
             return Ok(());
         }
 
+        if upstream_failed {
+            // 终止事件已经发出（上游报错、读到一半断开、空闲超时）。这里只把分块编码收尾，
+            // 不补 response.completed：那会把「半句话」伪装成一次完整回复。
+            return chunked.finish();
+        }
+
         for event in parser.finish().into_iter() {
             if let Ok(data) = serde_json::from_str::<Value>(&event.data) {
                 for frame in translator.feed(&data) {
@@ -559,6 +580,7 @@ impl Gateway {
 }
 
 /// 路径类别。前缀解析放在这里，避免在每个分支里各写一遍。
+#[derive(Debug, PartialEq, Eq)]
 enum RouteKind {
     Health,
     Models { revision: String },
@@ -568,16 +590,21 @@ enum RouteKind {
 }
 
 fn route_kind(path: &str) -> RouteKind {
+    // 查询串与片段不属于路径：`/health?x=1` 与 `/health` 是同一路由。
+    let path = path.split(['?', '#']).next().unwrap_or(path);
     if path == "/health" {
         return RouteKind::Health;
     }
     let Some((_, revision)) = crate::storage::snapshot::RuntimePublication::parse_prefix(path) else {
         return RouteKind::Unknown;
     };
-    match path.rsplit('/').next() {
-        Some("responses") => RouteKind::Responses,
-        Some("models") => RouteKind::Models { revision },
-        Some("realtime") => RouteKind::Realtime,
+    // 前缀之后必须恰好是 `v1/<端点>`——路径形状是 `/i/{实例}/c/{版本}/v1/{端点}`。
+    // 只看最后一段的话，`/i/x/c/rev/v1/anything/responses` 也会被当成推理端点。
+    let segments: Vec<&str> = path.split('/').filter(|segment| !segment.is_empty()).collect();
+    match segments.as_slice() {
+        ["i", _, "c", _, "v1", "responses"] => RouteKind::Responses,
+        ["i", _, "c", _, "v1", "models"] => RouteKind::Models { revision },
+        ["i", _, "c", _, "v1", "realtime"] => RouteKind::Realtime,
         _ => RouteKind::Unknown,
     }
 }
@@ -878,6 +905,25 @@ fn upstream_transport_error(error: &ureq::Error) -> CoreError {
     CoreError::new(code, message_key).with_detail(format!("无法完成上游请求：{}", text))
 }
 
+/// 上游在流中途用数据帧报错。
+///
+/// 只取结构化的 `type`/`code`/`message` 并脱敏、截断：整帧正文有时会回显请求内容，
+/// 而错误详情会出现在界面、日志与用户截图里。
+fn upstream_stream_error(payload: &Value, secret: &str) -> CoreError {
+    let kind = payload
+        .get("type")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("code").and_then(Value::as_str))
+        .unwrap_or("upstream_error");
+    let message = payload
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("上游在流中途返回错误");
+    let detail = redact(&format!("{kind}: {message}"), secret);
+    CoreError::new(ErrorCode::Internal, "error.upstreamFailed")
+        .with_detail(format!("上游流中途出错：{detail}"))
+}
+
 /// 流已开始后读取中断。此时响应头已经发出，只能用事件收尾。
 fn stream_read_error(error: &std::io::Error) -> CoreError {
     CoreError::internal("上游流在传输中断开")
@@ -939,4 +985,37 @@ pub fn token_fingerprint(token: &str) -> String {
         .take(4)
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 路由形状是 `/i/{实例}/c/{版本}/v1/{端点}`，`/health` 是唯一的例外。
+    /// 回归：过去只取最后一段，且不剥查询串——`/v1/x/responses` 会被当成推理端点，
+    /// `/health?x=1` 反而变成 404。
+    #[test]
+    fn route_kind_requires_the_documented_shape_and_ignores_query() {
+        let base = "/i/inst_1/c/rev_1";
+        assert_eq!(route_kind(&format!("{base}/v1/responses")), RouteKind::Responses);
+        assert_eq!(route_kind(&format!("{base}/v1/realtime")), RouteKind::Realtime);
+        assert_eq!(
+            route_kind(&format!("{base}/v1/models")),
+            RouteKind::Models { revision: "rev_1".to_owned() }
+        );
+        assert_eq!(route_kind("/health"), RouteKind::Health);
+        assert_eq!(route_kind("/health?probe=1"), RouteKind::Health);
+        assert_eq!(
+            route_kind(&format!("{base}/v1/models?limit=1")),
+            RouteKind::Models { revision: "rev_1".to_owned() }
+        );
+
+        // 多一段尾路径不是本网关的路由，不能因为最后一段叫 responses 就当推理端点。
+        assert_eq!(route_kind(&format!("{base}/v1/anything/responses")), RouteKind::Unknown);
+        // 少了 v1 段、或没有实例前缀，同样不认。
+        assert_eq!(route_kind(&format!("{base}/responses")), RouteKind::Unknown);
+        assert_eq!(route_kind("/v1/responses"), RouteKind::Unknown);
+        assert_eq!(route_kind("/"), RouteKind::Unknown);
+    }
 }

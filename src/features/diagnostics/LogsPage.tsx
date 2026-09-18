@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Download, Info, RefreshCw, Save, ScrollText, ShieldCheck, Trash2, XCircle } from 'lucide-react';
 import type { DiagnosticEvent, LogLevel } from '@/contracts/types';
 import { type DesktopClient, type DiagnosticsPreview, toCoreError } from '@/desktop/client';
@@ -45,14 +45,22 @@ export function LogsPage({ client }: { client: DesktopClient }) {
   const [notice, setNotice] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
 
+  /** 加载序号：连续切换筛选时，先返回的旧响应不得覆盖后发起的查询。 */
+  const pendingLoad = useRef(0);
+
   const load = useCallback(async () => {
+    const ticket = ++pendingLoad.current;
     setBusy('load'); setError('');
     try {
       const result = await client.listDiagnostics(level === 'all' ? {} : { level });
+      if (ticket !== pendingLoad.current) return;
       setEvents(result.items);
       setPage(0);
-    } catch (thrown) { setError(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('logs.loadFailed')); }
-    finally { setBusy(''); }
+    } catch (thrown) {
+      if (ticket !== pendingLoad.current) return;
+      setError(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('logs.loadFailed'));
+    }
+    finally { if (ticket === pendingLoad.current) setBusy(''); }
   }, [client, level]);
 
   useEffect(() => { void load(); }, [load]);
@@ -194,7 +202,13 @@ export function LogsPage({ client }: { client: DesktopClient }) {
       <div className={styles.scopes}>
         {CATEGORIES.map(scope => <label key={scope} className={styles.checkbox}>
           <input type="checkbox" checked={selectedScopes.includes(scope)}
-            onChange={event => setSelectedScopes(list => event.target.checked ? [...list, scope] : list.filter(item => item !== scope))} />
+            onChange={event => {
+              setSelectedScopes(list => event.target.checked ? [...list, scope] : list.filter(item => item !== scope));
+              // 范围变了，之前预览过的清单不再代表将要导出的内容：作废预览，
+              // 否则「保存到本地」会导出与预览清单不一致的包。
+              setPreview(null);
+              setSavedPath('');
+            }} />
           {scope}
         </label>)}
       </div>

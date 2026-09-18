@@ -258,7 +258,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
                   run: async () => { await client.deleteCredential(credential.id); },
                 })}>{t('action.delete')}</button></div></li>)}</ul> : <div className={styles.empty}><KeyRound size={24} /><h3>{t('empty.noKeyTitle')}</h3><p>{t('providers.noKeysBody')}</p></div>}
             <div className={styles.note}><ShieldCheck size={17} /><p>{t('providers.keyHint')}</p></div>
-            <ProbePanel client={client} provider={selectedProvider} credentialId={selectedProvider.activeCredentialId ?? null} />
+            <ProbePanel key={selectedProvider.id} client={client} provider={selectedProvider} credentialId={selectedProvider.activeCredentialId ?? null} />
           </section> : <section className={styles.card}><EmptyState icon={Settings2} title={t('providers.noneSelected')} description={t('providers.noneSelectedBody')} /></section>}</div>}
           {page === 'models' && <ModelsPage client={client} providers={providers} models={models} onChanged={refresh} onViewDiff={() => navigate('codexConfig')} />}
           {page === 'codexConfig' && <CodexConfigPage client={client} models={models} summary={summary} onApplied={() => void refresh()} />}
