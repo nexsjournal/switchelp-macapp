@@ -1,0 +1,21 @@
+/* 获取结果：工具条 + 可勾选清单。清单自己滚动，弹窗底栏保持不动。 */
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.search { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; color: var(--text-muted); }
+.count { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+
+.list { list-style: none; margin: 0; padding: 0; max-height: 46vh; overflow: auto;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+.list li + li { border-top: 1px solid var(--border-subtle); }
+/*
+ * 整行是点击区：勾选区 32 高以上，上游 ID 用等宽字体原样显示（大小写与斜杠都算数）。
+ *
+ * 选择器写成 `.list .row` 而不是 `.row`，并且显式写 `flex-direction: row`：
+ * 这个列表在 `.form-fields` 里，全局的 `.form-fields label` 会把它压成竖排
+ * （那个选择器的权重比单个类高，而且它设的 `flex-direction` 我这边没有对应的声明，
+ * 所以不是「谁赢」的问题，是那条属性根本没人覆盖）。
+ */
+.list .row { display: flex; flex-direction: row; align-items: center; gap: 12px; min-height: 44px; padding: 8px 14px; cursor: pointer; font-size: var(--font-size-control); color: var(--text-primary); }
+.list .row:hover { background: var(--bg-hover); }
+.list .row input { flex-shrink: 0; }
+.list .row .id { font-family: var(--font-mono); font-size: var(--font-size-code); flex-shrink: 0; }
+.list .row > span:nth-child(3) { flex: 1; min-width: 0; font-size: 12px; }

@@ -6,12 +6,16 @@
  *
  * 支持 `?view=codex|app` 直接进入对应页面，方便自动截图。
  */
-import { StrictMode } from 'react';
+import { StrictMode, type ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { ApplyPlan, CodexInstance, Credential, FieldChange, Model, Provider } from '@/contracts/types';
 import type { ApplyStatus, DesktopClient, InspectResult } from '@/desktop/client';
 import { App } from '@/app/App';
+import { ProviderForm } from '@/features/providers/ProviderForm';
+import { ModelFormDialog } from '@/features/models/ModelFormDialog';
+import { ModelEditorPage } from '@/features/models/ModelEditorPage';
 import { applyTheme, readThemePreference } from '@/theme';
+import { defaultPolicy } from '@/features/models/policy';
 import '@/styles/tokens.css';
 import '@/styles/global.css';
 
@@ -24,14 +28,16 @@ const provider = (id: string, name: string, endpoint: string, active: string | n
   enabled: true, version: 1, createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z',
 });
 
-function model(id: string, providerId: string, displayName: string, upstreamId: string, context: number, output: number, hostState: Model['hostState']): Model {
+function model(id: string, providerId: string, displayName: string, upstreamId: string, context: number, output: number, hostState: Model['hostState'], vision = false): Model {
   return {
     id, providerId, upstreamId, catalogAlias: `gs/${id}`, displayName, lifecycle: 'saved', hostState,
     inCatalog: hostState !== 'not_in_catalog',
     policy: {
       contextLimit: context, outputLimit: output, compactLimit: null,
       reasoning: { support: 'supported', control: 'effort', allowedValues: ['low', 'high'], defaultValue: 'low', budgetTokens: null, mappingId: 'reasoning.effort.v1' },
-      inputs: [],
+      // 能力表：文本永远支持，视觉按参数给——模型行上的「视觉」徽章就是这么来的。
+      inputs: defaultPolicy().inputs.map(entry => entry.kind === 'text' ? { ...entry, upstream: 'supported' as const }
+        : entry.kind === 'image' && vision ? { ...entry, upstream: 'supported' as const, gateway: 'supported' as const } : entry),
       tools: { functionTools: 'supported', parallelTools: 'unknown', customTools: 'unsupported', verification: 'declared' },
     },
     displayNameLayer: { discovered: null, userValue: displayName, overridden: true },
@@ -44,8 +50,8 @@ const providers = [
   provider('p_b', 'Example Provider B', 'https://api.example-b.com/v1', null),
 ];
 const models = [
-  model('m_1', 'p_a', '深度推理模型', 'vendor/reasoner-pro', 1_048_576, 65_536, 'awaiting_reload'),
-  model('m_2', 'p_a', '视觉多模态模型', 'vendor/vision-flash', 262_144, 32_768, 'awaiting_reload'),
+  model('m_1', 'p_a', 'deepseek-v4.1', 'vendor/reasoner-pro', 1_048_576, 65_536, 'awaiting_reload', true),
+  model('m_2', 'p_a', '视觉多模态模型', 'vendor/vision-flash', 262_144, 32_768, 'awaiting_reload', true),
   model('m_3', 'p_b', '轻量快速模型', 'vendor/fast-mini', 131_072, 8_192, 'loaded'),
   model('m_4', 'p_b', '长文本模型', 'vendor/long-context', 1_000_000, 16_384, 'not_in_catalog'),
 ];
@@ -110,19 +116,31 @@ const client: DesktopClient = {
   addCredential: async () => credentials[0]!,
   replaceCredential: async () => credentials[0]!,
   selectCredential: async () => undefined,
-  discoverModels: async () => [],
+  discoverModels: async () => [
+    { upstreamId: 'vendor/reasoner-pro', displayName: '深度推理模型', alreadySaved: true },
+    { upstreamId: 'vendor/new-vision', displayName: '新视觉模型', alreadySaved: false },
+    { upstreamId: 'Vendor/Case-Sensitive-2.5-Pro', displayName: '大小写敏感模型 2.5 Pro', alreadySaved: false },
+  ],
   listModels: async () => models,
   saveModel: async () => models[0]!,
   deleteModel: async () => undefined,
   deleteCredential: async () => undefined,
   deleteProvider: async () => undefined,
-  startProbe: async () => { throw new Error('fixture'); },
+  // 只读探测的合成结果：夹具里不发真实请求，但四个阶段都要成功，才看得到「连接成功」那条结论。
+  startProbe: async () => ({
+    id: 'probe_fixture', targetLabel: '示例供应商 A / deepseek-v4.1', startedAt: '2026-09-18T00:00:00Z',
+    stages: [
+      { stageKey: 'connect', status: 'passed', elapsedMs: 42, messageKey: 'probe.connected' },
+      { stageKey: 'credential', status: 'passed', elapsedMs: 12, messageKey: 'probe.credentialAccepted' },
+      { stageKey: 'model', status: 'passed', elapsedMs: 88, messageKey: 'probe.modelFound' },
+    ],
+  }),
   cancelProbe: async () => undefined,
   inspectConfig: async () => inspect,
   planApply: async () => plan,
   executeApply: async () => ({ operationId: 'op_a' }),
   applyStatus: async () => status,
-  restartHost: async () => ({ appPath: '/Applications/ChatGPT.app', quitRequested: true, launched: true }),
+  restartHost: async () => ({ appPath: '/Applications/ChatGPT.app', quitConfirmed: true, quitForced: false, launchedConfirmed: true }),
   confirmReload: async () => ({ operationId: 'op_a', open: false, events: [...status.events, { ...status.events[3]!, sequence: 4, phase: 'verified', messageKey: 'stage.verified' }] }),
   planRestore: async () => plan,
   executeRestore: async () => ({ operationId: 'op_r' }),
@@ -132,7 +150,7 @@ const client: DesktopClient = {
   clearDiagnostics: async () => 0,
 };
 
-const view = new URLSearchParams(window.location.search).get('view');
+const view = new URLSearchParams(window.location.search).get('view') ?? '';
 const container = document.getElementById('root');
 if (!container) throw new Error('缺少 #root 容器');
 // 走查首次接入向导：清空供应商，让向导自动展开。
@@ -141,8 +159,39 @@ if (view === 'onboarding') {
   (client as { listModels: unknown }).listModels = async () => [];
 }
 
+// 组件级直连视图：无交互截图用（headless Chrome / 审计脚本），不经过 App 壳。
+const noop = () => {};
+/**
+ * 组件级视图没有宿主可退回，所以「关闭 / 取消 / 后退」这些出口一律真的跳回供应商页。
+ *
+ * 以前这些出口传的是空函数，于是走查时点「取消」界面纹丝不动——看起来像按钮坏了，
+ * 其实是夹具没接。夹具的职责是让真实界面能被完整走一遍，包括出口。
+ */
+const backToProviders = () => { window.location.href = '/visual.html?view=providers'; };
+const directViews: Record<string, () => ReactElement> = {
+  // 供应商弹窗·编辑态：地址、格式、Key、模型列表
+  'provider-form': () => <ProviderForm client={client} provider={providers[0]} models={models}
+    onSaved={noop} onKeysChanged={noop} onModelsChanged={noop} onClose={backToProviders} />,
+  // 供应商弹窗·新建态
+  'provider-form-new': () => <ProviderForm client={client} models={models}
+    onSaved={noop} onKeysChanged={noop} onModelsChanged={noop} onClose={backToProviders} />,
+  // 手工添加模型（高级配置折叠）
+  'model-form': () => <ModelFormDialog client={client} providerId="p_a" onSaved={noop} onClose={backToProviders} />,
+  // 编辑已有模型（高级配置折叠，长度已填）
+  'model-form-edit': () => <ModelFormDialog client={client} providerId="p_a" model={models[0]}
+    onSaved={noop} onClose={backToProviders} />,
+  // 整页模型编辑器（新模型：可见链路不支持输入的灰态）
+  'model-editor': () => <ModelEditorPage client={client} providers={providers} onSaved={backToProviders} onCancel={backToProviders} />,
+};
+
 createRoot(container).render(
   <StrictMode>
-    <App client={client} initialPage={view === 'codex' ? 'codexConfig' : 'overview'} />
+    {directViews[view] ? (
+      // 与 App 壳的 main 一致的容器：这些视图本来就在 main 的 32px 内边距里渲染。
+      <main style={{ height: '100%', overflow: 'auto', padding: 'var(--content-padding)' }}>
+        {directViews[view]()}
+      </main>
+    ) : <App client={client}
+      initialPage={view === 'codex' ? 'codexConfig' : view === 'providers' ? 'providers' : 'overview'} />}
   </StrictMode>,
 );

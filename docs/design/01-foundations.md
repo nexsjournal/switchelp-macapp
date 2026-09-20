@@ -24,13 +24,13 @@
 | `text.muted` | `#8D8D99` | `#656570` | 时间、辅助标签 |
 | `border.subtle` | `#303036` | `#DADAE0` | 装饰性卡片分隔 |
 | `border.control` | `#777783` | `#777783` | 需要明确识别的表单边界 |
-| `accent` | `#38BDF8` | `#0284C7` | 强调色：当前导航、链接、选中态 |
+| `accent` | `#38BDF8` | `#0369A1` | 强调色：当前导航、链接、选中态（浅色取 `accent.strong` 同值，白字与 accent-subtle 底都要过 AA） |
 | `accent.strong` | `#0EA5E9` | `#0369A1` | 需要更实心时的强调底 |
 | `accent.subtle` | `#0E2A3A` | `#E3F2FD` | 强调色淡底（导航当前项、选中行） |
 | `accent.border` | `#1D5F7D` | `#9DC9E8` | 强调色描边 |
-| `action.primary.bg` | `#38BDF8` | `#0284C7` | 每个局部区域唯一主按钮 |
+| `action.primary.bg` | `#38BDF8` | `#0369A1` | 每个局部区域唯一主按钮 |
 | `action.primary.fg` | `#06202E` | `#FFFFFF` | 主按钮字 |
-| `focus.ring` | `#38BDF8` | `#0284C7` | 键盘焦点、可访问指示 |
+| `focus.ring` | `#38BDF8` | `#0369A1` | 键盘焦点、可访问指示 |
 | `status.success` | `#6EE7B7` | `#166534` | 已验证 |
 | `status.warning` | `#FCD34D` | `#854D0E` | 待处理、部分验证 |
 | `status.danger` | `#FDA4AF` | `#9F1239` | 错误、破坏性操作 |
