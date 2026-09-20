@@ -719,6 +719,111 @@ fn restore_drops_managed_keys_but_keeps_an_externally_modified_field() {
     );
 }
 
+/// 回归：配置里已经带着本工具早先写下的字段时，还原必须把 Codex 交还给原生，
+/// 而不是把我们自己的值当成「用户原值」再写回去。
+///
+/// 真机上的表现是：用户点了几遍「还原」、也重启了 Codex，可左下角仍然显示本工具，
+/// 也回不到账号登录——因为记录下来的基线本身就是我们写的（旧版本装过，或另一个工具
+/// 把我们写的行圈进了它的托管块），于是「还原」等于原样写回。
+#[test]
+fn restore_returns_to_native_when_the_recorded_baseline_was_our_own_write() {
+    // 模拟旧版本留下的现场：受管字段已经是我们写的值。
+    let leftovers = [
+        "model = \"gs/p_old/m_old\"",
+        "model_provider = \"gptswitch\"",
+        "model_catalog_json = \"/Users/me/Library/Application Support/app.gptswitch.desktop/catalogs/rev_old/models.json\"",
+        "model_context_window = 128000",
+        "approval_policy = \"on-request\"",
+        "",
+        "[model_providers.gptswitch]",
+        "name = \"Switchelp\"",
+        "base_url = \"http://127.0.0.1:18765/i/inst_old/c/rev_old/v1\"",
+        "wire_api = \"responses\"",
+        "",
+    ]
+    .join("\n");
+    let harness = Harness::with_ready_model(Some(&leftovers));
+
+    let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+    let operation_id = harness
+        .service
+        .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-leftover-apply")
+        .unwrap();
+    harness.service.confirm_reload(&operation_id, true).unwrap();
+
+    let restore = harness.service.plan_restore(&harness.instance).unwrap();
+    harness
+        .service
+        .execute_restore(
+            restore.id.as_str(),
+            &restore.plan_hash,
+            "idem-leftover-restore",
+        )
+        .unwrap();
+
+    let text = harness.read_config();
+    assert!(
+        !text.contains("gptswitch") && !text.contains("gs/"),
+        "还原后不得再有本工具的 provider / 别名，实际：\n{text}"
+    );
+    assert!(
+        !text.contains("model_catalog_json"),
+        "还原后不得再指向本工具的目录"
+    );
+    // 上一条 apply 没有记录过 `model_context_window`（它的写入条件是「用户在模型里覆盖了
+    // 上下文」），所以还原也不认领它。这是刻意的：同一个值也可能是用户自己在 Codex 里设的，
+    // 光看数字分不出作者，删掉它是越权。真正决定路由的是 provider / 别名 / 目录三项，它们
+    // 撤销之后 Codex 就已经回到原生登录与原生模型列表。
+    assert!(
+        text.contains("approval_policy = \"on-request\""),
+        "无关字段必须原样保留"
+    );
+}
+
+/// 首次接管时，配置里已经存在的本工具字段不能被记成「用户原值」。
+#[test]
+fn taking_over_our_own_leftovers_records_no_baseline() {
+    use switch_core::codex::config::{looks_like_our_value, FieldOwnership};
+
+    assert!(looks_like_our_value("model_provider", Some("gptswitch")));
+    assert!(looks_like_our_value("model", Some("gs/p_a/m_1")));
+    assert!(looks_like_our_value(
+        "model_catalog_json",
+        Some("/Users/me/Library/Application Support/app.gptswitch.desktop/catalogs/rev_1/models.json")
+    ));
+    assert!(looks_like_our_value(
+        "model_providers.gptswitch",
+        Some("name = \"Switchelp\"\n")
+    ));
+    // 认不出来的一律不当成自己的：泛化数值、原生模型名、别人的目录。
+    assert!(!looks_like_our_value(
+        "model_context_window",
+        Some("128000")
+    ));
+    assert!(!looks_like_our_value("model", Some("gpt-5.6-sol")));
+    assert!(!looks_like_our_value(
+        "model_catalog_json",
+        Some("/Users/me/Library/Application Support/OpenCodex/custom_model_catalog.json")
+    ));
+    assert!(!looks_like_our_value("model_provider", Some("openai")));
+
+    let record = |key: &str, baseline: Option<&str>| FieldOwnership {
+        key_path: key.to_owned(),
+        baseline_presence: baseline.is_some(),
+        baseline_value: baseline.map(str::to_owned),
+        last_written_value: None,
+    };
+    // 基线里带着本工具的 provider ID 与 providers 子表 → 判为「本工具自己的作业」。
+    assert!(switch_core::codex::config::baseline_is_our_own_work(&[
+        record("model_provider", Some("gptswitch")),
+        record("model_providers.gptswitch", Some("name = \"Switchelp\"\n")),
+    ]));
+    // 基线是真·原生配置 → 不是。
+    assert!(!switch_core::codex::config::baseline_is_our_own_work(&[
+        record("model_provider", Some("openai")),
+    ]));
+}
+
 /// 从未写入过该实例的配置时，还原必须明确拒绝，而不是生成空计划。
 #[test]
 fn restore_is_refused_before_anything_was_written() {

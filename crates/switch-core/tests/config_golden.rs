@@ -154,9 +154,13 @@ fn missing_keys_are_recorded_as_absent_baseline() {
 
 /// provider 子表是唯一「键路径不是字面量键」的受管字段。
 ///
-/// 回归：`execute_restore` 的 Restore 分支曾统一走 `document["model_providers.gptswitch"] = …`，
+/// 回归（一）：`execute_restore` 的 Restore 分支曾统一走 `document["model_providers.gptswitch"] = …`，
 /// 而 toml_edit 的索引赋值不做点号拆分，于是还原写出一条 `"model_providers.gptswitch" = "…"`
 /// 的垃圾键，真正的子表原封不动——还原报告成功，宿主配置却仍指向本工具。
+///
+/// 回归（二，真机）：基线里带着本工具的 provider 时，恢复「基线」等于把旧目录版本再写回去，
+/// 用户点几遍还原、重启 Codex 也回不到原生登录。正确动作是删掉——那才是「原本不存在」的语义。
+/// 字面点号键的防护由下面「不得写入 `"model_providers.gptswitch"`」与「子表已消失」两条断言守住。
 #[test]
 fn restore_writes_an_existing_gateway_provider_back_as_a_table() {
     let snapshot = load("existing-gateway-provider.toml");
@@ -181,8 +185,8 @@ fn restore_writes_an_existing_gateway_provider_back_as_a_table() {
         .find(|o| o.key_path() == "model_providers.gptswitch")
         .unwrap();
     assert!(
-        matches!(provider, RestoreOutcome::Restore { .. }),
-        "本次应可安全恢复基线：{provider:?}"
+        matches!(provider, RestoreOutcome::Delete { .. }),
+        "基线是本工具自己的作业时，还原必须删掉而不是写回：{provider:?}"
     );
 
     let (restored, _) = execute_restore(&applied, &ownership).unwrap();
@@ -190,18 +194,80 @@ fn restore_writes_an_existing_gateway_provider_back_as_a_table() {
         !restored.contains("\"model_providers.gptswitch\""),
         "不得写入字面点号键：\n{restored}"
     );
-    let reparsed =
-        ConfigSnapshot::parse(fixture("existing-gateway-provider.toml"), &restored).unwrap();
-    let provider = reparsed
-        .read_provider()
-        .expect("还原后 provider 子表必须仍然可读");
     assert!(
-        provider.base_url.contains("rev_0006"),
-        "应回到基线版本：{}",
-        provider.base_url
+        !restored.contains("[model_providers.gptswitch]"),
+        "还原后 Codex 必须回到原生：子表不得留下\n{restored}"
     );
+    // 回到原生：路由键与我们的 provider 一起消失，用户重启 Codex 后就是账号登录那一套。
+    assert!(
+        !restored.contains("gptswitch"),
+        "路由键必须撤销：\n{restored}"
+    );
+    assert!(!restored.contains("model_catalog_json"));
     // 无关内容保留。
     assert!(restored.contains("[mcp_servers.docs]"));
+    assert!(restored.contains("name = \"文档\"") || restored.contains("[mcp_servers.docs]"));
+}
+
+/// provider 子表的 **Restore 分支**（基线的表不是本工具的）仍然要按表写回，
+/// 而不是写成字面点号键。真机语义改成「基线是自己的作业就删掉」之后，
+/// 这条分支只剩「表在、但没在用它路由」这种状态会走到，单独钉一下。
+#[test]
+fn restore_writes_back_a_foreign_gateway_provider_as_a_table() {
+    let snapshot = load("missing-keys.toml");
+    let (applied_text, ownership) = apply_managed(&snapshot, &managed(), &[]).unwrap();
+    let applied = ConfigSnapshot::parse(fixture("missing-keys.toml"), &applied_text).unwrap();
+
+    // 手工构造：这套记录声称「接管前就有一张别人的 gptswitch 表，且当时没在用它路由」。
+    let foreign = ownership
+        .iter()
+        .map(|record| {
+            if record.key_path == "model_providers.gptswitch" {
+                FieldOwnership {
+                    key_path: record.key_path.clone(),
+                    baseline_presence: true,
+                    // 拿本工具写出来的表改个名字和地址：结构合法、内容认不出来是本工具的。
+                    baseline_value: Some(
+                        record
+                            .last_written_value
+                            .as_deref()
+                            .unwrap_or_default()
+                            .replace("Switchelp", "别人的网关")
+                            .replace("/i/", "/x/"),
+                    ),
+                    last_written_value: record.last_written_value.clone(),
+                }
+            } else if record.key_path == "model_provider" {
+                FieldOwnership {
+                    baseline_value: Some("openai".to_owned()),
+                    ..record.clone()
+                }
+            } else {
+                record.clone()
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let outcomes = plan_restore(&applied, &foreign);
+    assert!(matches!(
+        outcomes
+            .iter()
+            .find(|o| o.key_path() == "model_providers.gptswitch")
+            .unwrap(),
+        RestoreOutcome::Restore { .. }
+    ));
+    let (restored, _) = execute_restore(&applied, &foreign).unwrap();
+    assert!(
+        !restored.contains("\"model_providers.gptswitch\""),
+        "不得写入字面点号键：\n{restored}"
+    );
+    let reparsed = ConfigSnapshot::parse(fixture("missing-keys.toml"), &restored).unwrap();
+    let provider = reparsed.read_provider().expect("基线的表必须按表写回");
+    assert!(
+        !provider.base_url.contains("/i/"),
+        "写回的必须是基线那张表：{}",
+        provider.base_url
+    );
 }
 
 /// 回归：`model_providers` 是内联表时，往里塞普通子表会被 toml_edit 丢弃，

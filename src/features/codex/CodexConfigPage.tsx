@@ -170,13 +170,35 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
     return report && report.quitConfirmed && report.launchedConfirmed ? 'success' : 'danger';
   }
 
+  /**
+   * 还原后的结论：说清「撤销了什么」以及「Codex 回到哪里」。
+   *
+   * 被外部改过的字段按当前值保留（核心的三方比较），数量必须报出来——否则用户会以为
+   * 还原漏了东西。重启的三种结果复用同一套说法：配置撤销了但没重启，Codex 里看不出变化。
+   */
+  function restoreNotice(kept: number, report: { quitConfirmed: boolean; launchedConfirmed: boolean } | null): string {
+    const suffix = kept > 0 ? t('codex.restoreKept', { count: kept }) : '';
+    if (!report || !report.quitConfirmed) return t('codex.restoreRestartFailed', { suffix });
+    if (!report.launchedConfirmed) return t('codex.restoreRestartFailed', { suffix });
+    return t('codex.restoredAndRestarted', { suffix });
+  }
+
   const commit = () => run('commit', async () => {
     if (!draft) return;
     const request = { planId: draft.plan.id, planHash: draft.plan.planHash, idempotencyKey: newIdempotencyKey() };
     const result = draft.kind === 'apply' ? await client.executeApply(request) : await client.executeRestore(request);
     const next = await client.applyStatus(result.operationId);
     setStatus(next);
-    if (draft.kind === 'restore') { showToast(t('stage.restored')); setDraft(null); onApplied?.(); return; }
+    if (draft.kind === 'restore') {
+      // 还原之后也必须重启 Codex：它只在启动时读配置，不重启就还是旧的那一套
+      // （用户以为还原没生效，其实配置已经撤销了）。
+      setDraft(null);
+      onApplied?.();
+      const kept = draft.plan.warnings.length;
+      const restarted = await client.restartHost(instanceId).catch(() => null);
+      showToast(restoreNotice(kept, restarted), restartTone(restarted));
+      return;
+    }
     onApplied?.();
     // 配置写完了，但 Codex 只在启动时读它：直接重启，省掉「再点一次重启」这一步。
     // 重启失败不影响已经提交的配置，所以这里只降级成提示。
