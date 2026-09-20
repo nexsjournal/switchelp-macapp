@@ -275,7 +275,15 @@ jobs:
           merge-multiple: true
 
       - name: 列出即将发布的产物
-        run: ls -la artifacts
+        run: |
+          # 没有产物是**正常情况**，不是失败：未配置 Apple 签名 secrets 时 macOS 任务跳过，
+          # Windows 默认不出。以前这里直接 `ls artifacts`，于是「打标签 → 发布」在没配签名的
+          # 仓库里必然红一次；而发布本身（创建 Release、留出附件位）仍然要做。
+          mkdir -p artifacts
+          ls -la artifacts
+          if [ -z "$(ls -A artifacts)" ]; then
+            echo "::notice::这次没有 CI 产物（macOS 未配签名时跳过、Windows 默认不出）。Release 照常创建，macOS 包由本机签名后手动附上。"
+          fi
 
       - uses: softprops/action-gh-release@v2
         with:
@@ -283,4 +291,6 @@ jobs:
           tag_name: ${{ inputs.tag || github.ref_name }}
           draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
           generate_release_notes: true
+          # 没有产物时不报错：见上，零产物是预期状态之一。
+          fail_on_unmatched_files: false
           files: artifacts/*
