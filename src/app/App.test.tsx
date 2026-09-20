@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from './App';
-import { provider, testClient } from '../../tests/helpers/client';
+import { instance, plan, provider, testClient } from '../../tests/helpers/client';
 
 test('首次接入保存真实草稿调用，失败后保留表单且不宣称 Codex 已加载', async () => {
   const user = userEvent.setup();
@@ -107,6 +107,51 @@ test('回归：宿主的版本还没刷新上来时，撞上冲突会自己重�
   // 第一次用旧版本被拒，第二次带着重读到的版本写成。
   expect(saveProvider).toHaveBeenNthCalledWith(1, expect.anything(), 1);
   expect(saveProvider).toHaveBeenNthCalledWith(2, expect.anything(), 2);
+});
+
+test('回归：配好模型后，页面上有「应用并重启 Codex」这一步，不必自己去找入口', async () => {
+  // 真机反馈：在「供应商与模型」页配好供应商与模型之后，行上只有「编辑 / 测试 / 更多」，
+  // 没有任何能让配置生效的按钮——用户只能猜。待应用条把这一步摆在页面上。
+  const user = userEvent.setup();
+  const model = modelRow();
+  const planApply = vi.fn().mockResolvedValue(plan([{ keyPath: 'model', before: null, after: 'gs/m_1', reasonKey: 'reason.defaultModel' }]));
+  const executeApply = vi.fn().mockResolvedValue({ operationId: 'op_1' });
+  const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitConfirmed: true, quitForced: false, launchedConfirmed: true });
+  const client = testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
+    listModels: vi.fn().mockResolvedValue([model]), listCredentials: vi.fn().mockResolvedValue([]),
+    detectInstances: vi.fn().mockResolvedValue([instance]), planApply, executeApply, restartHost,
+    applyStatus: vi.fn().mockResolvedValue({ operationId: 'op_1', open: false, events: [] }) });
+  render(<App client={client} />);
+  await screen.findByText('测试供应商');
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+
+  // 条上写清「几个模型待应用」以及为什么要重启。
+  const bar = await screen.findByRole('region', { name: '待应用' });
+  expect(within(bar).getByText('1 个模型待应用')).toBeInTheDocument();
+  expect(within(bar).getByText(/Codex 只在启动时读配置/)).toBeInTheDocument();
+
+  // 点「应用并重启」→ 先给差异确认（写的是 Codex 自己的配置文件，不能静默写）→ 确认后写入并重启。
+  await user.click(within(bar).getByRole('button', { name: '应用并重启 Codex' }));
+  const confirm = await screen.findByRole('dialog', { name: '应用差异' });
+  expect(planApply).toHaveBeenCalled();
+  expect(executeApply).not.toHaveBeenCalled();
+
+  await user.click(within(confirm).getByRole('button', { name: '应用并重启 Codex' }));
+  await waitFor(() => expect(executeApply).toHaveBeenCalledTimes(1));
+  expect(restartHost).toHaveBeenCalledWith('inst_test');
+  expect(await screen.findByText('配置已提交，Codex 已重启；它回来后看看模型菜单。')).toBeInTheDocument();
+});
+
+test('待应用条的「查看差异」交给宿主切到 Codex 配置页', async () => {
+  const user = userEvent.setup();
+  const client = testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
+    listModels: vi.fn().mockResolvedValue([modelRow()]), listCredentials: vi.fn().mockResolvedValue([]) });
+  render(<App client={client} />);
+  await screen.findByText('测试供应商');
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  const bar = await screen.findByRole('region', { name: '待应用' });
+  await user.click(within(bar).getByRole('button', { name: '查看差异' }));
+  expect(await screen.findByRole('heading', { level: 1, name: 'Codex 配置' })).toBeInTheDocument();
 });
 
 test('供应商弹窗：标题是文字，名称是表单字段，「更多」里有停用与删除', async () => {

@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, FileSearch, History, RefreshCw, SlidersHorizontal } from 'lucide-react';
-import type { ApplyPlan, ApplyStage, CodexInstance, FieldChange, Model } from '@/contracts/types';
+import { useCallback, useEffect, useState } from 'react';
+import { CheckCircle2, FileSearch, History, RefreshCw, SlidersHorizontal } from 'lucide-react';
+import type { ApplyPlan, ApplyStage, CodexInstance, Model } from '@/contracts/types';
 import { isCoreError, type AppliedSummary, type ApplyStatus, type DesktopClient, type InspectResult, toCoreError } from '@/desktop/client';
 
 import { Dialog } from '@/components/Dialog';
+import { ApplyConfirmDialog } from './ApplyConfirmDialog';
+import { newIdempotencyKey } from './idempotency';
 import { showToast } from '@/components/Toast';
 import styles from './CodexConfigPage.module.css';
 
@@ -17,37 +19,10 @@ import { t } from '@/i18n';
  * - 任何重新比较都重新生成计划，不重用过期或冲突的计划。
  */
 
-/** 差异展示分组：只对核心给出的 reasonKey 归类，业务判定仍在核心。 */
-const groupOrder = ['route', 'catalog', 'policy', 'restore', 'other'] as const;
-type GroupKey = (typeof groupOrder)[number];
-
 /** 事务进度条展示顺序，与核心状态机的正常路径一致。 */
 const timeline: ApplyStage[] = ['prepared', 'committing', 'awaiting_reload', 'verified'];
 
-function groupOf(reasonKey: string): GroupKey {
-  switch (reasonKey) {
-    case 'reason.defaultModel':
-    case 'reason.providerRoute':
-      return 'route';
-    case 'reason.catalog':
-    case 'reason.gatewayProvider':
-      return 'catalog';
-    case 'reason.contextOverride':
-    case 'reason.reasoningDefault':
-      return 'policy';
-    case 'reason.restore':
-      return 'restore';
-    default:
-      return 'other';
-  }
-}
 
-/** 缺失的 reasonKey 回落到通用文案，而不是把内部 key 显示给用户。 */
-function reasonLabel(reasonKey: string): string {
-  const short = reasonKey.startsWith('reason.') ? reasonKey.slice('reason.'.length) : reasonKey;
-  const label = t(`reason.${short}`);
-  return label === `reason.${short}` ? t('reason.other') : label;
-}
 
 /** 事务阶段的可读文案。 */
 function stageLabelOf(stage: string): string {
@@ -61,27 +36,7 @@ function stageKey(phase: ApplyStage): string {
   return `stage.${phase.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())}`;
 }
 
-/**
- * 核心把编译警告拼成 `warning.xxx：详情`。界面必须显示可读文案，
- * 不能把内部 messageKey 直接摆在用户面前；未知 key 回落到通用标签。
- */
-function warningParts(raw: string): { label: string; detail: string } {
-  const separator = raw.indexOf('：');
-  if (separator < 0) return { label: t('warning.other'), detail: raw };
-  const key = raw.slice(0, separator);
-  const label = t(key);
-  return { label: label === key ? t('warning.other') : label, detail: raw.slice(separator + 1) };
-}
 
-function newIdempotencyKey(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function groups(changes: FieldChange[]): { key: GroupKey; changes: FieldChange[] }[] {
-  return groupOrder
-    .map(key => ({ key, changes: changes.filter(change => groupOf(change.reasonKey) === key) }))
-    .filter(group => group.changes.length > 0);
-}
 
 export function CodexConfigPage({ client, models, summary, onApplied }: {
   client: DesktopClient;
@@ -253,7 +208,6 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
     setInspect(result); setShowPreview(false);
   });
 
-  const diff = useMemo(() => (draft ? groups(draft.plan.changes) : []), [draft]);
   // 主按钮文案由核心的 reloadScope 决定：需要宿主重载时不写成“应用”。
   const commitLabel = draft?.kind === 'restore' ? t('codex.confirmRestore')
     : draft?.plan.reloadScope === 'host_reload' ? t('action.applyAndReload') : t('action.applyToCodex');
@@ -347,48 +301,10 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
       {showPreview && <pre className={styles.preview} aria-label={t('codex.redactedPreview')}>{inspect.redactedPreview}</pre>}
     </section>}
 
-    {/* 差异与确认是**模态**：以前它渲染在页面最下面，点了上面的按钮之后不往下滚根本看不到
-        确认入口（真机上就是这么卡住的：用户点完「还原」又去点了「重启 Codex」，配置一直没动）。
-        弹窗底栏固定在滚动区之外，长差异在正文里滚动。 */}
-    {draft && <Dialog width="wide" busy={busy === 'commit'}
-      title={draft.kind === 'apply' ? t('codex.diffTitleApply') : t('codex.diffTitleRestore')}
-      description={t('codex.changeCount', { count: draft.plan.changes.length })}
-      onClose={() => { setDraft(null); setError(''); }}
-      footer={<footer className="form-footer">
-        <span>{busy === 'commit' ? t('codex.commitNotCancellable') : t('codex.casNote')}</span>
-        <div className="actions">
-          <button onClick={() => { setDraft(null); setError(''); }} disabled={busy === 'commit'}>{t('action.cancel')}</button>
-          <button className="primary" autoFocus onClick={() => void commit()} disabled={busy === 'commit'}>
-            {busy === 'commit' ? t('codex.committing') : commitLabel}
-          </button>
-        </div>
-      </footer>}>
-      <div className="form-fields">
-        <p className="field-hint">{t('codex.targetFile')}<span className="text-mono break-anywhere">{draft.plan.configPath}</span></p>
-        {draft.plan.changes.length === 0
-          ? <p className="field-hint">{t('codex.noFieldDiff')}</p>
-          : diff.map(group => <div key={group.key} className={styles.group}>
-            <h3>{t(`group.${group.key}`)}<span className="badge">{group.changes.length}</span></h3>
-            <table className={styles.changes}>
-              <thead><tr><th>{t('codex.changeField')}</th><th>{t('codex.changeBefore')}</th><th>{t('codex.changeAfter')}</th><th>{t('codex.changeReason')}</th></tr></thead>
-              <tbody>{group.changes.map(change => <tr key={change.keyPath}>
-                <td className="text-mono">{change.keyPath}</td>
-                <td><code className="text-muted break-anywhere">{change.before ?? t('codex.notSet')}</code></td>
-                <td><code className="break-anywhere">{change.after ?? t('codex.willBeDeleted')}</code></td>
-                <td className="text-muted">{reasonLabel(change.reasonKey)}</td>
-              </tr>)}</tbody>
-            </table>
-          </div>)}
-        {draft.plan.warnings.length > 0 && <div className={styles.warnings}>
-          <AlertTriangle size={15} />{t('codex.compileWarnings')}<ul>{draft.plan.warnings.map(raw => {
-            const { label, detail } = warningParts(raw);
-            return <li key={raw}><strong>{label}</strong>{t('common.labelSeparator')}{detail}</li>;
-          })}</ul>
-        </div>}
-        <p className="field-hint">{t('codex.applyRestartsHost')}</p>
-        {error && <div role="alert" className="error-message">{error}</div>}
-      </div>
-    </Dialog>}
+    {/* 差异与确认复用一个组件：待应用条走的是同一套「看得清才让写」的流程。 */}
+    {draft && <ApplyConfirmDialog plan={draft.plan} kind={draft.kind} busy={busy === 'commit'} error={error}
+      commitLabel={commitLabel}
+      onConfirm={() => void commit()} onClose={() => { setDraft(null); setError(''); }} />}
 
     {status && <section className={styles.card}>
       <div className={styles.header}><div><CheckCircle2 size={18} /><h2>{t('codex.txState')}</h2></div>
