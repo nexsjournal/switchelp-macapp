@@ -57,7 +57,13 @@
 .rowActions > button { height: var(--control-height-compact); padding: 0 10px; font-size: 12px; }
 .count { margin: 14px 0 0; color: var(--text-muted); font-size: var(--font-size-caption); }
 
-.bulkBar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 12px 16px; border: 1px solid var(--accent-border); border-radius: 8px; background: var(--bg-elevated); font-size: 12px; }
+/*
+ * 批量操作条：夹在筛选行与表格之间的**页面内**一条，不是浮层。
+ * `margin-bottom` 不能省——没有它这张带边框和底色的条会直接贴住表格卡，
+ * 看起来像一个凭空冒出来的弹窗压在表头上（真机上就是这么被读错的）。
+ */
+.bulkBar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 0 0 16px; padding: 12px 16px;
+  border: 1px solid var(--accent-border); border-radius: 8px; background: var(--bg-elevated); font-size: var(--font-size-caption); }
 .bulkBar strong { font-variant-numeric: tabular-nums; }
 .bulkActions { margin-left: auto; }
 .notice { display: flex; gap: 10px; align-items: center; border: 1px solid var(--border-subtle); background: var(--bg-elevated); border-radius: 8px; padding: 12px 16px; font-size: 13px; }
