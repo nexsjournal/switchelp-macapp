@@ -14,7 +14,7 @@ Codex  →  ~/.codex/config.toml（本工具受管字段）
        →  auth helper 取本机令牌 → 按 alias 路由到供应商 → 上游
 ```
 
-- **模型菜单**来自编译后的目录文件（`model_catalog_json`），不是本工具自绘的列表。
+- **模型菜单**来自编译后的目录文件（`model_catalog_json`），不是本工具自绘的列表。注意 `model_catalog_json` 是**整体替换**宿主的模型列表而不是追加：工具处于已应用状态时，原生模型不在选择器里，要「还原为原生 Codex」才会回来。
 - **上游 Key 永不写入 `config.toml`**：只进系统凭据库，宿主拿到的只是本机网关令牌。
 - 写 Codex 配置一律走 **计划 → 摘要校验（CAS）→ 原子替换**，提交成功最多到"等待宿主重载"，不自行宣称已加载。
 - 上游是 `chat/completions` 时由网关双向翻译成 Responses；无法表达的字段**明确记为损失**，不假装生效。
@@ -22,23 +22,34 @@ Codex  →  ~/.codex/config.toml（本工具受管字段）
 
 ## 下载与安装
 
-从 [Releases](https://github.com/nexsjournal/switchelp-macapp/releases) 下载：
+从 [Releases](https://github.com/nexsjournal/switchelp-macapp/releases) 下载。
 
-| 平台 | 文件 | 首次打开 |
-| --- | --- | --- |
-| macOS（Apple Silicon） | `Switchelp_0.1.3_aarch64.dmg` | 已用 Developer ID 签名，但**尚未公证**：首次打开需**右键 → 打开**，或执行一次 `xattr -dr com.apple.quarantine /Applications/Switchelp.app` |
-| macOS（Apple Silicon） | `Switchelp-0.1.3-arm64.zip` | 同上，解压后把 `Switchelp.app` 拖进 `/Applications` |
-| Windows（x64） | `Switchelp_0.1.3_x64-setup.exe`（NSIS 安装器）<br>`Switchelp_0.1.3_x64_en-US.msi` | 未签名，SmartScreen 会提示“未知发布者”，点“仍要运行” |
+**当前版本 0.2.0 只发布 macOS Apple Silicon 两个包**；Windows 与 Intel Mac 的产物没有附在这次发布上，原因与替代做法见表格下方。
 
-更早的 0.1.0 产物名仍是旧的 `GPTSwitch`——它们是在产品与仓库改名之前构建的。应用标识仍是 `app.gptswitch.desktop`（有意保留，让旧版本的应用数据与凭据继续可用）。
+| 平台 | 文件 | SHA-256 | 首次打开 |
+| --- | --- | --- | --- |
+| macOS（Apple Silicon） | `Switchelp_0.2.0_aarch64.dmg` | `5b36e3624cbab6f70d3be11fdee5f56665bdd210d949310ab95cf2dbf7e445ac` | 已用 Developer ID 签名，但**尚未公证**，首次打开会被拦截——见下方两条路 |
+| macOS（Apple Silicon） | `Switchelp-0.2.0-arm64.zip` | `0fbc0337048214a2dbde853c91066c367c7dd923c147606067c0c72806046143` | 同上，解压后把 `Switchelp.app` 拖进 `/Applications` |
 
-**为什么 macOS 会提示**：签名与公证是两道关卡，本项目目前只有前者。
+**为什么 macOS 会拦住，以及怎么过去**：签名与公证是两道关卡，本项目目前只有前者，所以首次打开会被系统拒绝。两条路，先试第一条：
+
+1. **系统设置 → 隐私与安全性**，在「安全性」一栏里点被拦截应用旁边的**仍要打开**，再输入密码确认。这是 Apple 现在官方文档里写的路径——它已经不再提「右键 → 打开」那个旧办法，所以右键没反应是正常的。
+2. 打开一次终端，执行下面这行，之后正常双击即可：
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Switchelp.app
+   ```
+
 补齐公证需要账号所有者提供凭据，步骤见 [签名、公证与发布](docs/development/03-signing-and-release.md)；
 配好之后双击即可打开，且 CI 会自动产出带公证的包。
 
-**Windows 现状**：应用能打开，但**第三方模型在 Windows 上尚不可用**——凭据 helper 的 `.cmd`
-实现仍是显式未完成的桩，只保证失败可诊断，不假装可用。详见
-[证据索引](docs/appendix/01-source-index.md)。
+更早的 0.1.0 产物名仍是旧的 `GPTSwitch`——它们是在产品与仓库改名之前构建的。应用标识仍是 `app.gptswitch.desktop`（有意保留，让旧版本的应用数据与凭据继续可用）。
+
+**Windows 现状**：0.2.0 **没有发布任何 Windows 产物**。构建任务本身在（[`release.yml`](.github/workflows/release.yml) 的 `build-windows`），但它只在手动触发并勾选 `with_windows` 时才跑——打标签发布永远不会构建它。
+
+即便构建出来，**这个应用在 Windows 上会拒绝应用配置**，并在界面上说明原因，而不是照写不误：凭据 helper 在 Windows 上还没有实现，没有它 Codex 无法对本地网关鉴权，每一次请求都会失败。以前的做法——配置照写、界面报成功——比没用更糟：它把一个本来可用的 Codex 弄坏，还让人以为是上游的问题。详见[证据索引](docs/appendix/01-source-index.md)。
+
+**Intel Mac 现状**：发布矩阵里**是**包含 `x86_64-apple-darwin` 的，但 `build-macos` 任务只在 CI 配好 Apple 签名密钥时才运行，而 0.2.0 的包是本机在 Apple Silicon 上签的。需要 Intel 包请从源码构建（`pnpm exec tauri build`）。
 
 ## 构建与验证
 
@@ -57,10 +68,10 @@ node scripts/g0/probe-full-loop.mjs
 ```
 
 发布或推送前跑一次隐私扫描（规则是通用的，脚本本身不含任何个人标识；
-把你自己的私有特征写在仓库外的 `~/.gptswitch-private-patterns` 里即可一并检查）：
+把你自己的私有特征写在仓库外的 `~/.switchelp-private-patterns` 里即可一并检查）：
 
 ```bash
-printf '%s\n' 'api.your-provider.example' > ~/.gptswitch-private-patterns
+printf '%s\n' 'api.your-provider.example' > ~/.switchelp-private-patterns
 scripts/check-publish-safety.sh
 ```
 
@@ -75,10 +86,11 @@ scripts/check-publish-safety.sh
 
 ## 当前状态
 
-机制层面已经端到端跑通，但**尚未用真实第三方供应商验证过**：
+机制层面已经端到端跑通，并且**已在 macOS 上用真实第三方供应商验证过**：
 
-- 已实测：真实 Codex app-server 能列出自定义模型并路由到本机网关；`chat` 协议适配、输出上限执行、思考档位映射、模态拒绝都在真实链路里以上游收到的请求参数为证；上游断开即取消。
-- 未验证：Desktop **图形界面**的模型选择器（现有证据是 app-server 层）、真实供应商的响应质量、Windows 真机、读屏实际表现。
+- 已实测：真实上游返回了一次经本机网关路由的完整推理；真实 Codex 的 `model/list` 能列出受管模型；Desktop app-server 会用受管模型真实开会话（`logs_2.sqlite` 里有 `thread/start`，`client_name="Codex Desktop"`，模型是受管别名）；应用配置会提交并重启宿主；`chat` 协议适配、输出上限执行、思考档位映射、模态拒绝都以真实上游收到的请求参数为证；上游断开即取消。
+- **应用之前值得先读的一条**：`model_catalog_json` 是**整体替换**宿主的模型列表。工具处于已应用状态时，原生模型从 Codex 选择器里消失，只有「还原为原生 Codex」才能拿回来。已由 `model/list` 只返回 1 条证实。修复方案与「应用弹窗里明确警告」记在 [2026-09-20 审计](docs/audits/2026-09-20-audit-synthesis.md)。
+- 未验证：Windows 真机、读屏实际表现，以及 Desktop 图形界面选择器的**视觉**表现——上面的证据来自 app-server 与日志层，不是看着那个菜单得出的。
 
 设计与调研文档在 [`docs/`](docs/README.md)，含证据等级与未决问题清单（目前只有中文）。
 
