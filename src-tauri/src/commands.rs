@@ -218,6 +218,39 @@ pub async fn providers_delete(
     .await
 }
 #[tauri::command]
+pub async fn credentials_rename(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    credential_id: String,
+    label: String,
+    expected_version: u64,
+) -> Result<Credential, CoreError> {
+    run(window, state, move |desktop| {
+        desktop
+            .workspace
+            .rename_credential(&credential_id, &label, expected_version)
+    })
+    .await
+}
+
+/// 停用 / 重新启用一个 Key。停用当前正在用的那个会被核心拒绝，并把原因带回来。
+#[tauri::command]
+pub async fn credentials_set_disabled(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    credential_id: String,
+    disabled: bool,
+    expected_version: u64,
+) -> Result<Credential, CoreError> {
+    run(window, state, move |desktop| {
+        desktop
+            .workspace
+            .set_credential_disabled(&credential_id, disabled, expected_version)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn credentials_delete(
     window: WebviewWindow,
     state: Desktop<'_>,

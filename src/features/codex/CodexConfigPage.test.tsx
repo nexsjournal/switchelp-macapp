@@ -283,3 +283,49 @@ test('未检测到实例时显示安装指引而不显示应用入口', async ()
   expect(screen.queryByRole('button', { name: '应用到 Codex' })).not.toBeInTheDocument();
   expect(screen.getByLabelText('Codex 应用路径')).toBeInTheDocument();
 });
+
+test('确认之前说清「菜单会被替换」，并列出替换后的模型', async () => {
+  // 这是本工具最容易被误解的一条行为：目录是替换整份菜单，不是往里追加。
+  // 真机上「加一个模型」的预期与「原来能用的都不见了」的结果对不上，界面必须提前说。
+  const listed = { ...plan([modelChange]).catalogAliases };
+  const user = await openCodexPage({
+    detectInstances: vi.fn().mockResolvedValue([instance]),
+    listModels: vi.fn().mockResolvedValue([{
+      id: 'm_1', providerId: 'p_test', upstreamId: 'vendor/a', catalogAlias: 'gs/m_1', displayName: '我的模型',
+      lifecycle: 'saved', hostState: 'pending_apply', inCatalog: true,
+      policy: { contextLimit: 128_000, outputLimit: 8_192, compactLimit: null,
+        reasoning: { support: 'unknown', control: 'none', allowedValues: [], defaultValue: null, budgetTokens: null, mappingId: null },
+        inputs: [], tools: { functionTools: 'unknown', parallelTools: 'unknown', customTools: 'unknown', verification: 'declared' } },
+      displayNameLayer: { discovered: null, userValue: null, overridden: false }, capabilityRevision: 1, version: 1,
+      createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z',
+    }]),
+    planApply: vi.fn().mockResolvedValue(plan([modelChange], { catalogAliases: ['gs/m_1', 'gs/m_2'] })),
+  });
+  expect(listed).toBeDefined();
+
+  await user.click(screen.getByRole('button', { name: '应用到 Codex' }));
+
+  const note = await screen.findByRole('note');
+  expect(within(note).getByText('Codex 的模型菜单会被替换')).toBeInTheDocument();
+  expect(within(note).getByText(/还原为原生 Codex/)).toBeInTheDocument();
+  expect(within(note).getByText('本次替换后菜单里会有 2 个模型')).toBeInTheDocument();
+  // 能对上模型的显示名字；对不上的退回别名，也比什么都不说强。
+  expect(within(note).getByText('我的模型')).toBeInTheDocument();
+  expect(within(note).getByText('gs/m_2')).toBeInTheDocument();
+});
+
+test('还原不显示「替换菜单」警告——它正是把菜单还回去的那个动作', async () => {
+  const user = await openCodexPage({
+    detectInstances: vi.fn().mockResolvedValue([instance]),
+    planRestore: vi.fn().mockResolvedValue(plan([{ keyPath: 'model', before: 'gs/m_1', after: 'gpt-5.6-sol', reasonKey: 'reason.restore' }],
+      { catalogAliases: ['gs/m_1'] })),
+  });
+
+  // 「还原」按钮点了就直接出差异弹窗（计划生成后即展示），中间没有第二次点击。
+  await user.click(screen.getByRole('button', { name: '还原为原生 Codex' }));
+
+  const dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getByText('还原差异')).toBeInTheDocument();
+  expect(within(dialog).getByText('恢复基线')).toBeInTheDocument();
+  expect(screen.queryByText('Codex 的模型菜单会被替换')).not.toBeInTheDocument();
+});

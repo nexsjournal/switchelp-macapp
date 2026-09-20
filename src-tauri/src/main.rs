@@ -253,6 +253,8 @@ fn main() {
             commands::models_list,
             commands::models_save,
             commands::providers_delete,
+            commands::credentials_rename,
+            commands::credentials_set_disabled,
             commands::credentials_delete,
             commands::models_delete,
             commands::instances_detect,

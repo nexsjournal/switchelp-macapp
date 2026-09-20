@@ -13,6 +13,17 @@ import styles from './ProviderForm.module.css';
 
 import { t } from '@/i18n';
 
+/** Key 状态文案。核心的 `CredentialStatus::label_key()` 就是这一套键，前端沿用同一份，不另立一份。 */
+const credentialStatusKeys: Record<Credential['status'], string> = {
+  saved: 'credential.saved',
+  verified: 'credential.verified',
+  auth_failed: 'credential.authFailed',
+  scope_limited: 'credential.scopeLimited',
+  keystore_locked: 'credential.keystoreLocked',
+  missing: 'credential.missing',
+  disabled: 'credential.disabled',
+};
+
 /** 一次「可以拿去请求上游」的准备结果。 */
 type Ready = { providerId: string; credentialId: string | null };
 
@@ -66,6 +77,16 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
   const [secretVisible, setSecretVisible] = useState(false);
   const [keys, setKeys] = useState<Credential[]>([]);
   const [activeId, setActiveId] = useState<string | null>(provider?.activeCredentialId ?? null);
+  /**
+   * Key 池的编辑态。
+   *
+   * 「多 Key 管理」以前只有一半：核心与数据库都支持多个 Key，但界面只有一个输入框——
+   * 留空＝不动、填了＝替换**当前**那个。于是没法加第二个、没法改名、没法删、没法停用，
+   * 而 P0 要求的是「新增、替换、禁用、检测」四件事都能做。
+   */
+  const [addingKey, setAddingKey] = useState<{ label: string; secret: string } | null>(null);
+  const [renamingKey, setRenamingKey] = useState<{ id: string; label: string } | null>(null);
+  const [keyBusy, setKeyBusy] = useState('');
 
   /** 本次弹窗里刚建好的供应商：兜底用，一旦宿主列表里有它就让位给更活的那份。 */
   const [created, setCreated] = useState<Provider | null>(null);
@@ -209,6 +230,8 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
         providerId: targetId, upstreamId: model.upstreamId,
         displayName: model.displayName || model.upstreamId, catalogAlias: '',
         policy: discoveredModelPolicy(), inCatalog: true, displayNameOverridden: false,
+        // 发现出来的模型一律跟随供应商：上游列表不会告诉我们它走哪套协议。
+        protocolOverride: null,
       }, 0);
     }
     setDiscovered(null);
@@ -224,6 +247,65 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
       setActiveId(credentialId);
       onKeysChanged();
     } catch (thrown) { fail(thrown, t('providers.switchKeyFailed')); }
+  }
+
+  /** 池子里的 Key 变了之后统一重读：版本号、状态、掩码都以库里的为准。 */
+  async function reloadKeys(providerId: string) {
+    setKeys(await client.listCredentials(providerId).catch(() => keys));
+    onKeysChanged();
+  }
+
+  /** 加第 N 个 Key。第一个 Key 由创建供应商那条路写，这里只管「再加一个」。 */
+  async function addKey() {
+    if (!targetId || !addingKey) return;
+    const label = addingKey.label.trim();
+    const secretValue = addingKey.secret.trim();
+    if (!label) { showToast(t('key.needLabel'), 'danger'); return; }
+    if (!secretValue) { showToast(t('key.needSecret'), 'danger'); return; }
+    setKeyBusy('add');
+    try {
+      await client.addCredential(targetId, label, secretValue);
+      setAddingKey(null);
+      await reloadKeys(targetId);
+      showToast(t('key.added', { label }));
+    } catch (thrown) { fail(thrown, t('key.addFailed')); }
+    finally { setKeyBusy(''); }
+  }
+
+  async function renameKey() {
+    if (!renamingKey) return;
+    const label = renamingKey.label.trim();
+    const current = keys.find(item => item.id === renamingKey.id);
+    if (!current) return;
+    if (!label || label === current.label) { setRenamingKey(null); return; }
+    setKeyBusy('rename');
+    try {
+      await client.renameCredential(current.id, label, current.version);
+      setRenamingKey(null);
+      if (targetId) await reloadKeys(targetId);
+      showToast(t('key.renamed'));
+    } catch (thrown) { fail(thrown, t('key.renameFailed')); }
+    finally { setKeyBusy(''); }
+  }
+
+  async function toggleKeyDisabled(credential: Credential) {
+    setKeyBusy(credential.id);
+    try {
+      await client.setCredentialDisabled(credential.id, credential.status !== 'disabled', credential.version);
+      if (targetId) await reloadKeys(targetId);
+      showToast(credential.status === 'disabled' ? t('key.enabled', { label: credential.label }) : t('key.disabled', { label: credential.label }));
+    } catch (thrown) { fail(thrown, t('key.toggleFailed')); }
+    finally { setKeyBusy(''); }
+  }
+
+  async function deleteKey(credential: Credential) {
+    setKeyBusy(credential.id);
+    try {
+      await client.deleteCredential(credential.id);
+      if (targetId) await reloadKeys(targetId);
+      showToast(t('key.deleted', { label: credential.label }));
+    } catch (thrown) { fail(thrown, t('key.deleteFailed')); }
+    finally { setKeyBusy(''); }
   }
 
   /** 手工加模型：落到同一个模型表单，保存后回到这张表里。 */
@@ -303,7 +385,7 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
   ];
 
   return <>
-    <Dialog title={target?.name || t('action.addProvider')} leadingIcon={<Boxes size={20} />}
+    <Dialog width="normal" title={target?.name || t('action.addProvider')} leadingIcon={<Boxes size={20} />}
       headerActions={<RowMenu label={t('providers.moreActions')} items={menuItems} />}
       dirty={dirty} busy={working} onClose={onClose}
       footer={<footer className={styles.footer}>
@@ -350,9 +432,61 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
             </span></label>
           {keys.length > 1 && <label><span className="field-label">{t('providers.currentKey')}</span>
             <select value={activeId ?? ''} onChange={event => void switchKey(event.target.value)}>
-              {keys.map(credential => <option key={credential.id} value={credential.id}>{credential.label} · {credential.maskedSuffix}</option>)}
+              {keys.filter(credential => credential.status !== 'disabled')
+                .map(credential => <option key={credential.id} value={credential.id}>{credential.label} · {credential.maskedSuffix}</option>)}
             </select></label>}
           <p className="field-hint">{t('providers.apiKeyHint')}</p>
+
+          {/* Key 池：同一供应商下的每个 Key 各自一行，四种动作都能做。 */}
+          {target && keys.length > 0 && <section className={styles.keyPool} aria-label={t('key.poolTitle')}>
+            <div className={styles.keyPoolHead}>
+              <h3>{t('key.poolTitle')}</h3>
+              <button type="button" onClick={() => setAddingKey({ label: '', secret: '' })} disabled={working}>{t('key.add')}</button>
+            </div>
+            <ul className={styles.keyList}>
+              {keys.map(credential => <li key={credential.id} className={credential.status === 'disabled' ? styles.keyOff : ''}>
+                {renamingKey?.id === credential.id
+                  ? <span className={styles.keyRename}>
+                      <input value={renamingKey.label} aria-label={t('key.labelAria', { label: credential.label })} maxLength={64}
+                        onChange={event => setRenamingKey({ id: credential.id, label: event.target.value })} />
+                      <button type="button" className="primary" onClick={() => void renameKey()} disabled={keyBusy === 'rename'}>{t('action.save')}</button>
+                      <button type="button" onClick={() => setRenamingKey(null)}>{t('action.cancel')}</button>
+                    </span>
+                  : <span className={styles.keyName}>
+                      <strong>{credential.label}</strong>
+                      <span className="text-mono text-muted">{credential.maskedSuffix}</span>
+                      {credential.id === activeId && <span className="badge">{t('key.current')}</span>}
+                      <span className="badge">{t(credentialStatusKeys[credential.status])}</span>
+                    </span>}
+                <span className={styles.keyActions}>
+                  {credential.id !== activeId && credential.status !== 'disabled'
+                    && <button type="button" onClick={() => void switchKey(credential.id)} disabled={working}>{t('key.makeCurrent')}</button>}
+                  <button type="button" onClick={() => setRenamingKey({ id: credential.id, label: credential.label })} disabled={working}>{t('common.edit')}</button>
+                  {/* 停用当前 Key 由核心拒绝；这里也先禁掉，理由写在 title 里，而不是点了才报错。 */}
+                  <button type="button" onClick={() => void toggleKeyDisabled(credential)}
+                    title={credential.id === activeId && credential.status !== 'disabled' ? t('key.currentCannotDisable') : undefined}
+                    disabled={working || keyBusy === credential.id || (credential.id === activeId && credential.status !== 'disabled')}>
+                    {credential.status === 'disabled' ? t('key.enable') : t('key.disable')}</button>
+                  <button type="button" className="danger" onClick={() => void deleteKey(credential)} disabled={working || keyBusy === credential.id || credential.id === activeId}
+                    title={credential.id === activeId ? t('key.currentCannotDelete') : undefined}>{t('action.delete')}</button>
+                </span>
+              </li>)}
+            </ul>
+            {addingKey && <div className={styles.keyAdd}>
+              <label>{t('key.label')}
+                <input value={addingKey.label} maxLength={64} placeholder={t('key.labelPlaceholder')}
+                  onChange={event => setAddingKey({ ...addingKey, label: event.target.value })} /></label>
+              <label>{t('auth.apiKey')}
+                <input type="password" value={addingKey.secret} maxLength={4096} spellCheck={false} autoComplete="new-password"
+                  placeholder={t('key.secretPlaceholder')}
+                  onChange={event => setAddingKey({ ...addingKey, secret: event.target.value })} /></label>
+              <div className="actions">
+                <button type="button" className="primary" onClick={() => void addKey()} disabled={keyBusy === 'add'}>{t('key.addSave')}</button>
+                <button type="button" onClick={() => setAddingKey(null)}>{t('action.cancel')}</button>
+              </div>
+            </div>}
+            <p className="field-hint">{t('key.poolHint')}</p>
+          </section>}
         </> : <p className={styles.authNote}>{t('providers.noAuthOn')}</p>}
 
         {showNotes && <label>{t('common.notes')}
@@ -403,7 +537,7 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
       onSaved={async () => { setModelDialog(null); await onChanged(); showToast(t('copy.draftSaved')); }}
       onClose={() => setModelDialog(null)} />}
 
-    {modelConfirm && <Dialog title={t('models.deleteModel')} busy={working}
+    {modelConfirm && <Dialog width="narrow" title={t('models.deleteModel')} busy={working}
       description={t('providers.deleteModelBody', { name: modelConfirm.model.displayName, upstream: modelConfirm.model.upstreamId })}
       onClose={() => setModelConfirm(null)} footer={<footer className="form-footer">
         <span>{t('common.irreversible')}</span>
@@ -415,7 +549,7 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
       </footer>}
       />}
 
-    {deleting && target && <Dialog title={t('providers.deleteProvider')} busy={working}
+    {deleting && target && <Dialog width="narrow" title={t('providers.deleteProvider')} busy={working}
       description={t('providers.deleteProviderBody', {
         name: target.name, keys: keys.length, models: providerModels.length,
       })} onClose={() => setDeleting(false)} footer={<footer className="form-footer">

@@ -32,17 +32,19 @@ function noteFor(messageKey: string): string {
   return stageNoteKeys[messageKey] ?? messageKey;
 }
 
-export function OnboardingPage({ client, providers, models, credentialsByProvider, onOpenProviderForm, onOpenModelEditor, onViewDiff, onDismiss }: {
+export function OnboardingPage({ client, providers, models, credentialsByProvider, step, onStepChange, onOpenProviderForm, onOpenModelEditor, onViewDiff, onDismiss }: {
   client: DesktopClient;
   providers: Provider[];
   models: Model[];
   credentialsByProvider: Record<string, Credential[]>;
+  /** 当前步由宿主持有：第 2 步会打开整页模型编辑器，那一刻本组件会卸载，步骤不能只活在组件里。 */
+  step: number;
+  onStepChange: (step: number) => void;
   onOpenProviderForm: () => void;
   onOpenModelEditor: () => void;
   onViewDiff: () => void;
   onDismiss: () => void;
 }) {
-  const [step, setStep] = useState(0);
   const [instances, setInstances] = useState<CodexInstance[]>([]);
   const [instanceId, setInstanceId] = useState('');
   const [manualPath, setManualPath] = useState('');
@@ -110,7 +112,7 @@ export function OnboardingPage({ client, providers, models, credentialsByProvide
     <ol className={styles.steps} aria-label={t('onboarding.steps')}>
       {stepKeys.map((key, index) => <li key={key} className={index === step ? styles.current : index < step ? styles.done : ''}
         aria-current={index === step ? 'step' : undefined}>
-        <span className={styles.index}>{index < step ? <Check size={13} /> : index + 1}</span>
+        <span className={styles.index}>{index < step ? <Check size={12} /> : index + 1}</span>
         <span className={styles.label}>{t(key)}</span>
       </li>)}
     </ol>
@@ -120,7 +122,7 @@ export function OnboardingPage({ client, providers, models, credentialsByProvide
     {step === 0 && <section className={styles.card}>
       <div className={styles.cardHeader}><h2>{t('onboarding.detectTitle')}</h2>
         <button className="text-button" onClick={() => void detect()} disabled={detecting}>
-          <RefreshCw size={15} />{detecting ? t('codex.detecting') : t('codex.recheck')}
+          <RefreshCw size={14} />{detecting ? t('codex.detecting') : t('codex.recheck')}
         </button>
       </div>
 
@@ -133,7 +135,7 @@ export function OnboardingPage({ client, providers, models, credentialsByProvide
           <button onClick={() => void detect(manualPath.trim() || undefined)} disabled={detecting}>{t('onboarding.detectWithPath')}</button>
         </div>
       </div> : <>
-        {instances.length > 1 && <p className={styles.hint}><CircleHelp size={15} />
+        {instances.length > 1 && <p className={styles.hint}><CircleHelp size={14} />
           {t('onboarding.multiInstance', { count: instances.length })}</p>}
         <ul className={styles.instances}>{instances.map(instance => <li key={instance.id}
           className={instance.id === instanceId ? styles.picked : ''}>
@@ -171,23 +173,23 @@ export function OnboardingPage({ client, providers, models, credentialsByProvide
 
     {step === 1 && <section className={styles.card}>
       <div className={styles.cardHeader}><h2>{t('onboarding.setupTitle')}</h2></div>
-      <p className={styles.hint}><ShieldCheck size={15} />{t('onboarding.keyHint')}</p>
+      <p className={styles.hint}><ShieldCheck size={14} />{t('onboarding.keyHint')}</p>
 
       <ul className={styles.checklist}>
         <li className={readyProviders.length > 0 ? styles.ok : ''}>
-          <span className={styles.mark}>{readyProviders.length > 0 ? <Check size={13} /> : '1'}</span>
+          <span className={styles.mark}>{readyProviders.length > 0 ? <Check size={12} /> : '1'}</span>
           <div><strong>{t('onboarding.addProviderAndKey')}</strong>
             <span>{readyProviders.length > 0 ? t('onboarding.providersAdded', { count: readyProviders.length }) : t('empty.noProviderTitle')}</span></div>
           <button onClick={onOpenProviderForm}>{readyProviders.length > 0 ? t('onboarding.addAnother') : t('action.addProvider')}</button>
         </li>
         <li className={withActiveKey.length > 0 ? styles.ok : ''}>
-          <span className={styles.mark}>{withActiveKey.length > 0 ? <Check size={13} /> : '2'}</span>
+          <span className={styles.mark}>{withActiveKey.length > 0 ? <Check size={12} /> : '2'}</span>
           <div><strong>{t('onboarding.pickActiveKey')}</strong>
             <span>{withActiveKey.length > 0 ? t('onboarding.keysChosen', { count: withActiveKey.length }) : t('onboarding.needActiveKey')}</span></div>
           <button onClick={onOpenProviderForm} disabled={!readyProviders.length}>{t('onboarding.goPick')}</button>
         </li>
         <li className={catalogModels.length > 0 ? styles.ok : ''}>
-          <span className={styles.mark}>{catalogModels.length > 0 ? <Check size={13} /> : '3'}</span>
+          <span className={styles.mark}>{catalogModels.length > 0 ? <Check size={12} /> : '3'}</span>
           <div><strong>{t('onboarding.addModelAndCatalog')}</strong>
             <span>{catalogModels.length > 0 ? t('onboarding.modelsInCatalog', { count: catalogModels.length }) : t('onboarding.modelNeedsId')}</span></div>
           <button onClick={onOpenModelEditor} disabled={!providers.length}>{t('action.addModel')}</button>
@@ -220,6 +222,9 @@ export function OnboardingPage({ client, providers, models, credentialsByProvide
 
       {probeState === 'skipped' && <p className={styles.hint}>{t('onboarding.skipped')}</p>}
 
+      {/* 说清「为什么要重启」：向导前面几步都没提过，到这一步才知道应用会重启宿主，会觉得突兀。 */}
+      <p className={styles.hint}><RefreshCw size={14} />{t('onboarding.restartNote')}</p>
+
       <div className={styles.finish}>
         <div>
           <strong>{t('onboarding.pickInCodex')}</strong>
@@ -242,10 +247,10 @@ export function OnboardingPage({ client, providers, models, credentialsByProvide
     </section>}
 
     <footer className={styles.footer}>
-      <button onClick={() => setStep(value => Math.max(0, value - 1))} disabled={step === 0}>
+      <button onClick={() => onStepChange(Math.max(0, step - 1))} disabled={step === 0}>
         <ArrowLeft size={16} />{t('onboarding.back')}</button>
       <span className="text-muted">{t('onboarding.stepOf', { current: step + 1, total: stepKeys.length })}</span>
-      <button className="primary" onClick={() => setStep(value => Math.min(stepKeys.length - 1, value + 1))} disabled={step === stepKeys.length - 1}>{t('onboarding.next')}<ArrowRight size={16} />
+      <button className="primary" onClick={() => onStepChange(Math.min(stepKeys.length - 1, step + 1))} disabled={step === stepKeys.length - 1}>{t('onboarding.next')}<ArrowRight size={16} />
       </button>
     </footer>
   </div>;

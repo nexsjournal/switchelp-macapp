@@ -111,11 +111,25 @@ const client: DesktopClient = {
   checkUpdate: async () => ({ current: '0.1.0', latest: '0.2.0', hasUpdate: true, releaseUrl: 'https://github.com/nexsjournal/switchelp-macapp/releases', publishedAt: '2026-09-18T00:00:00Z', error: null }),
   listProviders: async () => ({ items: providers, nextCursor: null }),
   saveProvider: async draft => provider('p_new', draft.name, draft.endpoint, null),
-  listPresets: async () => [],
   listCredentials: async id => credentials.filter(c => c.providerId === id),
   addCredential: async () => credentials[0]!,
   replaceCredential: async () => credentials[0]!,
   selectCredential: async () => undefined,
+  // 夹具里的 Key 池是只读的：改名/停用真的落到合成数据上，走查才能看到状态变化。
+  renameCredential: async (credentialId: string, label: string) => {
+    const found = credentials.find(item => item.id === credentialId);
+    if (!found) throw new Error('missing credential');
+    found.label = label;
+    found.version += 1;
+    return found;
+  },
+  setCredentialDisabled: async (credentialId: string, disabled: boolean) => {
+    const found = credentials.find(item => item.id === credentialId);
+    if (!found) throw new Error('missing credential');
+    found.status = disabled ? 'disabled' : 'saved';
+    found.version += 1;
+    return found;
+  },
   discoverModels: async () => [
     { upstreamId: 'vendor/reasoner-pro', displayName: '深度推理模型', alreadySaved: true },
     { upstreamId: 'vendor/new-vision', displayName: '新视觉模型', alreadySaved: false },
@@ -155,6 +169,8 @@ const container = document.getElementById('root');
 if (!container) throw new Error('缺少 #root 容器');
 // 走查首次接入向导：清空供应商，让向导自动展开。
 if (view === 'onboarding') {
+  // 向导的「已看过」标记是持久的（点过「稍后再说」就记下了），不清掉这个视图会时有时无。
+  try { localStorage.removeItem('gptswitch.onboarding.dismissed'); } catch { /* 没有存储时按「没看过」处理 */ }
   (client as { listProviders: unknown }).listProviders = async () => ({ items: [], nextCursor: null });
   (client as { listModels: unknown }).listModels = async () => [];
 }

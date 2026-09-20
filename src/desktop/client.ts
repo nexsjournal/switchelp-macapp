@@ -4,6 +4,7 @@
  * 方法名对应 docs/architecture/04-data-and-contracts.md 第 4 节 IPC 命令表。
  */
 import type {
+  Protocol,
   ApplyPlan,
   ApplyStage,
   CodexInstance,
@@ -14,7 +15,6 @@ import type {
   OperationEvent,
   ProbeResult,
   Provider,
-  ProviderPreset,
 } from '@/contracts/types';
 
 import { t } from '@/i18n';
@@ -44,6 +44,8 @@ export interface ModelDraft {
   policy: Model['policy'];
   inCatalog: boolean;
   displayNameOverridden: boolean;
+  /** `null` = 跟随供应商的协议。 */
+  protocolOverride: Protocol | null;
 }
 
 export interface DiscoveredModel {
@@ -182,13 +184,16 @@ export interface DesktopClient {
 
   listProviders(filter?: { query?: string }): Promise<ListResult<Provider>>;
   saveProvider(draft: ProviderDraft, expectedVersion: number): Promise<Provider>;
-  listPresets(): Promise<ProviderPreset[]>;
 
   listCredentials(providerId: string): Promise<Credential[]>;
   /** 秘密只在这一个调用里传入，不进入任何持久化状态。 */
   addCredential(providerId: string, label: string, secret: string): Promise<Credential>;
   replaceCredential(credentialId: string, secret: string, expectedVersion: number): Promise<Credential>;
   selectCredential(providerId: string, credentialId: string): Promise<void>;
+  /** 改备注名。同一供应商下多个 Key 只有掩码尾号不同，名字是唯一的区分手段。 */
+  renameCredential(credentialId: string, label: string, expectedVersion: number): Promise<Credential>;
+  /** 停用 / 重新启用。停用当前正在用的那个会被拒绝——路由已经指向它。 */
+  setCredentialDisabled(credentialId: string, disabled: boolean, expectedVersion: number): Promise<Credential>;
 
   discoverModels(providerId: string, credentialId: string): Promise<DiscoveredModel[]>;
   listModels(): Promise<Model[]>;

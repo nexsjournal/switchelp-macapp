@@ -1,12 +1,20 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { OnboardingPage } from './OnboardingPage';
 import { instance, provider, testClient } from '../../../tests/helpers/client';
 
 function setup(overrides: Partial<Parameters<typeof OnboardingPage>[0]> = {}) {
   const handlers = { onOpenProviderForm: vi.fn(), onOpenModelEditor: vi.fn(), onViewDiff: vi.fn(), onDismiss: vi.fn() };
-  render(<OnboardingPage client={testClient({ detectInstances: vi.fn().mockResolvedValue([instance]) })}
-    providers={[]} models={[]} credentialsByProvider={{}} {...handlers} {...overrides} />);
+  // 步骤由宿主持有（组件会在打开整页编辑器时卸载），所以用例这边也要有个宿主来承载它。
+  // 客户端在渲染之外建好：每次渲染都换一个 client 会让 detect 的 useCallback 依赖一直变，转成死循环。
+  const client = testClient({ detectInstances: vi.fn().mockResolvedValue([instance]) });
+  function Host() {
+    const [step, setStep] = useState(0);
+    return <OnboardingPage client={client} providers={[]} models={[]} credentialsByProvider={{}}
+      step={step} onStepChange={setStep} {...handlers} {...overrides} />;
+  }
+  render(<Host />);
   return handlers;
 }
 

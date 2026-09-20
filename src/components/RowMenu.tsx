@@ -84,7 +84,7 @@ export function RowMenu({ label, items }: {
 
   return <div className={styles.root} ref={root}>
     <button ref={trigger} className="icon-button" aria-label={label} aria-haspopup="menu" aria-expanded={open}
-      onClick={() => setOpen(value => !value)}><MoreHorizontal size={17} /></button>
+      onClick={() => setOpen(value => !value)}><MoreHorizontal size={18} /></button>
     {open && anchor && createPortal(<div className={styles.menu} role="menu" ref={menu}
       // `pointerEvents` 写在内联样式里（CSS 里也有一份）：模态弹窗打开时 Radix 会把
       // body 设成 pointer-events: none，只给它自己的内容开例外，而菜单挂在 body 上。

@@ -246,7 +246,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
     <section className={styles.card}>
       <div className={styles.header}>
         <div><SlidersHorizontal size={18} /><h2>{t('codex.instances')}</h2></div>
-        <button className="text-button" onClick={() => void detect()} disabled={busy === 'detect'}><RefreshCw size={15} />{t('codex.recheck')}</button>
+        <button className="text-button" onClick={() => void detect()} disabled={busy === 'detect'}><RefreshCw size={14} />{t('codex.recheck')}</button>
       </div>
       {instances.length > 1 && <div className={styles.row} style={{ marginBottom: 20 }}>
         <label className={styles.field}>{t('codex.selectInstance')}<select aria-label={t('codex.selectInstance')} value={instanceId} onChange={event => { setInstanceId(event.target.value); setInspect(null); setDraft(null); setStatus(null); }}>
@@ -282,7 +282,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
         <button onClick={loadInspect} disabled={!instanceId || busy === 'inspect'}>{t('codex.checkConfig')}</button>
         <button className="primary" onClick={() => void makePlan('apply')} disabled={!instanceId || busy === 'plan'}>{t('action.applyToCodex')}</button>
         <button onClick={() => void makePlan('restore')} disabled={!instanceId || busy === 'plan'}><History size={16} />{t('action.restorePrevious')}</button>
-        <button onClick={() => setRestartConfirm(true)} disabled={!instanceId || busy === 'restart'}><RefreshCw size={15} />{t('action.restartHost')}</button>
+        <button onClick={() => setRestartConfirm(true)} disabled={!instanceId || busy === 'restart'}><RefreshCw size={14} />{t('action.restartHost')}</button>
       </div>
       {/*
         没有可应用的模型时提前说明，而不是让用户点一个必然失败的按钮。
@@ -303,7 +303,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
 
     {/* 差异与确认复用一个组件：待应用条走的是同一套「看得清才让写」的流程。 */}
     {draft && <ApplyConfirmDialog plan={draft.plan} kind={draft.kind} busy={busy === 'commit'} error={error}
-      commitLabel={commitLabel}
+      commitLabel={commitLabel} models={models}
       onConfirm={() => void commit()} onClose={() => { setDraft(null); setError(''); }} />}
 
     {status && <section className={styles.card}>
@@ -323,7 +323,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
         </div>
         <div className={styles.actions}>
           {/* 重启是让 Codex 真正读到新目录的可靠办法，所以放在这一格里。 */}
-          <button onClick={() => setRestartConfirm(true)} disabled={busy === 'restart'}><RefreshCw size={15} />{t('action.restartHost')}</button>
+          <button onClick={() => setRestartConfirm(true)} disabled={busy === 'restart'}><RefreshCw size={14} />{t('action.restartHost')}</button>
           <button className="primary" onClick={() => void confirmReload(true)} disabled={busy === 'confirm'}>{t('codex.reloaded')}</button>
           <button onClick={() => void confirmReload(false)} disabled={busy === 'confirm'}>{t('action.laterReload')}</button>
         </div>
@@ -337,7 +337,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
     </section>}
 
     {/* 放在页面顶层：实例卡里的按钮在没有事务时也要能打开它。 */}
-      {restartConfirm && <Dialog title={t('action.restartHost')} description={t('codex.restartHostBody')}
+      {restartConfirm && <Dialog width="narrow" title={t('action.restartHost')} description={t('codex.restartHostBody')}
         busy={busy === 'restart'} onClose={() => setRestartConfirm(false)} footer={<footer className="form-footer">
           <span>{t('codex.restartHostNote')}</span>
           <div className="actions">

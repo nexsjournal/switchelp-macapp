@@ -64,7 +64,10 @@ function collect(dir: string, files: (file: string) => boolean, pattern: RegExp,
 
 const fromSource = collect('src', file => /\.tsx?$/.test(file), new RegExp(`'([a-z][a-zA-Z0-9]*${SEGMENT})'`, 'g'), SOURCE_PREFIXES);
 const fromCore = collect('crates', file => file.endsWith('.rs'), new RegExp(`"([a-z][a-zA-Z0-9]*${SEGMENT})"`, 'g'), CORE_PREFIXES);
-const required = new Set([...fromSource, ...fromCore, ...DYNAMIC_KEYS]);
+// 桌面壳也是 Rust，也会抛带 messageKey 的 CoreError（例如「网关没起来就不能写配置」）。
+// 只扫 crates 的话，壳里独有的键会绕过这条守卫：文案缺失，界面直接显示键名。
+const fromDesktop = collect('src-tauri', file => file.endsWith('.rs'), new RegExp(`"([a-z][a-zA-Z0-9]*${SEGMENT})"`, 'g'), CORE_PREFIXES);
+const required = new Set([...fromSource, ...fromCore, ...fromDesktop, ...DYNAMIC_KEYS]);
 
 function placeholders(value: string): string[] {
   return [...value.matchAll(/\{(\w+)\}/g)].map(match => match[1]!).sort();

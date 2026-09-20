@@ -129,10 +129,10 @@ export function LogsPage({ client }: { client: DesktopClient }) {
 
     <section className={styles.card}>
       <div className={styles.header}>
-        <div><ScrollText size={17} /><h2>{t('logs.events')}</h2><span className="badge">{filtered.length}{filtered.length !== events.length ? ` / ${events.length}` : ''}</span></div>
+        <div><ScrollText size={18} /><h2>{t('logs.events')}</h2><span className="badge">{filtered.length}{filtered.length !== events.length ? ` / ${events.length}` : ''}</span></div>
         <div className={styles.actions}>
           <button onClick={() => void load()} disabled={busy === 'load'} className="icon-button" aria-label={t('logs.refresh')}>
-            <RefreshCw size={17} className={busy === 'load' ? styles.spin : ''} />
+            <RefreshCw size={18} className={busy === 'load' ? styles.spin : ''} />
           </button>
           <button className="danger" onClick={() => setConfirmClear(true)} disabled={!events.length}>
             <Trash2 size={16} />{t('logs.clear')}</button>
@@ -167,7 +167,7 @@ export function LogsPage({ client }: { client: DesktopClient }) {
             const Icon = levelIcons[event.level];
             return <li key={`${event.timestamp}-${event.resultKey}-${index}`}>
               <button className={styles.eventRow} onClick={() => setDetail(event)} aria-label={t('logs.detailAria', { result: event.resultKey })}>
-                <Icon size={15} className={styles[event.level]} aria-hidden="true" />
+                <Icon size={14} className={styles[event.level]} aria-hidden="true" />
                 <span className="text-mono text-muted">{event.timestamp}</span>
                 <span className={styles.category}>{event.categoryKey}</span>
                 <span className="break-anywhere">{event.resultKey}</span>
@@ -221,10 +221,10 @@ export function LogsPage({ client }: { client: DesktopClient }) {
         </li>)}</ul>
       </div>}
 
-      {savedPath && <div className={styles.saved} role="status"><Download size={15} />{t('common.savedTo')}<span className="text-mono break-anywhere">{savedPath}</span></div>}
+      {savedPath && <div className={styles.saved} role="status"><Download size={14} />{t('common.savedTo')}<span className="text-mono break-anywhere">{savedPath}</span></div>}
     </section>
 
-    {detail && <Dialog title={t('logs.eventDetail')} description={`${detail.categoryKey} · ${t(levelKeys[detail.level])}`}
+    {detail && <Dialog width="normal" title={t('logs.eventDetail')} description={`${detail.categoryKey} · ${t(levelKeys[detail.level])}`}
       onClose={() => setDetail(null)}
       footer={<footer className="form-footer">
         <span />
@@ -253,7 +253,7 @@ export function LogsPage({ client }: { client: DesktopClient }) {
       </div>
     </Dialog>}
 
-    {confirmClear && <Dialog title={t('logs.clear')} busy={busy === 'clear'}
+    {confirmClear && <Dialog width="narrow" title={t('logs.clear')} busy={busy === 'clear'}
       description={t('logs.clearBody', { count: events.length })}
       onClose={() => setConfirmClear(false)} footer={<footer className="form-footer">
         <span>{t('logs.clearIrreversible')}</span>

@@ -44,6 +44,12 @@ pub struct ModelDraft {
     pub policy: ModelPolicy,
     pub in_catalog: bool,
     pub display_name_overridden: bool,
+    /// 这个模型单独走哪套协议。`None` 表示跟随供应商。
+    ///
+    /// P0 明写「独立模型编辑：显示名、上游 ID、协议、上下文、输出限制…」，而
+    /// `Model.protocol_override` 早就存在并参与路由（同一供应商下不同模型可能一套是
+    /// Responses、一套只有 chat/completions），只是草稿里没有这个字段，于是永远设不上。
+    pub protocol_override: Option<Protocol>,
 }
 
 pub struct WorkspaceService {
@@ -217,7 +223,96 @@ impl WorkspaceService {
         provider.updated_at = now();
         let version = provider.version;
         self.repository.save_provider(provider, version)?;
+        // 换 Key 改变的是**下一次发布**会用哪一个凭据：网关服务的是发布时冻结的路由快照，
+        // 里面写死了 credential_id 与版本。所以只改选中项、不重新发布，新请求仍然走旧 Key。
+        //
+        // 这一点以前完全不可见：换完 Key 页面没有任何「待应用」提示，用户以为已经生效了。
+        // 把该供应商已纳入目录的模型退回「待应用」，待应用条就会自己出现——
+        // 用既有的机制表达既有的事实，不再新造一个提示。
+        self.mark_models_pending_for_provider(provider_id)?;
         Ok(())
+    }
+
+    /// 把某供应商已纳入目录的模型退回「待应用」。
+    ///
+    /// 只在路由的实际内容发生变化时调用（换当前 Key）。已经在待应用状态的不动，
+    /// 未纳入目录的也不动——它们本来就不在 Codex 的菜单里。
+    fn mark_models_pending_for_provider(&self, provider_id: &str) -> Result<(), CoreError> {
+        for model in self.repository.list_models()? {
+            if model.provider_id.as_str() != provider_id || !model.in_catalog {
+                continue;
+            }
+            if model.host_state == HostState::PendingApply {
+                continue;
+            }
+            let mut next = model.clone();
+            next.host_state = HostState::PendingApply;
+            let version = model.version;
+            self.repository.save_model(next, version)?;
+        }
+        Ok(())
+    }
+
+    /// 改 Key 的备注名。
+    ///
+    /// 备注是同一供应商下多个 Key 之间**唯一**的区分手段：掩码只露尾号，
+    /// 没有名字就只能靠记忆认「哪个是日常、哪个是备用」。
+    pub fn rename_credential(
+        &self,
+        id: &str,
+        label: &str,
+        expected_version: u64,
+    ) -> Result<Credential, CoreError> {
+        let _guard = self
+            .mutations
+            .lock()
+            .map_err(|_| CoreError::internal("写入锁不可用"))?;
+        let mut credential = self
+            .repository
+            .get_credential(&CredentialId::new(id))?
+            .ok_or_else(|| CoreError::not_found("Key"))?;
+        if credential.version != expected_version {
+            return Err(CoreError::conflict("error.credentialVersionConflict"));
+        }
+        credential.rename(label)?;
+        self.repository.save_credential(credential)
+    }
+
+    /// 停用或重新启用一个 Key。
+    ///
+    /// 禁止停用**当前正在用**的那个 Key：路由已经指向它，停用之后每一次新请求都会失败，
+    /// 而界面上看起来只是「关掉了一个开关」。要停用就先切到别的 Key——
+    /// 这与删除当前 Key 的处理方式一致，也是「不做假开关」的具体做法。
+    pub fn set_credential_disabled(
+        &self,
+        id: &str,
+        disabled: bool,
+        expected_version: u64,
+    ) -> Result<Credential, CoreError> {
+        let _guard = self
+            .mutations
+            .lock()
+            .map_err(|_| CoreError::internal("写入锁不可用"))?;
+        let mut credential = self
+            .repository
+            .get_credential(&CredentialId::new(id))?
+            .ok_or_else(|| CoreError::not_found("Key"))?;
+        if credential.version != expected_version {
+            return Err(CoreError::conflict("error.credentialVersionConflict"));
+        }
+        if disabled {
+            let active = self
+                .repository
+                .get_provider(&credential.provider_id)?
+                .and_then(|provider| provider.active_credential_id);
+            if active.as_ref() == Some(&credential.id) {
+                return Err(CoreError::conflict(
+                    "error.activeCredentialCannotBeDisabled",
+                ));
+            }
+        }
+        credential.set_disabled(disabled);
+        self.repository.save_credential(credential)
     }
 
     pub fn save_model(&self, draft: ModelDraft, expected_version: u64) -> Result<Model, CoreError> {
@@ -265,6 +360,7 @@ impl WorkspaceService {
             return Err(CoreError::validation("已有模型不能更换供应商"));
         }
         model.upstream_id = draft.upstream_id;
+        model.protocol_override = draft.protocol_override;
         model.catalog_alias = alias;
         model.display_name = draft.display_name.trim().to_owned();
         // 只有用户确实改过名字才算覆盖层。否则显示名应当跟随上游发现值，
