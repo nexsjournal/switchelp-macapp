@@ -155,6 +155,7 @@ const client: DesktopClient = {
   executeApply: async () => ({ operationId: 'op_a' }),
   applyStatus: async () => status,
   restartHost: async () => ({ appPath: '/Applications/ChatGPT.app', quitConfirmed: true, quitForced: false, launchedConfirmed: true }),
+  reconcileReload: async () => ({ confirmedOperationIds: [] }),
   confirmReload: async () => ({ operationId: 'op_a', open: false, events: [...status.events, { ...status.events[3]!, sequence: 4, phase: 'verified', messageKey: 'stage.verified' }] }),
   planRestore: async () => plan,
   executeRestore: async () => ({ operationId: 'op_r' }),
@@ -173,6 +174,11 @@ if (view === 'onboarding') {
   try { localStorage.removeItem('gptswitch.onboarding.dismissed'); } catch { /* 没有存储时按「没看过」处理 */ }
   (client as { listProviders: unknown }).listProviders = async () => ({ items: [], nextCursor: null });
   (client as { listModels: unknown }).listModels = async () => [];
+}
+// 走查「还没有应用」的那一版待应用条：默认夹具里模型是 awaiting_reload，量不到「N 个模型待应用」。
+if (view === 'pending') {
+  (client as { listModels: unknown }).listModels = async () => models.map(model => ({ ...model, hostState: 'pending_apply' as const }));
+  (client as { applySummary: unknown }).applySummary = async () => null;
 }
 
 // 组件级直连视图：无交互截图用（headless Chrome / 审计脚本），不经过 App 壳。

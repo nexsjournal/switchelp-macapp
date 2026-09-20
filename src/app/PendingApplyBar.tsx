@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { CloudUpload } from 'lucide-react';
 import type { ApplyPlan, Model, Provider } from '@/contracts/types';
-import { type DesktopClient, isCoreError, toCoreError } from '@/desktop/client';
+import { type AppliedSummary, type DesktopClient, isCoreError, toCoreError } from '@/desktop/client';
 import { showToast } from '@/components/Toast';
 import { ApplyConfirmDialog } from '@/features/codex/ApplyConfirmDialog';
 import styles from './PendingApplyBar.module.css';
@@ -21,11 +21,13 @@ import { t } from '@/i18n';
  *   「生成计划 → 差异确认 → 写入 → 重启」——确认那一步不省：它要写的是 Codex 自己的配置文件，
  *   而且会重启用户的 Codex。
  */
-export function PendingApplyBar({ client, providers, models, onApplied, onOpenDiff }: {
+export function PendingApplyBar({ client, providers, models, summary, onApplied, onOpenDiff }: {
   client: DesktopClient;
   providers: Provider[];
   /** 全部模型；这里自己筛「已纳入目录但还没生效」的那些。 */
   models: Model[];
+  /** 已发布的配置摘要：手动交回执时要用它的 operationId。 */
+  summary: AppliedSummary | null;
   /** 应用成功后重读数据。 */
   onApplied: () => Promise<void> | void;
   /** 「查看差异」：交给宿主切到 Codex 配置页。 */
@@ -40,6 +42,11 @@ export function PendingApplyBar({ client, providers, models, onApplied, onOpenDi
 
   const scope = new Set(pending.map(model => model.providerId)).size;
   const providerName = (id: string) => providers.find(provider => provider.id === id)?.name ?? t('common.unknownProvider');
+  /**
+   * 全部待办都只是「等宿主回执」时，这条不该再说「待应用」——配置已经写完了，
+   * 再点一次「应用并重启」只会重做一遍同样的事。这时它改说事实，并把回执交回用户。
+   */
+  const awaitingHost = pending.every(model => model.hostState === 'awaiting_reload') && !!summary;
 
   /** 生成计划 → 弹差异确认。提交在 confirmApply 里。 */
   async function planApply() {
@@ -82,7 +89,25 @@ export function PendingApplyBar({ client, providers, models, onApplied, onOpenDi
         showToast(t('codex.restartHostStillRunning'), 'danger');
         return;
       }
+      // 重启是我们自己做的，而且退出与启动都**观察到**了——这就是宿主回执，直接记账。
+      // 以前不做这一步，于是配置早已生效、Codex 也真的重新读过了，事务却永远停在
+      // 「等待重载」：界面一直显示待应用，用户以为没生效。
+      await client.confirmReload(result.operationId, true).catch(() => null);
+      await onApplied();
       showToast(t('codex.appliedAndRestarted'));
+    } catch (thrown) {
+      setError(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('common.failed'));
+    } finally { setBusy(false); }
+  }
+
+  /** 手动交回执：用于自动补记没能成立的情况（宿主没重启、平台查不到启动时间）。 */
+  async function confirmHostReloaded() {
+    if (!summary) return;
+    setBusy(true); setError('');
+    try {
+      await client.confirmReload(summary.operationId, true);
+      await onApplied();
+      showToast(t('codex.hostReloadConfirmed'), 'info');
     } catch (thrown) {
       setError(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('common.failed'));
     } finally { setBusy(false); }
@@ -92,14 +117,21 @@ export function PendingApplyBar({ client, providers, models, onApplied, onOpenDi
     <div className={styles.bar} role="region" aria-label={t('codex.pendingBarLabel')}>
       <CloudUpload size={16} aria-hidden="true" />
       <span className={styles.text}>
-        <strong>{t('codex.pendingCount', { count: pending.length })}</strong>
-        <span className="text-muted">{t('codex.pendingScope', { providers: scope, names: [...new Set(pending.map(model => providerName(model.providerId)))].join(t('common.itemSeparator')) })}</span>
+        {awaitingHost
+          ? <><strong>{t('codex.awaitingHostTitle')}</strong>
+            <span className="text-muted">{t('codex.awaitingHostBody')}</span></>
+          : <><strong>{t('codex.pendingCount', { count: pending.length })}</strong>
+            <span className="text-muted">{t('codex.pendingScope', { providers: scope, names: [...new Set(pending.map(model => providerName(model.providerId)))].join(t('common.itemSeparator')) })}</span></>}
       </span>
       <div className="actions">
         <button type="button" onClick={onOpenDiff}>{t('action.viewDiff')}</button>
-        <button type="button" className="primary" disabled={busy} onClick={() => void planApply()}>
-          {busy && !plan ? t('codex.committing') : t('codex.applyAndRestart')}
-        </button>
+        {awaitingHost && summary
+          ? <button type="button" className="primary" disabled={busy} onClick={() => void confirmHostReloaded()}>
+            {t('action.confirmHostReloaded')}
+          </button>
+          : <button type="button" className="primary" disabled={busy} onClick={() => void planApply()}>
+            {busy && !plan ? t('codex.committing') : t('codex.applyAndRestart')}
+          </button>}
       </div>
     </div>
 

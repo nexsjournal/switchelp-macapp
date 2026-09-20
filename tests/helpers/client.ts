@@ -29,6 +29,7 @@ export function testClient(overrides: Partial<DesktopClient> = {}): DesktopClien
   return {
     detectInstances: failing(),
     applySummary: vi.fn().mockResolvedValue(null),
+    reconcileReload: vi.fn().mockResolvedValue({ confirmedOperationIds: [] }),
     setGatewayPaused: vi.fn().mockResolvedValue(false),
     listBackups: vi.fn().mockResolvedValue([]),
     createBackup: failing(),

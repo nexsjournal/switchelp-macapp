@@ -59,6 +59,7 @@ export const desktopClient: DesktopClient = {
   executeApply: request => call<ExecuteResult>('apply_execute', { planId: request.planId, planHash: request.planHash, idempotencyKey: request.idempotencyKey }),
   applyStatus: operationId => call<ApplyStatus>('apply_status', { operationId }),
   confirmReload: (operationId, loaded) => call<ApplyStatus>('apply_confirm_reload', { operationId, loaded }),
+  reconcileReload: () => call<{ confirmedOperationIds: string[] }>('apply_reconcile_reload', {}),
   restartHost: instanceId => call<HostRestart>('host_restart', { instanceId }),
   planRestore: instanceId => call<ApplyPlan>('restore_plan', { instanceId }),
   executeRestore: request => call<ExecuteResult>('restore_execute', { planId: request.planId, planHash: request.planHash, idempotencyKey: request.idempotencyKey }),

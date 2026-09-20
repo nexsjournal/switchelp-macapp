@@ -118,9 +118,10 @@ test('回归：配好模型后，页面上有「应用并重启 Codex」这一�
   const planApply = vi.fn().mockResolvedValue(plan([{ keyPath: 'model', before: null, after: 'gs/m_1', reasonKey: 'reason.defaultModel' }]));
   const executeApply = vi.fn().mockResolvedValue({ operationId: 'op_1' });
   const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitConfirmed: true, quitForced: false, launchedConfirmed: true });
+  const confirmReload = vi.fn().mockResolvedValue({ operationId: 'op_1', open: false, events: [] });
   const client = testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
     listModels: vi.fn().mockResolvedValue([model]), listCredentials: vi.fn().mockResolvedValue([]),
-    detectInstances: vi.fn().mockResolvedValue([instance]), planApply, executeApply, restartHost,
+    detectInstances: vi.fn().mockResolvedValue([instance]), planApply, executeApply, restartHost, confirmReload,
     applyStatus: vi.fn().mockResolvedValue({ operationId: 'op_1', open: false, events: [] }) });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
@@ -140,7 +141,45 @@ test('回归：配好模型后，页面上有「应用并重启 Codex」这一�
   await user.click(within(confirm).getByRole('button', { name: '应用并重启 Codex' }));
   await waitFor(() => expect(executeApply).toHaveBeenCalledTimes(1));
   expect(restartHost).toHaveBeenCalledWith('inst_test');
+  // 重启是本应用自己做的，而且退出与启动都观察到了——回执当场记下，不再让用户去
+  // 「Codex 配置」页点第二次。以前不记账，事务永远停在「等待重载」。
+  await waitFor(() => expect(confirmReload).toHaveBeenCalledWith('op_1', true));
   expect(await screen.findByText('配置已提交，Codex 已重启；它回来后看看模型菜单。')).toBeInTheDocument();
+});
+
+test('已应用但没等到回执时，条上说事实，并把回执交回用户', async () => {
+  // 自动补记不成立的场合（宿主没重启、平台查不到启动时间）不能让用户卡在「待应用」上：
+  // 那条会误导人再点一次「应用并重启」，而配置其实早就写好了。
+  const user = userEvent.setup();
+  const applied = { ...modelRow(), hostState: 'awaiting_reload' as const };
+  const confirmReload = vi.fn().mockResolvedValue({ operationId: 'op_9', open: false, events: [] });
+  const client = testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
+    listModels: vi.fn().mockResolvedValue([applied]), listCredentials: vi.fn().mockResolvedValue([]),
+    applySummary: vi.fn().mockResolvedValue({ operationId: 'op_9', instanceId: 'inst_test', catalogRevision: 'rev_1',
+      defaultModel: 'gs/m_1', aliasCount: 1, stage: 'awaiting_reload', appliedAt: '2026-09-20T00:00:00Z' }),
+    confirmReload });
+  render(<App client={client} />);
+  await screen.findByText('测试供应商');
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+
+  const bar = await screen.findByRole('region', { name: '待应用' });
+  expect(within(bar).getByText('已应用，等 Codex 确认加载')).toBeInTheDocument();
+  expect(within(bar).queryByRole('button', { name: '应用并重启 Codex' })).toBeNull();
+
+  await user.click(within(bar).getByRole('button', { name: 'Codex 已经重启了' }));
+  await waitFor(() => expect(confirmReload).toHaveBeenCalledWith('op_9', true));
+});
+
+test('启动时对账：宿主已经重启过就自动补记，不必等用户去点', async () => {
+  const reconcileReload = vi.fn().mockResolvedValue({ confirmedOperationIds: ['op_9'] });
+  const listModels = vi.fn().mockResolvedValue([{ ...modelRow(), hostState: 'awaiting_reload' as const }]);
+  const client = testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
+    listModels, listCredentials: vi.fn().mockResolvedValue([]), reconcileReload });
+  render(<App client={client} />);
+
+  await waitFor(() => expect(reconcileReload).toHaveBeenCalled());
+  // 有事务被补记就重读数据：模型状态才会从「等待重载」翻过去。
+  await waitFor(() => expect(listModels.mock.calls.length).toBeGreaterThan(1));
 });
 
 test('待应用条的「查看差异」交给宿主切到 Codex 配置页', async () => {

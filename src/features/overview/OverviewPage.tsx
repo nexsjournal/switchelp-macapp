@@ -3,6 +3,7 @@ import { Activity, ArrowRight, Boxes, CircleHelp, KeyRound, Plus, Server, Settin
 import type { Credential, Model, Provider } from '@/contracts/types';
 import type { AppliedSummary, GatewayReport } from '@/desktop/client';
 import { EmptyState } from '@/components/EmptyState';
+import { hostStateKeys } from '@/features/models/policy';
 import styles from './OverviewPage.module.css';
 
 import { t } from '@/i18n';
@@ -38,13 +39,15 @@ function codexState(summary: AppliedSummary | null, gateway: GatewayReport | nul
   return { text: t('codex.awaitingReload'), tone: 'warn' };
 }
 
-export function OverviewPage({ providers, models, credentialsByProvider, gateway, summary, pendingCount, onNavigate, onAddProvider }: {
+export function OverviewPage({ providers, models, credentialsByProvider, gateway, summary, pendingCount, awaitingHostOnly, onNavigate, onAddProvider }: {
   providers: Provider[];
   models: Model[];
   credentialsByProvider: Record<string, Credential[]>;
   gateway: GatewayReport | null;
   summary: AppliedSummary | null;
   pendingCount: number;
+  /** 待办只剩「等宿主回执」：已提交但 Codex 还没确认加载，此时不该再说「待应用」。 */
+  awaitingHostOnly: boolean;
   onNavigate: (page: 'providers' | 'codexConfig' | 'diagnostics' | 'settings') => void;
   onAddProvider: () => void;
 }) {
@@ -156,22 +159,22 @@ export function OverviewPage({ providers, models, credentialsByProvider, gateway
     </section>
 
     <section className={styles.card}>
-      <div className={styles.cardHeader}><h2>{t('overview.pendingModels')}<span className="badge">{pendingCount}</span></h2>
+      <div className={styles.cardHeader}><h2>{awaitingHostOnly ? t('overview.awaitingHostModels') : t('overview.pendingModels')}<span className="badge">{pendingCount}</span></h2>
         <button className="text-button" onClick={() => onNavigate('providers')}>{t('overview.viewAll')}<ArrowRight size={14} /></button></div>
       {pendingCount === 0
         ? <p className={styles.muted}><Boxes size={14} />{t('overview.nothingPending')}</p>
         : <ul className={styles.pending}>{models.filter(model => model.inCatalog && model.hostState !== 'loaded').slice(0, 5).map(model => <li key={model.id}>
           <span className="text-mono text-muted">{model.upstreamId}</span>
           <span className={styles.pendingName}>{model.displayName}</span>
-          <span className="badge warning">{t('host.pendingApply')}</span>
+          <span className="badge warning">{t(hostStateKeys[model.hostState])}</span>
         </li>)}</ul>}
     </section>
 
-    {pendingCount > 0 && <div className={styles.applyBar} role="region" aria-label={t('overview.pendingChanges')}>
-      <span><KeyRound size={16} />{t('overview.pendingBar', { count: pendingCount })}</span>
+    {pendingCount > 0 && <div className={styles.applyBar} role="region" aria-label={awaitingHostOnly ? t('overview.awaitingHostChanges') : t('overview.pendingChanges')}>
+      <span><KeyRound size={16} />{awaitingHostOnly ? t('overview.awaitingHostBar', { count: pendingCount }) : t('overview.pendingBar', { count: pendingCount })}</span>
       <div className="actions">
         <button onClick={() => onNavigate('providers')}><CircleHelp size={14} />{t('overview.whereToChange')}</button>
-        <button className="primary" onClick={() => onNavigate('codexConfig')}>{t('overview.viewDiffAndApply')}</button>
+        <button className="primary" onClick={() => onNavigate('codexConfig')}>{awaitingHostOnly ? t('overview.confirmHostLoading') : t('overview.viewDiffAndApply')}</button>
       </div>
     </div>}
   </div>;

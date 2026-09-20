@@ -17,7 +17,7 @@ const gateway = { running: true, paused: false, port: 18765, served: 3, revision
 function renderOverview(overrides: Partial<Parameters<typeof OverviewPage>[0]> = {}) {
   return render(<OverviewPage
     providers={[provider]} models={[model]} credentialsByProvider={{ p_test: [] }}
-    gateway={gateway} summary={null} pendingCount={1}
+    gateway={gateway} summary={null} pendingCount={1} awaitingHostOnly={false}
     onNavigate={() => {}} onAddProvider={() => {}} {...overrides} />);
 }
 

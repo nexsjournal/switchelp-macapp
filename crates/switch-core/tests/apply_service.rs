@@ -1194,3 +1194,74 @@ fn chat_completions_models_are_flagged_as_experimental_before_applying() {
         "警告要说清哪一部分没验证过：{warning}"
     );
 }
+
+/// 宿主重启的事实要被记成回执。
+///
+/// 回归：以前只有配置页那两个按钮会写回执，而「应用并重启 Codex」自己重启了宿主却不记账，
+/// 于是配置早已生效、Codex 也真的重新读过了，界面却永远显示「等待重载」、待应用条一直在。
+/// 真机上就是这么踩到的：事务停在 awaiting_reload，模型停在 awaiting_reload。
+#[test]
+fn a_host_started_after_the_publication_is_recorded_as_a_receipt() {
+    let harness = Harness::with_ready_model(None);
+    let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+    let operation_id = harness
+        .service
+        .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-receipt")
+        .unwrap();
+    assert_eq!(harness.stage(&operation_id), ApplyStage::AwaitingReload);
+
+    // 测试时钟的发布时间是 2026-09-18；1_900_000_000 是 2030 年，晚于它。
+    let confirmed = harness
+        .service
+        .reconcile_host_reload(Some(1_900_000_000))
+        .unwrap();
+    assert_eq!(confirmed, vec![operation_id.clone()], "应记下这次回执");
+    assert_eq!(harness.stage(&operation_id), ApplyStage::Verified);
+    assert_eq!(harness.host_states(), vec![HostState::Loaded]);
+
+    // 幂等：再跑一次不会重复确认，也不会报错。
+    assert!(harness
+        .service
+        .reconcile_host_reload(Some(1_900_000_000))
+        .unwrap()
+        .is_empty());
+}
+
+/// 比发布更早起来的宿主不是回执——那份配置它还没读过。
+#[test]
+fn a_host_running_since_before_the_publication_is_not_a_receipt() {
+    let harness = Harness::with_ready_model(None);
+    let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+    let operation_id = harness
+        .service
+        .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-stale-host")
+        .unwrap();
+
+    // 1_600_000_000 是 2020 年：宿主一直活着，配置改了也不会被它读到。
+    assert!(harness
+        .service
+        .reconcile_host_reload(Some(1_600_000_000))
+        .unwrap()
+        .is_empty());
+    assert_eq!(harness.stage(&operation_id), ApplyStage::AwaitingReload);
+    assert_eq!(harness.host_states(), vec![HostState::AwaitingReload]);
+}
+
+/// 查不到宿主启动时间时不许猜：停在原处等人工确认，不用「大概重启过了」顶替回执。
+#[test]
+fn an_unknown_host_start_time_never_confirms_by_itself() {
+    let harness = Harness::with_ready_model(None);
+    let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+    let operation_id = harness
+        .service
+        .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-no-host")
+        .unwrap();
+
+    assert!(harness
+        .service
+        .reconcile_host_reload(None)
+        .unwrap()
+        .is_empty());
+    assert_eq!(harness.stage(&operation_id), ApplyStage::AwaitingReload);
+    assert_eq!(harness.host_states(), vec![HostState::AwaitingReload]);
+}

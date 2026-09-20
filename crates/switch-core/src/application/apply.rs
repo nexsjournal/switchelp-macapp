@@ -522,6 +522,54 @@ impl ApplyService {
         Ok(state)
     }
 
+    /// 宿主回执的自动补记：宿主进程的启动时间**晚于**本次发布时，认为它已经读过这份配置。
+    ///
+    /// 为什么可以这样判定：Codex 只在启动时读配置（这正是每次应用都要重启它的原因），
+    /// 所以「一个在发布之后才起来的宿主进程」本身就是回执——不需要用户再点一次「已重载」。
+    /// 以前缺这一步，于是「应用并重启 Codex」成功、配置也真的生效了，事务却永远停在
+    /// `AwaitingReload`，界面一直显示「等待重载」，待应用条也一直在。
+    ///
+    /// 拿不到启动时间（宿主没运行、平台查不到）时**什么都不做**，停在原处等人工确认；
+    /// 不用「大概重启过了」去顶替回执。返回被补记的 operation id。
+    pub fn reconcile_host_reload(
+        &self,
+        host_started_at_unix: Option<i64>,
+    ) -> Result<Vec<String>, CoreError> {
+        let Some(host_started) = host_started_at_unix else {
+            return Ok(Vec::new());
+        };
+        let mut confirmed = Vec::new();
+        for mut state in self.operations.unfinished()? {
+            if state.operation.stage != ApplyStage::AwaitingReload {
+                continue;
+            }
+            let published_at = match &state.publication {
+                Some(publication) => publication.published_at.clone(),
+                None => continue,
+            };
+            let Ok(published) = time::OffsetDateTime::parse(
+                &published_at,
+                &time::format_description::well_known::Rfc3339,
+            ) else {
+                continue;
+            };
+            // 严格晚于发布：同一秒里分不清「发布前启动」还是「发布后启动」，
+            // 这种边界留给人工确认，宁可不动也不猜。
+            if host_started <= published.unix_timestamp() {
+                continue;
+            }
+            state
+                .operation
+                .transition(ApplyStage::Verified, self.clock.now())?;
+            self.operations.save(state.clone())?;
+            confirmed.push(state.operation.id.as_str().to_owned());
+        }
+        if !confirmed.is_empty() {
+            self.mark_models_loaded(&self.repository.list_models()?)?;
+        }
+        Ok(confirmed)
+    }
+
     /// 还原计划：只撤销本工具写入且未被外部修改的字段。
     pub fn plan_restore(&self, instance: &CodexInstance) -> Result<ApplyPlan, CoreError> {
         let ownership = self.operations.ownership(&instance.id)?;

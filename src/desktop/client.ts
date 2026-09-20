@@ -216,6 +216,13 @@ export interface DesktopClient {
   /** 只有用户确认宿主已重新加载，事务才从“等待重载”前进；不得由前端自行宣称已加载。 */
   confirmReload(operationId: string, loaded: boolean): Promise<ApplyStatus>;
   /**
+   * 自动补记宿主回执：宿主进程在这次发布之后重新启动过，就认为它读过了新配置。
+   *
+   * 应用完成、窗口重新获得焦点、启动时各调一次。返回被补记的 operationId；空数组表示
+   * 没有可确认的事务（宿主没重启过，或平台查不到启动时间），不是失败。
+   */
+  reconcileReload(): Promise<{ confirmedOperationIds: string[] }>;
+  /**
    * 重启探测到的宿主实例（Codex / ChatGPT 桌面端）。
    *
    * Codex 只在启动时读 `config.toml`，写完配置必须重启它，模型才会出现在它的菜单里。
