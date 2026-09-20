@@ -10,6 +10,7 @@ import { OverviewPage } from '@/features/overview/OverviewPage';
 import { ModelsPage } from '@/features/models/ModelsPage';
 import { Dialog } from '@/components/Dialog';
 import { ToastHost, showToast } from '@/components/Toast';
+import { PendingApplyBar } from './PendingApplyBar';
 import { EmptyState } from '@/components/EmptyState';
 import { AppLogo } from '@/components/AppLogo';
 import { CodexConfigPage } from '@/features/codex/CodexConfigPage';
@@ -278,6 +279,11 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
           {page === 'diagnostics' && <ConnectionPage client={client} providers={providers} />}
           {page === 'logs' && <LogsPage client={client} />}
           {page === 'settings' && <SettingsPage client={client} gateway={gateway} onNavigate={navigate} />}
+          {/* 待应用条常驻在页面内容之后：配好供应商与模型之后，生效只差「应用 + 重启」这一步，
+              入口不能只在 Codex 配置页里（真机上用户在自己配的页面上找不到任何能生效的按钮）。
+              Codex 配置页自己就有完整的操作行，那里不重复出现。 */}
+          {page !== 'codexConfig' && !showOnboarding && !modelEditor && <PendingApplyBar client={client} providers={providers}
+            models={models} onApplied={refresh} onOpenDiff={() => navigate('codexConfig')} />}
         </>}
       </>}
       </main>
