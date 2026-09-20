@@ -1,4 +1,4 @@
-.page { display: grid; gap: 20px; }
+.page { display: grid; gap: 24px; }
 /*
  * 嵌进供应商详情时的工具栏：那里的容器窄得多（右边一栏要放地址、Key、模型、连接检查）。
  * 搜索独占一行，筛选换到下一行，避免和主按钮挤在同一行里互相压。
@@ -20,17 +20,22 @@
  * 标签与下拉同一行。「目录」竖排时自己占一行，左边的漏斗图标被留在一段没有内容的高度上，
  * 看上去谁都不属于；横排之后图标、标签、下拉落在同一条基线上。
  */
-.filters label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.filters label { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); white-space: nowrap; }
 
 /* 嵌进别的卡片时用：不要外框，只要不塌陷。 */
 .plain { min-width: 0; }
 .card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
 /* 表头与行里的点击区用负外边距撑到 32px：不给滚动区留白的话，那几像素会被裁掉，
    点击区就少了边（审计会把它们报成 clipped）。 */
-.tableWrap { overflow-x: auto; padding: 7px; margin: -7px; }
-.tableWrap table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
-.tableWrap th { color: var(--text-muted); font-size: var(--font-size-caption); font-weight: 500; padding: 0 12px 14px; white-space: nowrap; }
-.tableWrap td { border-top: 1px solid var(--border-subtle); padding: 14px 12px; vertical-align: middle; }
+/*
+ * `position: relative`：滚动容器要给自己内部的绝对定位后代建立包含块。
+ * 少了它，表格里那个 `.visually-hidden`（绝对定位、1px 宽）会以更外层的祖先为基准落位，
+ * 于是被横向滚出可视区之后仍然把整页 scrollWidth 撑大几像素——480px 宽的窗口里实测溢出 4px。
+ */
+.tableWrap { overflow-x: auto; padding: 7px; margin: -7px; position: relative; }
+.tableWrap table { width: 100%; border-collapse: collapse; text-align: left; font-size: var(--font-size-label); line-height: var(--line-height-label); }
+.tableWrap th { color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); font-weight: 500; padding: 0 12px 16px; white-space: nowrap; }
+.tableWrap td { border-top: 1px solid var(--border-subtle); padding: 16px 12px; vertical-align: middle; }
 .tableWrap td strong { display: block; font-weight: 500; margin-bottom: 2px; }
 /*
  * 单元格里的第二行（上游 ID、最大输出）。不能写 .text-muted 工具类：CSS Module 会把
@@ -39,7 +44,7 @@
  * 会被这条规则改成 display: block（方框不再居中，表头与行的勾选框差 14px）
  * 并套上 11px 字号。给第二行一个自己的类，规则就只命中它该命中的东西。
  */
-.tableWrap .line { display: block; font-size: var(--font-size-caption); color: var(--text-muted); }
+.tableWrap .line { display: block; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 /* 操作列按内容收窄：自动布局会把剩余宽度摊给所有列，操作列会宽过数据列。 */
 .tableWrap th:last-child, .tableWrap td:last-child { width: 1%; white-space: nowrap; }
 .checkCell { width: 1%; }
@@ -51,11 +56,11 @@
 .checkHit { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin: -7px; }
 .selectedRow { background: var(--accent-subtle); }
 /* 表头排序按钮也是控件：32 高，负边距吃回，表头密度不变。 */
-.sortButton { height: var(--control-height-compact); margin: -5px 0; padding: 0; font-size: var(--font-size-caption); color: var(--text-muted); background: transparent; border-color: transparent; }
+.sortButton { height: var(--control-height-compact); margin: -5px 0; padding: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); background: transparent; border-color: transparent; }
 .sortButton:hover:not(:disabled) { background: transparent; color: var(--text-primary); }
-.rowActions { display: flex; align-items: center; gap: 6px; }
-.rowActions > button { height: var(--control-height-compact); padding: 0 10px; font-size: 12px; }
-.count { margin: 14px 0 0; color: var(--text-muted); font-size: var(--font-size-caption); }
+.rowActions { display: flex; align-items: center; gap: 8px; }
+.rowActions > button { height: var(--control-height-compact); padding: 0 8px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+.count { margin: 16px 0 0; color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 
 /*
  * 批量操作条：夹在筛选行与表格之间的**页面内**一条，不是浮层。
@@ -63,17 +68,17 @@
  * 看起来像一个凭空冒出来的弹窗压在表头上（真机上就是这么被读错的）。
  */
 .bulkBar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 0 0 16px; padding: 12px 16px;
-  border: 1px solid var(--accent-border); border-radius: 8px; background: var(--bg-elevated); font-size: var(--font-size-caption); }
+  border: 1px solid var(--accent-border); border-radius: 8px; background: var(--bg-elevated); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 .bulkBar strong { font-variant-numeric: tabular-nums; }
 .bulkActions { margin-left: auto; }
-.notice { display: flex; gap: 10px; align-items: center; border: 1px solid var(--border-subtle); background: var(--bg-elevated); border-radius: 8px; padding: 12px 16px; font-size: 13px; }
+.notice { display: flex; gap: 8px; align-items: center; border: 1px solid var(--border-subtle); background: var(--bg-elevated); border-radius: 8px; padding: 12px 16px; font-size: var(--font-size-label); line-height: var(--line-height-label); }
 
-.empty { display: flex; flex-direction: column; align-items: center; padding: 40px 20px; text-align: center; color: var(--text-muted); border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); }
-.empty h3 { font-size: 14px; font-weight: 500; color: var(--text-primary); margin: 16px 0 4px; }
-.empty p { font-size: 12px; margin: 4px 0 16px; max-width: 380px; }
+.empty { display: flex; flex-direction: column; align-items: center; padding: 48px 24px; text-align: center; color: var(--text-muted); border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); }
+.empty h3 { font-size: var(--font-size-body); line-height: var(--line-height-body); font-weight: 500; color: var(--text-primary); margin: 16px 0 4px; }
+.empty p { font-size: var(--font-size-caption); line-height: var(--line-height-caption); margin: 4px 0 16px; max-width: 380px; }
 
 .stages { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.stages li { display: grid; grid-template-columns: 88px 48px minmax(0, 1fr) 72px; gap: 10px; align-items: baseline; padding: 10px 12px; border-radius: 8px; background: var(--bg-input); font-size: 12px; }
+.stages li { display: grid; grid-template-columns: 88px 48px minmax(0, 1fr) 72px; gap: 8px; align-items: baseline; padding: 8px 12px; border-radius: 8px; background: var(--bg-input); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 .stages li strong { font-weight: 500; }
 .stages li.passed > span:first-of-type { color: var(--status-success); }
 .stages li.failed > span:first-of-type { color: var(--status-danger); }

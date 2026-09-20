@@ -1,50 +1,50 @@
 .page { display: grid; gap: 24px; }
 .card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
-.card h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: var(--line-height-card-title); }
-.card h3 { margin: 0; font-size: 14px; font-weight: 600; line-height: var(--line-height-control); }
-.header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
-.header > div { display: flex; align-items: center; gap: 10px; }
+.card h2 { margin: 0; font-size: var(--font-size-card-title); font-weight: 600; line-height: var(--line-height-card-title); }
+.card h3 { margin: 0; font-size: var(--font-size-body); font-weight: 600; line-height: var(--line-height-body); }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 24px; }
+.header > div { display: flex; align-items: center; gap: 8px; }
 /* 标题块贴行顶：同一行里的按钮更高时，居中会把标题带下去（修正量见 tokens.css）。 */
 .card > .header:first-child { margin-top: calc(-1 * var(--card-title-optical-trim)); }
 .card > .header:first-child > div:first-child { align-self: flex-start; }
-.subtle { color: var(--text-muted); font-size: 12px; margin: 0; }
-.empty { display: flex; flex-direction: column; align-items: center; padding: 36px 20px; text-align: center; color: var(--text-muted); }
-.empty h3 { font-size: 14px; font-weight: 500; color: var(--text-primary); margin: 16px 0 4px; }
-.empty p { font-size: 12px; margin: 4px 0 16px; max-width: 360px; }
+.subtle { color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); margin: 0; }
+.empty { display: flex; flex-direction: column; align-items: center; padding: 32px 24px; text-align: center; color: var(--text-muted); }
+.empty h3 { font-size: var(--font-size-body); line-height: var(--line-height-body); font-weight: 500; color: var(--text-primary); margin: 16px 0 4px; }
+.empty p { font-size: var(--font-size-caption); line-height: var(--line-height-caption); margin: 4px 0 16px; max-width: 360px; }
 .row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
-.field { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--text-secondary); min-width: 220px; }
-.details { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; font-size: 13px; margin: 0; }
+.field { display: flex; flex-direction: column; gap: 8px; font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); min-width: 220px; }
+.details { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; font-size: var(--font-size-label); line-height: var(--line-height-label); margin: 0; }
 .details dt { color: var(--text-muted); }
 .details dd { margin: 0; }
-.preview { margin: 20px 0 0; padding: 16px; background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: 8px; max-height: 260px; overflow: auto; font-size: 12px; line-height: 20px; white-space: pre-wrap; }
+.preview { margin: 24px 0 0; padding: 16px; background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: 8px; max-height: 260px; overflow: auto; font-size: var(--font-size-caption); line-height: var(--line-height-caption); white-space: pre-wrap; }
 .group { margin-top: 24px; }
 .group > h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
 /* 固定列宽：路径类值很长，自动布局会把“原因”挤到折行。 */
-.changes { width: 100%; border-collapse: collapse; table-layout: fixed; text-align: left; font-size: 13px; }
-.changes th { color: var(--text-muted); font-size: var(--font-size-caption); font-weight: 500; padding: 0 12px 12px; white-space: nowrap; }
+.changes { width: 100%; border-collapse: collapse; table-layout: fixed; text-align: left; font-size: var(--font-size-label); line-height: var(--line-height-label); }
+.changes th { color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); font-weight: 500; padding: 0 12px 12px; white-space: nowrap; }
 .changes th:nth-child(1) { width: 24%; }
 .changes th:nth-child(2) { width: 26%; }
 .changes th:nth-child(3) { width: 30%; }
 .changes th:nth-child(4) { width: 20%; }
 .changes td { border-top: 1px solid var(--border-subtle); padding: 12px; vertical-align: top; }
-.changes code { font-size: 12px; overflow-wrap: anywhere; }
-.warnings { margin: 20px 0 0; padding: 14px 16px; border-radius: 8px; background: var(--status-warning-bg); color: var(--status-warning); font-size: 12px; line-height: 20px; }
-.warnings ul { margin: 8px 0 0; padding-left: 18px; }
-.note { display: flex; align-items: flex-start; gap: 10px; color: var(--text-muted); padding: 14px; border-radius: 8px; background: var(--bg-input); font-size: 12px; line-height: 20px; margin-top: 20px; }
+.changes code { font-size: var(--font-size-caption); line-height: var(--line-height-caption); overflow-wrap: anywhere; }
+.warnings { margin: 24px 0 0; padding: 16px 16px; border-radius: 8px; background: var(--status-warning-bg); color: var(--status-warning); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+.warnings ul { margin: 8px 0 0; padding-left: 16px; }
+.note { display: flex; align-items: flex-start; gap: 8px; color: var(--text-muted); padding: 16px; border-radius: 8px; background: var(--bg-input); font-size: var(--font-size-caption); line-height: var(--line-height-caption); margin-top: 24px; }
 .note > svg { flex-shrink: 0; margin-top: 2px; }
 .note p { margin: 0; }
-.awaiting { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-top: 20px; padding: 18px 20px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-elevated); }
-.awaiting strong { display: block; font-size: 14px; margin-bottom: 4px; }
-.awaiting span { color: var(--text-secondary); font-size: 12px; }
-.stages { display: flex; gap: 8px; flex-wrap: wrap; list-style: none; padding: 0; margin: 20px 0 0; }
-.stages li { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-caption); color: var(--text-muted); border: 1px solid var(--border-subtle); border-radius: var(--radius-pill); padding: 3px 10px; }
+.awaiting { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin-top: 24px; padding: 16px 24px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-elevated); }
+.awaiting strong { display: block; font-size: var(--font-size-body); line-height: var(--line-height-body); margin-bottom: 4px; }
+.awaiting span { color: var(--text-secondary); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+.stages { display: flex; gap: 8px; flex-wrap: wrap; list-style: none; padding: 0; margin: 24px 0 0; }
+.stages li { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); border: 1px solid var(--border-subtle); border-radius: var(--radius-pill); padding: 4px 8px; }
 .stages li.done { color: var(--text-primary); border-color: var(--border-control); }
 .stages li.current { color: var(--status-info); background: var(--status-info-bg); border-color: transparent; }
-.actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* 三项版本状态：已保存 / 已发布 / 已观测。第三项没有数据来源时必须显示未观测。 */
-.versions { list-style: none; margin: 20px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-.versions li { padding: 12px 14px; border-radius: 8px; background: var(--bg-input); border: 1px solid var(--border-subtle); }
-.versions span { display: block; font-size: var(--font-size-caption); color: var(--text-muted); }
-.versions strong { display: block; font-size: 13px; font-weight: 500; margin-top: 4px; overflow-wrap: anywhere; }
-.versions small { display: block; font-size: var(--font-size-caption); color: var(--text-muted); margin-top: 4px; line-height: 16px; }
+.versions { list-style: none; margin: 24px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.versions li { padding: 12px 16px; border-radius: 8px; background: var(--bg-input); border: 1px solid var(--border-subtle); }
+.versions span { display: block; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.versions strong { display: block; font-size: var(--font-size-label); line-height: var(--line-height-label); font-weight: 500; margin-top: 4px; overflow-wrap: anywhere; }
+.versions small { display: block; font-size: var(--font-size-caption); color: var(--text-muted); margin-top: 4px; line-height: var(--line-height-caption); }

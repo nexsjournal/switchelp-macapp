@@ -1,47 +1,47 @@
 .page { display: grid; gap: 24px; }
 .card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
 .header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
-.header > div { display: flex; align-items: center; gap: 10px; }
-.header h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: var(--line-height-card-title); }
+.header > div { display: flex; align-items: center; gap: 8px; }
+.header h2 { margin: 0; font-size: var(--font-size-card-title); font-weight: 600; line-height: var(--line-height-card-title); }
 /* 标题块贴行顶：同一行里的按钮更高时，居中会把标题带下去（修正量见 tokens.css）。 */
 .card > .header:first-child { margin-top: calc(-1 * var(--card-title-optical-trim)); }
 .card > .header:first-child > div:first-child { align-self: flex-start; }
 .header > div > svg { color: var(--text-muted); }
-.actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-.filters { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-.filters label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.filters { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.filters label { display: flex; flex-direction: column; gap: 8px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
 .grow { flex: 1; min-width: 240px; }
-.policy { margin: 0 0 16px; padding: 12px 14px; border-radius: 8px; background: var(--bg-input); color: var(--text-muted); font-size: 12px; line-height: 20px; }
-.empty { color: var(--text-muted); font-size: 13px; margin: 0; }
-.notice { border: 1px solid var(--border-subtle); background: var(--bg-elevated); border-radius: 8px; padding: 12px 16px; font-size: 13px; }
+.policy { margin: 0 0 16px; padding: 12px 16px; border-radius: 8px; background: var(--bg-input); color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+.empty { color: var(--text-muted); font-size: var(--font-size-label); line-height: var(--line-height-label); margin: 0; }
+.notice { border: 1px solid var(--border-subtle); background: var(--bg-elevated); border-radius: 8px; padding: 12px 16px; font-size: var(--font-size-label); line-height: var(--line-height-label); }
 
 .events { list-style: none; margin: 0; padding: 0; max-height: 520px; overflow-y: auto; }
 .events li { border-top: 1px solid var(--border-subtle); }
-.eventRow { width: 100%; height: auto; padding: 9px 4px; background: transparent; border-color: transparent; border-radius: 6px;
-  display: grid; grid-template-columns: 16px 170px 74px minmax(0, 1.1fr) minmax(0, 1fr) 66px; gap: 10px; align-items: baseline; text-align: left; font-size: 12px; }
+.eventRow { width: 100%; height: auto; padding: 8px 4px; background: transparent; border-color: transparent; border-radius: 6px;
+  display: grid; grid-template-columns: 16px 170px 74px minmax(0, 1.1fr) minmax(0, 1fr) 66px; gap: 8px; align-items: baseline; text-align: left; font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 .eventRow:hover { background: var(--bg-hover); }
 .eventRow > svg { transform: translateY(2px); color: var(--text-muted); }
 svg.warning { color: var(--status-warning); }
 svg.error { color: var(--status-danger); }
-.category { color: var(--text-secondary); font-size: var(--font-size-caption); }
-.pager { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 16px; color: var(--text-muted); font-size: 12px; }
-.pager button { height: var(--control-height-compact); font-size: 12px; }
+.category { color: var(--text-secondary); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+.pager { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 16px; color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+.pager button { height: var(--control-height-compact); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 
 .scopes { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
 .preview { padding: 16px; border-radius: 8px; background: var(--bg-input); }
-.preview > p { margin: 0 0 10px; font-size: 12px; }
+.preview > p { margin: 0 0 8px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 .preview ul { list-style: none; margin: 0; padding: 0; }
-.preview li { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.6fr); gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border-subtle); font-size: 12px; }
+.preview li { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.6fr); gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border-subtle); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 .preview li.included > span:first-child { color: var(--text-primary); }
 .preview li > span:first-child { color: var(--text-secondary); }
-.saved { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding: 12px 14px; border-radius: 8px; background: var(--status-success-bg); color: var(--status-success); font-size: 12px; }
+.saved { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding: 12px 16px; border-radius: 8px; background: var(--status-success-bg); color: var(--status-success); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 
-.detail { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px 12px; font-size: 12px; margin: 0; }
+.detail { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px 12px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); margin: 0; }
 .detail dt { color: var(--text-muted); }
 .detail dd { margin: 0; }
 .kv { display: contents; }
-.related { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.related li { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 10px; font-size: 12px; }
+.related { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.related li { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 8px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 .spin { animation: rotate 1s linear infinite; }
 @keyframes rotate { to { transform: rotate(360deg); } }

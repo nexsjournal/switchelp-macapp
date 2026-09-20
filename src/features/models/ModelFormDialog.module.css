@@ -6,19 +6,19 @@
 
 /* 智能配置：标签与开关同一行，开关贴右。 */
 .smartRow { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.smartNote { font-size: 12px; line-height: 18px; color: var(--text-muted); margin: -8px 0 0; }
+.smartNote { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); margin: -8px 0 0; }
 
 /* 折叠的高级区：summary 自绘箭头，展开时转向下方。 */
 .advanced { border-top: 1px solid var(--border-subtle); margin-top: 4px; padding-top: 16px; }
-.advancedSummary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; font-size: var(--font-size-control); font-weight: var(--font-weight-semibold); color: var(--text-primary); }
+.advancedSummary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; font-size: var(--font-size-control); line-height: var(--line-height-control); font-weight: var(--font-weight-semibold); color: var(--text-primary); }
 .advancedSummary::-webkit-details-marker { display: none; }
 .advancedSummary:hover { color: var(--text-secondary); }
 .chevron { color: var(--text-muted); transition: transform var(--motion-hover); }
 .advanced[open] .chevron { transform: rotate(90deg); }
 /* 展开后的内容与高级标题之间收紧一格，读起来仍是一个整体。 */
 .advancedBody { display: grid; gap: 16px; padding-top: 16px; }
-.groupTitle { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: var(--font-weight-semibold); color: var(--text-secondary); }
+.groupTitle { margin: 0; display: flex; align-items: center; gap: 8px; font-size: var(--font-size-label); line-height: var(--line-height-label); font-weight: var(--font-weight-semibold); color: var(--text-secondary); }
 
 /* 推理参数映射：只读。它显示的是网关里已版本化的适配器，不是可以随手改的配置。 */
-.mapping { margin: 0; padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
-  background: var(--bg-input); color: var(--text-secondary); font-size: 12px; line-height: 18px; }
+.mapping { margin: 0; padding: 12px 16px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  background: var(--bg-input); color: var(--text-secondary); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }

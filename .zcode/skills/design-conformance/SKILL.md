@@ -32,6 +32,13 @@ description: 用实测数据（而不是凭印象）核对 Switchelp 的界面�
      会看起来没生效。可靠做法是直接写 `document.documentElement.dataset.theme`——样式
      完全由这个属性驱动，两种主题都能量。
 3. 浏览器操作用 `browser-use:control-browser` 技能（`mcp__node_repl__js`）。
+4. **切主题之后必须等过渡走完再测量**。`--motion-hover` 是 100ms、抽屉 180ms，背景色是
+   过渡属性：在过渡中间读 `getComputedStyle` 会拿到插值中的颜色，于是同一个页面的对比度
+   结果会在「干净」和「报几处」之间来回跳（实测：设完 `data-theme` 立刻量得到 1~3 处，
+   等 700ms 再量全部为 0）。同一次测量里还会出现「文字色是浅色主题、底色还是深色主题」
+   这种自相矛盾的组合——看到这种组合就说明量早了，不要当成真问题去改代码。
+   可靠做法：写 `data-theme` → 等 700ms → 量；并且顺手确认
+   `getComputedStyle(document.body).backgroundColor` 已经是目标主题的底色。
 
 夹具的坑，别当成产品 bug：
 - 夹具的 `saveProvider` / `selectCredential` 是空实现，新建后供应商列表不会真的变化。

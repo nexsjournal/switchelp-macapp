@@ -14,8 +14,8 @@
  * （那个选择器的权重比单个类高，而且它设的 `flex-direction` 我这边没有对应的声明，
  * 所以不是「谁赢」的问题，是那条属性根本没人覆盖）。
  */
-.list .row { display: flex; flex-direction: row; align-items: center; gap: 12px; min-height: 44px; padding: 8px 14px; cursor: pointer; font-size: var(--font-size-control); color: var(--text-primary); }
+.list .row { display: flex; flex-direction: row; align-items: center; gap: 12px; min-height: 44px; padding: 8px 16px; cursor: pointer; font-size: var(--font-size-control); line-height: var(--line-height-control); color: var(--text-primary); }
 .list .row:hover { background: var(--bg-hover); }
 .list .row input { flex-shrink: 0; }
-.list .row .id { font-family: var(--font-mono); font-size: var(--font-size-code); flex-shrink: 0; }
-.list .row > span:nth-child(3) { flex: 1; min-width: 0; font-size: 12px; }
+.list .row .id { font-family: var(--font-mono); font-size: var(--font-size-code); line-height: var(--line-height-code); flex-shrink: 0; }
+.list .row > span:nth-child(3) { flex: 1; min-width: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); }

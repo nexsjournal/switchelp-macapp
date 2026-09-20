@@ -1,8 +1,8 @@
 .empty { display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: 44px 24px; text-align: center; }
+  padding: 48px 24px; text-align: center; }
 .icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 11px;
   background: var(--bg-selected); border: 1px solid var(--border-subtle); color: var(--text-secondary); }
 .warning .icon { background: var(--status-warning-bg); border-color: transparent; color: var(--status-warning); }
-.title { margin: 14px 0 0; font-size: 14px; font-weight: 500; color: var(--text-primary); }
-.description { margin: 6px 0 0; max-width: 420px; font-size: 12px; line-height: 19px; color: var(--text-muted); }
-.action { margin-top: 18px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.title { margin: 16px 0 0; font-size: var(--font-size-body); line-height: var(--line-height-body); font-weight: 500; color: var(--text-primary); }
+.description { margin: 8px 0 0; max-width: 420px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.action { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
