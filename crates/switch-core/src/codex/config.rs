@@ -451,6 +451,69 @@ impl FieldOwnership {
     }
 }
 
+/// 这个受管字段的当前值是否**明确是本工具写进去的**。
+///
+/// 为什么需要它：基线记录的是「接管之前用户原本的值」，但旧版本装过、或另一个工具把我们写的
+/// 行圈进它自己的托管块时，配置里已经带着我们的值。此时若把「我们自己的值」记成基线，
+/// 还原就会忠实地把它再写回去——用户以为点了还原，Codex 却仍然走本工具（真机上正是如此）。
+///
+/// 只认**有本工具特征**的值，泛化的数值（上下文窗口、思考档位）在这里一律返回 false：
+/// 它们单独看不出作者，交给 [`baseline_is_our_own_work`] 做整组判断。
+pub fn looks_like_our_value(key_path: &str, value: Option<&str>) -> bool {
+    let Some(value) = value else { return false };
+    let trimmed = value.trim();
+    match key_path {
+        "model_provider" => trimmed == PROVIDER_ID,
+        // 本工具的目录别名一律以 `gs/` 开头（见 domain::ids::CatalogAlias）。
+        "model" => trimmed.starts_with("gs/"),
+        // 目录文件只可能落在本工具的数据目录里：`<appData>/catalogs/<rev>/models.json`。
+        // 判据用「catalogs 子目录 + models.json」而不是绝对路径，跨平台成立。
+        "model_catalog_json" => {
+            let normalized = trimmed.replace('\\', "/");
+            normalized.contains("/catalogs/") && normalized.ends_with("models.json")
+        }
+        // 这个子表要按**内容**认：键名是本工具的固定 ID，但用户也可能自己在同名表里放了别的
+        // 东西。本工具写的表带自己的显示名，base_url 是本机网关的实例路由
+        // （`…/i/<instance>/c/<revision>/v1`）——两条认一条即可。
+        "model_providers.gptswitch" => {
+            value.contains(PROVIDER_NAME) || (value.contains("/i/") && value.contains("/c/"))
+        }
+        _ => false,
+    }
+}
+
+/// 记下来的基线本身就出自本工具吗？
+///
+/// 判据取两条最强的证据：基线里的 `model_provider` 是本工具的 ID，且基线里存在本工具的
+/// providers 子表——别人的配置不会碰这两样。成立就意味着「没有可还原的用户原值」，
+/// 还原应当**删除**这些字段（于是 Codex 回到原生登录与原生模型列表），而不是把它们写回基线。
+pub fn baseline_is_our_own_work(ownership: &[FieldOwnership]) -> bool {
+    let baseline_of = |key: &str| {
+        ownership
+            .iter()
+            .find(|record| record.key_path == key)
+            .and_then(|record| record.baseline_value.as_deref())
+    };
+    let provider_is_ours = baseline_of("model_provider")
+        // 本工具的 ID 或本工具的 providers 子表出现在基线里，就是最强的证据：
+        // 别人的配置不会碰这两样。
+        .map(|value| looks_like_our_value("model_provider", Some(value)))
+        .unwrap_or(false);
+    let table_is_ours = baseline_of("model_providers.gptswitch")
+        .map(|value| looks_like_our_value("model_providers.gptswitch", Some(value)))
+        .unwrap_or(false);
+    provider_is_ours || table_is_ours
+}
+
+/// 首次接管某个字段时要记的基线。
+///
+/// 正常情况下基线就是当前值（那是用户原本的配置）。但当前值已经带着本工具特征时，
+/// 说明这是**我们自己早先写下的**，正确的基线是「原本不存在」。
+fn initial_ownership(key_path: &str, current: Option<String>) -> FieldOwnership {
+    let baseline = current.filter(|value| !looks_like_our_value(key_path, Some(value)));
+    FieldOwnership::new(key_path, baseline)
+}
+
 /// 字段级差异。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -539,7 +602,7 @@ pub fn apply_managed(
                   updated: &mut Vec<FieldOwnership>| {
         let baseline = match existing.get(key) {
             Some(record) => (*record).clone(),
-            None => FieldOwnership::new(key, snapshot.managed_value(key)),
+            None => initial_ownership(key, snapshot.managed_value(key)),
         };
         let _ = document;
         updated.push(FieldOwnership {
@@ -735,12 +798,16 @@ pub fn plan_restore(
     snapshot: &ConfigSnapshot,
     ownership: &[FieldOwnership],
 ) -> Vec<RestoreOutcome> {
+    // 基线本身就是本工具写的（旧版本、或另一个工具把我们写的行圈进了它的托管块）：
+    // 此时「还原成基线」等于把我们自己的值再写回去，用户根本回不到原生 Codex。
+    // 正确的动作是删掉这些字段——那才是「原本不存在」的语义。
+    let baseline_is_ours = baseline_is_our_own_work(ownership);
     ownership
         .iter()
         .map(|record| {
             let current = snapshot.managed_value(&record.key_path);
             if current == record.last_written_value {
-                if record.baseline_presence {
+                if record.baseline_presence && !baseline_is_ours {
                     RestoreOutcome::Restore {
                         key_path: record.key_path.clone(),
                     }
