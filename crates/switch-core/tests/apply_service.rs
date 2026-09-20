@@ -30,6 +30,7 @@ use switch_core::{
         version::{CompatibilityStatus, VersionFingerprint},
     },
     gateway::{self, GatewayRouter},
+    protocols::CHAT_COMPLETIONS_V1,
     storage::{MemoryOperationStore, OperationStore, Repository, SqliteRepository},
 };
 
@@ -70,6 +71,8 @@ struct Harness {
     workspace: WorkspaceService,
     store: Arc<MemoryOperationStore>,
     clock: Arc<TestClock>,
+    /// 用例据此检查「失败之后路由里还剩什么」。
+    router: Arc<GatewayRouter>,
 }
 
 fn provider_draft() -> ProviderDraft {
@@ -101,6 +104,7 @@ fn ready_model(provider_id: &str) -> ModelDraft {
         policy,
         in_catalog: true,
         display_name_overridden: true,
+        protocol_override: None,
     }
 }
 
@@ -116,10 +120,11 @@ fn harness(existing_config: Option<&str>) -> Harness {
     let workspace = WorkspaceService::new(repository.clone(), vault.clone());
     let store = Arc::new(MemoryOperationStore::new());
     let clock = Arc::new(TestClock::new(1_700_000_000));
+    let router = Arc::new(GatewayRouter::new());
     let service = ApplyService::new(
         repository,
         store.clone(),
-        Arc::new(GatewayRouter::new()),
+        router.clone(),
         GatewayLayout {
             app_data_dir: dir.path().join("app-data"),
             port: gateway::DEFAULT_PORT,
@@ -151,6 +156,7 @@ fn harness(existing_config: Option<&str>) -> Harness {
         workspace,
         store,
         clock,
+        router,
     }
 }
 
@@ -175,6 +181,11 @@ impl Harness {
             .save_model(ready_model(provider.id.as_str()), 0)
             .unwrap();
         harness
+    }
+
+    /// 应用数据目录：目录文件与路由快照都挂在它下面。
+    fn layout_dir(&self) -> PathBuf {
+        self.config_path.parent().unwrap().join("app-data")
     }
 
     fn read_config(&self) -> String {
@@ -877,5 +888,309 @@ fn restore_blocks_when_the_config_changes_after_the_restore_plan() {
         harness.read_config(),
         "# 计划生成后外部又改了\n",
         "冲突后不得覆盖外部修改"
+    );
+}
+
+/// 写盘失败不能留下一个「配置里并不存在」的已发布目录版本。
+///
+/// 回归：`router.publish` 过去排在 `write_atomic` 之前，而写入失败只是把错误冒出去——
+/// 刚发布的版本留在内存路由器里继续服务，下次应用的版本号又与它对不上。
+/// 表现是网关为一个没人指向的版本服务，而界面说「保存失败」。
+#[test]
+fn a_failed_write_takes_back_the_publication_it_just_made() {
+    let harness = Harness::with_ready_model(Some("model = \"gpt-5.6-sol\"\n"));
+    let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+
+    // 让写入失败：目录去掉写权限，`File::create` 就建不出临时文件。
+    // 恢复权限用 guard，保证断言失败也不会把临时目录留在只读状态。
+    let dir = harness.config_path.parent().unwrap().to_path_buf();
+    let original = std::fs::metadata(&dir).unwrap().permissions();
+    let mut read_only = original.clone();
+    read_only.set_readonly(true);
+    std::fs::set_permissions(&dir, read_only).unwrap();
+    let result =
+        harness
+            .service
+            .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-write-fail");
+    std::fs::set_permissions(&dir, original).unwrap();
+
+    assert!(result.is_err(), "写入失败必须报错，不能假装提交成功");
+    assert!(
+        !harness.router.revisions().contains(&plan.catalog_revision),
+        "写入失败后，刚发布的目录版本必须被收回，否则网关会一直为一个配置里不存在的版本服务：{:?}",
+        harness.router.revisions()
+    );
+    // 用户配置保持原样。
+    assert_eq!(
+        std::fs::read_to_string(&harness.config_path).unwrap(),
+        "model = \"gpt-5.6-sol\"\n"
+    );
+}
+
+/// 旧目录版本必须被回收。
+///
+/// 回归：生产路径上 `retain`/`release`/`retire` 从来没被调用过，每应用一次就永久多一份
+/// 目录快照与一份磁盘文件（本机实测堆了 3 份）。保留代数是有意的策略：留下「当前 + 上一代」，
+/// 因为宿主只在启动时读配置，刚应用完它还带着旧前缀在跑，旧快照要服务到它真的重启为止。
+#[test]
+fn apply_reclaims_catalog_revisions_beyond_the_retention_window() {
+    let harness = Harness::with_ready_model(None);
+    let mut revisions = Vec::new();
+    for round in 0..4 {
+        // 每轮换一个 Key：目录内容不变，但来源摘要变，于是得到真正的新版本号。
+        let provider = harness.workspace.list_providers().unwrap().remove(0);
+        let credential = harness
+            .workspace
+            .add_credential(
+                provider.id.as_str(),
+                &format!("第{round}次"),
+                format!("synthetic-secret-round{round}-0123456789"),
+            )
+            .unwrap();
+        harness
+            .workspace
+            .select_credential(provider.id.as_str(), credential.id.as_str())
+            .unwrap();
+        let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+        harness
+            .service
+            .execute_apply(plan.id.as_str(), &plan.plan_hash, &format!("idem-{round}"))
+            .unwrap();
+        revisions.push(plan.catalog_revision);
+    }
+
+    let last = revisions.last().unwrap().clone();
+    let mut distinct: Vec<String> = revisions.clone();
+    distinct.dedup();
+    assert!(distinct.len() >= 3, "本用例需要至少 3 个不同版本号才有意义");
+
+    let live = harness.router.revisions();
+    assert!(live.contains(&last), "当前版本必须还在：{live:?}");
+    assert!(
+        live.len() <= 2,
+        "只应保留当前版本与上一代，实际留下 {live:?}"
+    );
+    let oldest = &revisions[0];
+    assert!(!live.contains(oldest), "最早那代必须被回收");
+    assert!(
+        !harness.layout_dir().join("catalogs").join(oldest).exists(),
+        "内存里回收了，磁盘上的目录也要删掉"
+    );
+}
+
+/// 仍被引用的版本不能被回收——这是「旧宿主带旧前缀继续工作」的保障。
+#[test]
+fn a_referenced_revision_survives_reclamation() {
+    let harness = Harness::with_ready_model(None);
+    let first = harness.service.plan_apply(&harness.instance, None).unwrap();
+    harness
+        .service
+        .execute_apply(first.id.as_str(), &first.plan_hash, "idem-a")
+        .unwrap();
+    // 模拟「还有一个在途请求 / 续接绑定挂在这个版本上」。
+    harness.router.retain(&first.catalog_revision, 0);
+
+    for round in 0..4 {
+        let provider = harness.workspace.list_providers().unwrap().remove(0);
+        let credential = harness
+            .workspace
+            .add_credential(
+                provider.id.as_str(),
+                &format!("轮{round}"),
+                format!("synthetic-secret-ref{round}-0123456789"),
+            )
+            .unwrap();
+        harness
+            .workspace
+            .select_credential(provider.id.as_str(), credential.id.as_str())
+            .unwrap();
+        let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+        harness
+            .service
+            .execute_apply(plan.id.as_str(), &plan.plan_hash, &format!("idem-r{round}"))
+            .unwrap();
+    }
+
+    assert!(
+        harness.router.revisions().contains(&first.catalog_revision),
+        "仍有引用的版本不能被回收：{:?}",
+        harness.router.revisions()
+    );
+
+    // 引用释放之后，下一次应用就该把它收走。
+    harness.router.release(&first.catalog_revision, 0);
+    let provider = harness.workspace.list_providers().unwrap().remove(0);
+    let credential = harness
+        .workspace
+        .add_credential(
+            provider.id.as_str(),
+            "收尾",
+            "synthetic-secret-final-0123456789".to_string(),
+        )
+        .unwrap();
+    harness
+        .workspace
+        .select_credential(provider.id.as_str(), credential.id.as_str())
+        .unwrap();
+    let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+    harness
+        .service
+        .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-final")
+        .unwrap();
+    assert!(
+        !harness.router.revisions().contains(&first.catalog_revision),
+        "引用归零后应当被回收：{:?}",
+        harness.router.revisions()
+    );
+}
+
+/// 应用是**替换** Codex 的模型菜单，不是往里追加。
+///
+/// 这条不是「实现细节」，而是用户最容易误解的行为：`model_catalog_json` 指向的目录里
+/// 只有本工具发布的别名，Codex 自带的模型会整批从选择器里消失，直到「还原为原生 Codex」。
+/// 真机实测 `model/list` 只剩 1 条。以前界面和文档都没说过这件事，于是「加一个模型」
+/// 的预期与「原来能用的都不见了」的结果对不上。
+///
+/// 这里锁定的是核心侧的事实：写进去的目录**只含本次发布的别名**，一个原生模型都不带。
+#[test]
+fn applying_replaces_the_host_menu_with_exactly_the_published_aliases() {
+    let harness = Harness::with_ready_model(Some(
+        "model = \"gpt-5.6-sol\"\nmodel_provider = \"openai\"\n",
+    ));
+    let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+    harness
+        .service
+        .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-catalog")
+        .unwrap();
+
+    let catalog_text = std::fs::read_to_string(
+        harness
+            .layout_dir()
+            .join("catalogs")
+            .join(&plan.catalog_revision)
+            .join("models.json"),
+    )
+    .unwrap();
+    let catalog: serde_json::Value = serde_json::from_str(&catalog_text).unwrap();
+    let published: Vec<String> = catalog["models"]
+        .as_array()
+        .expect("目录里有 models 数组")
+        .iter()
+        .map(|entry| entry["slug"].as_str().unwrap().to_owned())
+        .collect();
+
+    assert_eq!(
+        published, plan.catalog_aliases,
+        "目录内容必须与计划声明的别名逐一对应"
+    );
+    // 原生模型不会出现在这里——它们没有被合并进去，这就是「替换」的确切含义。
+    for native in ["gpt-5.6-sol", "gpt-6-astra", "gpt-5"] {
+        assert!(
+            !catalog_text.contains(native),
+            "目录里不该出现原生模型 {native}；它是替换而不是追加"
+        );
+    }
+    // 配置确实指向这份目录（宿主据此换掉整份菜单）。
+    assert!(harness.read_config().contains("model_catalog_json"));
+    assert!(harness.read_config().contains(&plan.catalog_revision));
+}
+
+/// 模型级协议覆盖必须真的改变路由。
+///
+/// 回归：`Model.protocol_override` 早就在域模型里，`build_routes` 也按它选协议
+/// （`model.protocol_override.unwrap_or(provider.protocol)`），但 `ModelDraft` 没有这个字段，
+/// 于是从界面永远设不上——P0 要求「独立模型编辑：显示名、上游 ID、协议…」里的协议是个死字段。
+#[test]
+fn a_model_level_protocol_override_reaches_the_route() {
+    let harness = Harness::with_ready_model(None);
+    let provider = harness.workspace.list_providers().unwrap().remove(0);
+    assert_eq!(
+        provider.protocol,
+        Protocol::Responses,
+        "前提：供应商本身是 Responses"
+    );
+
+    // 同一个供应商下的这个模型单独走 chat/completions。
+    // 改**已有**那个模型：新建第二个会得到两个 alias，而断言按 alias 取路由，取到谁不确定。
+    let existing = harness.workspace.list_models().unwrap().remove(0);
+    let model = harness
+        .workspace
+        .save_model(
+            ModelDraft {
+                id: Some(existing.id.as_str().to_owned()),
+                protocol_override: Some(Protocol::ChatCompletions),
+                ..ready_model(provider.id.as_str())
+            },
+            existing.version,
+        )
+        .unwrap();
+    assert_eq!(model.protocol_override, Some(Protocol::ChatCompletions));
+
+    let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+    harness
+        .service
+        .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-protocol")
+        .unwrap();
+
+    let snapshot = harness
+        .router
+        .admission(
+            &plan.catalog_revision,
+            &plan.catalog_aliases[0],
+            &harness.instance.id,
+        )
+        .expect("目录里应当有这个 alias");
+    assert_eq!(
+        snapshot.route.protocol_id, CHAT_COMPLETIONS_V1,
+        "模型级协议要覆盖供应商的协议"
+    );
+
+    // 目标是「模型级覆盖能生效」，不是「覆盖能清掉」——清掉覆盖走的是同一段代码，
+    // 再写一遍只会和上面的唯一约束打架（同一个 supplier+upstream 的第二次身份登记）。
+}
+
+/// Chat Completions 适配必须在**应用之前**被标明为实验状态。
+///
+/// PRD 明写「chat/completions 适配通过工具调用门禁后进入首发，未通过则明确标实验状态，
+/// 不能冒充完整可用」。工具调用门禁没有实现，所以这里锁的是那条退路：
+/// 只要这次发布有模型走 CC 适配，应用前的差异里就必须有这条警告。
+#[test]
+fn chat_completions_models_are_flagged_as_experimental_before_applying() {
+    let harness = Harness::with_ready_model(None);
+    let provider = harness.workspace.list_providers().unwrap().remove(0);
+
+    // Responses 的供应商：不该出现这条警告。
+    let responses_plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+    assert!(
+        !responses_plan
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("warning.chatAdapterExperimental")),
+        "全是 Responses 时不该报 CC 实验状态：{:?}",
+        responses_plan.warnings
+    );
+
+    // 把模型的协议改成 chat/completions：警告必须出现。
+    let model = harness.workspace.list_models().unwrap().remove(0);
+    harness
+        .workspace
+        .save_model(
+            ModelDraft {
+                id: Some(model.id.as_str().to_owned()),
+                protocol_override: Some(Protocol::ChatCompletions),
+                ..ready_model(provider.id.as_str())
+            },
+            model.version,
+        )
+        .unwrap();
+    let cc_plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+    let warning = cc_plan
+        .warnings
+        .iter()
+        .find(|warning| warning.contains("warning.chatAdapterExperimental"))
+        .expect("走 CC 适配时必须给出实验状态警告");
+    assert!(
+        warning.contains("工具调用"),
+        "警告要说清哪一部分没验证过：{warning}"
     );
 }

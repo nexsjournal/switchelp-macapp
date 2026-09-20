@@ -307,6 +307,30 @@ pub async fn apply_execute(
     idempotency_key: String,
 ) -> Result<ExecuteResult, CoreError> {
     run(window, state, move |desktop| {
+        // 本机网关没起来就绝不能写配置。
+        //
+        // 写进 Codex 的 base_url 是 `127.0.0.1:<port>/i/<实例>/c/<新版本>/v1`；写下去之后
+        // Codex 的每一次请求都打在这个前缀上。网关不在时它必然全部失败，而用户看到的是
+        // 「已应用」——配置被改坏了，却没人告诉他。
+        //
+        // 最典型的成因是**开了第二个 Switchelp**：它绑不到端口、网关起不来，但它的 IPC 与
+        // 写配置照常，于是它会把 Codex 指向一个只有它自己知道、而它又服务不了的版本。
+        // 这里直接拦住，原因交给界面显示。
+        if desktop.gateway().is_none() {
+            let detail = match desktop.gateway_error() {
+                Some(reason) => format!(
+                    "本机网关未运行，现在写入会让 Codex 用不了这些模型：{reason}。\
+                     最常见的原因是已经开着另一个 Switchelp 实例——一个进程只能占住网关端口。"
+                ),
+                None => "本机网关未运行，无法应用配置。".to_owned(),
+            };
+            // 不挂 recovery action：界面目前只渲染 `recompare` 一种恢复项，
+            // 给一个不会变成按钮的动作等于承诺一个不存在的出口。
+            return Err(
+                CoreError::new(ErrorCode::Internal, "error.gatewayRequiredForApply")
+                    .with_detail(detail),
+            );
+        }
         let operation_id = desktop
             .apply
             .execute_apply(&plan_id, &plan_hash, &idempotency_key)?;

@@ -111,7 +111,20 @@ impl GatewayLayout {
     fn catalog_revision(&self, catalog_hash: &str) -> String {
         format!("rev_{}", &catalog_hash[..16.min(catalog_hash.len())])
     }
+
+    /// 某个修订的目录目录（`<appData>/catalogs/<revision>`）。
+    fn catalog_dir(&self, catalog_revision: &str) -> PathBuf {
+        self.app_data_dir.join("catalogs").join(catalog_revision)
+    }
 }
+
+/// 保留的目录版本代数：当前版本 + 上一代。
+///
+/// 为什么要留一代：宿主只在启动时读配置，刚应用完的那一瞬间它还带着旧前缀在跑，
+/// 旧快照必须继续服务到它真的重启为止（这是 `routing.rs` 写的「旧宿主仍带旧前缀时
+/// 按旧快照服务」）。留一代足够覆盖这个窗口，又不会像过去那样**无限累积**——
+/// 生产路径上 `retain`/`release`/`retire` 从来没被调用过，本机实测已经堆了 3 份旧目录。
+const RETAINED_CATALOG_GENERATIONS: usize = 2;
 
 /// 启动恢复的判定结果，供 UI 说明“为什么还停在等待状态”。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -377,8 +390,6 @@ impl ApplyService {
                 .with_detail("目录文件在预览后被修改".to_owned()));
         }
         let (text, ownership) = apply_managed(&snapshot, &prepared.managed, &state.ownership)?;
-        // 路由发布失败必须发生在修改 Codex 之前；发布的是冻结输入，不读取当前表单值。
-        self.router.publish(prepared.routes.clone())?;
         state.operation.idempotency_key = idempotency_key.to_owned();
         state.operation.written_hash = Some(hash(&text));
         state.ownership = ownership;
@@ -388,6 +399,7 @@ impl ApplyService {
             .transition(ApplyStage::Committing, self.clock.now())?;
         self.operations.save(state.clone())?; // 写前日志：崩溃后可根据目标摘要补记。
                                               // 写之前先备份原文件。备份失败就不写：宁可不提交，也不能在没有退路时改用户配置。
+                                              // 备份**排在发布之前**：它失败时什么都没发生过，用户配置与路由都保持原样。
         if let Some(backups) = &self.backups {
             if Path::new(&state.plan.config_path).exists() {
                 backups.create(
@@ -397,14 +409,75 @@ impl ApplyService {
                 )?;
             }
         }
-        write_atomic(Path::new(&state.plan.config_path), &text)?;
+        // 路由发布失败必须发生在修改 Codex 之前；发布的是冻结输入，不读取当前表单值。
+        self.router.publish(prepared.routes.clone())?;
+        // 写盘失败要把刚发布的版本收回去：路由器是内存态，进程活着它就会一直服务一个
+        // 「配置文件里并不存在」的目录版本，而且下次应用的版本号与它对不上——表现是网关
+        // 为一个没人指向的版本服务。收不回来（仍有在途引用）时如实写在错误里，不假装已清理。
+        if let Err(error) = write_atomic(Path::new(&state.plan.config_path), &text) {
+            let reclaimed = self.router.retire(&state.plan.catalog_revision);
+            let revision = state.plan.catalog_revision.clone();
+            state
+                .operation
+                .transition(ApplyStage::Failed, self.clock.now())?;
+            self.operations.save(state)?;
+            return Err(if reclaimed {
+                error
+            } else {
+                error.with_detail(format!(
+                    "配置写入失败，且刚发布的目录版本 {revision} 仍有在途引用、未能回收"
+                ))
+            });
+        }
         state
             .operation
             .transition(ApplyStage::AwaitingReload, self.clock.now())?;
         let operation_id = state.operation.id.as_str().to_owned();
+        let published_revision = state.plan.catalog_revision.clone();
         self.operations.save(state)?;
         self.mark_models_awaiting_reload(&prepared.models)?;
+        self.prune_catalog_revisions(&published_revision);
         Ok(operation_id)
+    }
+
+    /// 回收超出保留代数的目录版本：内存里的路由快照 + 磁盘上的目录文件。
+    ///
+    /// 生产路径上 `retain`/`release`/`retire` 过去从来没被调用过，于是每应用一次就永久
+    /// 多一份目录（本机实测堆了 3 份）。这里的判定顺序是刻意的：
+    /// 1. 当前版本永远保留；
+    /// 2. **仍有引用**（在途请求或续接绑定）的版本一律保留——`retire` 自己也会拒绝，
+    ///    这里先筛一遍是为了不把「本该保留」和「没能回收」混为一谈；
+    /// 3. 剩下的按目录的修改时间排序，只留最近 `RETAINED_CATALOG_GENERATIONS - 1` 个。
+    ///
+    /// 修订号是内容摘要，字典序与新旧无关，所以排序必须看时间而不是看名字。
+    fn prune_catalog_revisions(&self, current: &str) {
+        let mut candidates: Vec<(std::time::SystemTime, String)> = self
+            .router
+            .revisions()
+            .into_iter()
+            .filter(|revision| revision != current)
+            .filter(|revision| self.router.refs(revision).is_reclaimable())
+            .map(|revision| {
+                let modified = std::fs::metadata(self.layout.catalog_dir(&revision))
+                    .and_then(|meta| meta.modified())
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                (modified, revision)
+            })
+            .collect();
+        candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+
+        for (_, revision) in candidates
+            .into_iter()
+            .skip(RETAINED_CATALOG_GENERATIONS - 1)
+        {
+            if !self.router.retire(&revision) {
+                // 竞态：筛选之后来了新引用。`retire` 已经拒绝，留着就是正确结果。
+                continue;
+            }
+            // 内存里回收了，磁盘上那份也要删，否则文件会一直堆着。
+            // 删不掉不是致命错误：它既不参与路由，也不影响用户。
+            let _ = std::fs::remove_dir_all(self.layout.catalog_dir(&revision));
+        }
     }
 
     /// 宿主加载回执。没有回执时最多停在 `Pending`，不能自称 `Loaded`。

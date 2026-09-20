@@ -4,6 +4,7 @@ use switch_core::{
     credentials::{MemoryVault, SecretVault},
     domain::{
         capability::{InputKind, InputPath, Support, Verification},
+        credential::CredentialStatus,
         error::ErrorCode,
         ids::ProviderId,
         model::{HostState, ModelPolicy},
@@ -11,6 +12,14 @@ use switch_core::{
     },
     storage::{Repository, SqliteRepository},
 };
+
+/// 建一个干净的 service 与一个已保存的供应商。
+fn seeded_provider() -> (WorkspaceService, switch_core::domain::provider::Provider) {
+    let repository: Arc<dyn Repository> = Arc::new(SqliteRepository::in_memory().unwrap());
+    let service = WorkspaceService::new(repository, Arc::new(MemoryVault::new()));
+    let provider = service.save_provider(provider_draft(), 0).unwrap();
+    (service, provider)
+}
 
 fn provider_draft() -> ProviderDraft {
     ProviderDraft {
@@ -39,6 +48,7 @@ fn ready_model(provider_id: &str, upstream_id: &str, display_name: &str) -> Mode
         policy,
         in_catalog: true,
         display_name_overridden: true,
+        protocol_override: None,
     }
 }
 
@@ -258,6 +268,7 @@ fn model_save_recomputes_host_capabilities_and_never_claims_loaded() {
                 policy,
                 in_catalog: true,
                 display_name_overridden: true,
+                protocol_override: None,
             },
             0,
         )
@@ -458,4 +469,168 @@ fn deleting_a_credential_revokes_its_secret_and_allows_the_active_one() {
         .is_empty());
     assert_eq!(vault.len(), 0, "秘密必须随元数据一起撤销");
     assert!(vault.load(&spare.secret_ref).unwrap().is_none());
+}
+
+/// 多 Key 管理：改名、停用、重新启用。
+///
+/// 回归：核心与数据库一直都支持同一供应商下多个 Key，但**没有任何途径把 Key 置为停用**——
+/// `CredentialStatus::Disabled` 只有测试在写，生产代码里没有 setter。于是
+/// 「禁用」这条 P0 要求实际上不存在，界面也没有可点的入口。
+mod key_pool {
+    use super::*;
+
+    #[test]
+    fn a_key_can_be_renamed_and_the_version_advances() {
+        let (service, provider) = seeded_provider();
+        let key = service
+            .add_credential(
+                provider.id.as_str(),
+                "日常",
+                "synthetic-secret-0000000001".to_string(),
+            )
+            .unwrap();
+
+        let renamed = service
+            .rename_credential(key.id.as_str(), "  备用通道  ", key.version)
+            .unwrap();
+        assert_eq!(renamed.label, "备用通道", "备注名要去掉首尾空白");
+        assert_eq!(
+            renamed.version,
+            key.version + 1,
+            "版本必须推进，否则并发改写会被放行"
+        );
+
+        // 拿旧版本再改一次必须被拒——这是「重读再写」的依据。
+        assert_eq!(
+            service
+                .rename_credential(key.id.as_str(), "另一个名字", key.version)
+                .unwrap_err()
+                .code,
+            ErrorCode::Conflict
+        );
+
+        // 空名字与超长名字都要拒绝。
+        let current = service
+            .list_credentials(provider.id.as_str())
+            .unwrap()
+            .remove(0);
+        assert!(service
+            .rename_credential(key.id.as_str(), "   ", current.version)
+            .is_err());
+    }
+
+    #[test]
+    fn a_key_can_be_disabled_and_enabled_again() {
+        let (service, provider) = seeded_provider();
+        let first = service
+            .add_credential(
+                provider.id.as_str(),
+                "日常",
+                "synthetic-secret-0000000002".to_string(),
+            )
+            .unwrap();
+        let second = service
+            .add_credential(
+                provider.id.as_str(),
+                "备用",
+                "synthetic-secret-0000000003".to_string(),
+            )
+            .unwrap();
+        service
+            .select_credential(provider.id.as_str(), first.id.as_str())
+            .unwrap();
+
+        // 停用**非当前**的 Key：允许。
+        let off = service
+            .set_credential_disabled(second.id.as_str(), true, second.version)
+            .unwrap();
+        assert_eq!(off.status, CredentialStatus::Disabled);
+        assert!(!off.status.is_selectable());
+
+        // 停用的 Key 不能被设为当前。
+        assert!(service
+            .select_credential(provider.id.as_str(), second.id.as_str())
+            .is_err());
+
+        // 重新启用回到「已保存、未检测」，不把停用前的验证结果带回来。
+        let on = service
+            .set_credential_disabled(second.id.as_str(), false, off.version)
+            .unwrap();
+        assert_eq!(on.status, CredentialStatus::Saved);
+    }
+
+    /// 停用当前 Key 必须被拒：路由已经指向它，停用之后每次新请求都会失败，
+    /// 而界面上看起来只是「关掉了一个开关」。
+    #[test]
+    fn the_active_key_cannot_be_disabled() {
+        let (service, provider) = seeded_provider();
+        let key = service
+            .add_credential(
+                provider.id.as_str(),
+                "日常",
+                "synthetic-secret-0000000004".to_string(),
+            )
+            .unwrap();
+        service
+            .select_credential(provider.id.as_str(), key.id.as_str())
+            .unwrap();
+        let current = service
+            .list_credentials(provider.id.as_str())
+            .unwrap()
+            .remove(0);
+
+        let error = service
+            .set_credential_disabled(key.id.as_str(), true, current.version)
+            .unwrap_err();
+        assert_eq!(error.message_key, "error.activeCredentialCannotBeDisabled");
+        assert_eq!(error.code, ErrorCode::Conflict);
+    }
+}
+
+/// 换当前 Key 必须让「待应用」重新出现。
+///
+/// 网关服务的是发布时冻结的路由快照——里面写死了 credential_id 与凭据版本。
+/// 只改选中项、不重新发布，新请求仍然走旧 Key。以前这件事完全不可见：
+/// 换完 Key 页面上没有任何提示，用户以为已经生效了。
+#[test]
+fn switching_the_active_key_puts_the_models_back_to_pending() {
+    let (service, provider) = seeded_provider();
+    let first = service
+        .add_credential(
+            provider.id.as_str(),
+            "日常",
+            "synthetic-secret-switch-1".to_string(),
+        )
+        .unwrap();
+    let second = service
+        .add_credential(
+            provider.id.as_str(),
+            "备用",
+            "synthetic-secret-switch-2".to_string(),
+        )
+        .unwrap();
+    service
+        .select_credential(provider.id.as_str(), first.id.as_str())
+        .unwrap();
+    let model = service
+        .save_model(ready_model(provider.id.as_str(), "vendor/a", "模型甲"), 0)
+        .unwrap();
+    // 应用一次，让它落到「已加载」。
+    let loaded = {
+        let mut next = model.clone();
+        next.host_state = HostState::Loaded;
+        service.repository.save_model(next, model.version).unwrap()
+    };
+    assert_eq!(loaded.host_state, HostState::Loaded);
+
+    service
+        .select_credential(provider.id.as_str(), second.id.as_str())
+        .unwrap();
+
+    let after = service.list_models().unwrap().remove(0);
+    assert_eq!(
+        after.host_state,
+        HostState::PendingApply,
+        "换 Key 之后模型必须回到待应用，否则界面完全看不出「还没生效」"
+    );
 }

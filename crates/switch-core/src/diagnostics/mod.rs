@@ -315,11 +315,48 @@ fn looks_like_secret(token: &str) -> bool {
     if trimmed.len() >= 32 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
         return true;
     }
+    // 无前缀的现代密钥：多数供应商直接给一串 base62/base64 字符。过去只认 ≥40 位，
+    // 于是 32 位这个最常见的长度整段漏过去，原样进了诊断包。
+    if is_opaque_mixed_case_token(trimmed) {
+        return true;
+    }
     // 长随机串：无明显结构但足够长且字符集混合。
     trimmed.len() >= 40
         && trimmed
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// 本工具自己的标识前缀。它们同样是「字母数字混排的短串」，但必须原样保留：
+/// 诊断日志的价值有一半在这些 id 上，全涂成星号等于没有诊断。
+const INTERNAL_ID_PREFIXES: [&str; 8] = [
+    "inst_", "rev_", "op_", "plan_", "gs/", "vendor/", "p_", "m_",
+];
+
+/// 判定「无前缀的不透明随机串」：≥24 位、只用 base62 与 `-`/`_`、且大小写与数字齐备。
+///
+/// 为什么是「大小写齐备」而不是单纯的长度：本工具自己的 id 全是纯小写
+/// （`inst_feea2e927725590c`、`rev_c9a0dbf7ff24a147`），模型 id 还常带 `.` 或 `/`，
+/// 它们都不满足这条，因此不会被误伤。真实供应商密钥几乎总是混排的。
+fn is_opaque_mixed_case_token(token: &str) -> bool {
+    const MIN_OPAQUE_LEN: usize = 24;
+    if token.len() < MIN_OPAQUE_LEN
+        || INTERNAL_ID_PREFIXES
+            .iter()
+            .any(|prefix| token.starts_with(prefix))
+    {
+        return false;
+    }
+    if !token
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return false;
+    }
+    let has_lower = token.chars().any(|c| c.is_ascii_lowercase());
+    let has_upper = token.chars().any(|c| c.is_ascii_uppercase());
+    let has_digit = token.chars().any(|c| c.is_ascii_digit());
+    has_lower && has_upper && has_digit
 }
 
 /// 事件时间戳格式：小数固定 3 位。
@@ -530,5 +567,44 @@ mod tests {
         ));
         assert_eq!(log.prune(1_800_000_000), 0, "长度异常的时间戳不应被误删");
         assert_eq!(log.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod unprefixed_key_tests {
+    use super::*;
+
+    /// 回归：20~39 位、无 `sk-` 前缀的密钥过去整段漏过脱敏，原样进诊断包。
+    #[test]
+    fn an_unprefixed_twenty_four_to_forty_char_key_is_masked() {
+        for key in [
+            "AbCdEf1234567890GhIjKlMnOpQrSt",    // 32 位 base62，最常见的形态
+            "Zx9Qw8Er7Ty6Ui5Op4As3Df2Gh1Jk0LmN", // 34 位
+            "aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW",  // 32 位含数字
+            "AKIAIOSFODNN7EXAMPLEKEY1234567890abcd", // 40 位，AWS 风格无前缀
+        ] {
+            let masked = redact_value(key);
+            assert!(
+                masked.contains("••••") && !masked.contains(key),
+                "无前缀密钥必须被脱敏，实际得到：{masked}"
+            );
+        }
+    }
+
+    /// 反面：本工具自己的 id 与正常文本不能被涂成星号，否则诊断日志失去意义。
+    #[test]
+    fn internal_identifiers_and_normal_text_survive_untouched() {
+        for keep in [
+            "inst_feea2e927725590c",
+            "rev_c9a0dbf7ff24a147",
+            "gs/57745d8a-08f4-4e72-8b64-1dc95f4699be/14f3fca6-1920-4f29-b4d0-5e32ccde5397",
+            "vendor/reasoner-pro",
+            "Vendor/Case-Sensitive-2.5-Pro",
+            "MODALITY_IMAGE+MODALITY_AUDIO",
+            "HTTP_401_UNAUTHORIZED",
+            "2026-09-18T00:00:00Z",
+        ] {
+            assert_eq!(redact_value(keep), keep, "{keep} 不应被脱敏");
+        }
     }
 }
