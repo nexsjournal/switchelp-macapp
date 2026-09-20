@@ -27,6 +27,7 @@ use crate::{
         provider::{AuthKind, Protocol, Provider},
     },
     gateway::{self, GatewayRouter},
+    protocols::CHAT_COMPLETIONS_V1,
     storage::{
         operation::{OperationKind, OperationState, PreparedDeployment},
         snapshot::{RouteEntry, RouteSnapshot, RuntimePublication},
@@ -276,11 +277,32 @@ impl ApplyService {
             self.managed_config(instance, &default_alias, &catalog_path, &catalog_revision);
         let snapshot = crate::codex::config::ConfigSnapshot::read(&instance.config_file)?;
         let changes = diff_managed(&snapshot, &managed);
-        let warnings: Vec<String> = compiled
+        let mut warnings: Vec<String> = compiled
             .warnings
             .iter()
             .map(|warning| format!("{}：{}", warning.message_key, warning.detail))
             .collect();
+        // Chat Completions 适配尚未通过工具调用门禁（PRD 对这条路径的要求是
+        // 「未通过则明确标实验状态，不能冒充完整可用」）。它必须在**应用之前**说出来：
+        // 用户是在这一步决定要不要让 Codex 走这条路，等到请求失败才发现就晚了。
+        if selected
+            .iter()
+            .filter(|model| model.in_catalog)
+            .any(|model| {
+                let protocol = model.protocol_override.unwrap_or_else(|| {
+                    providers
+                        .get(model.provider_id.as_str())
+                        .map(|provider| provider.protocol)
+                        .unwrap_or(Protocol::Responses)
+                });
+                protocol_id(protocol) == CHAT_COMPLETIONS_V1
+            })
+        {
+            warnings.push(
+                "warning.chatAdapterExperimental：本次有模型走 Chat Completions 适配。                 它会把上游的 chat/completions 双向翻译成 Responses，但工具调用尚未通过门禁、                 没有在真实上游上验证过；文本对话可用，工具与结构化输出可能不可用。"
+                    .to_owned(),
+            );
+        }
 
         let revision_id = RevisionId::new(catalog_revision.clone());
         let plan = build_plan(

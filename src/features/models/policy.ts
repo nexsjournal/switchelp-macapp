@@ -205,6 +205,7 @@ export function modelDraft(model: Model, overrides: Partial<ModelDraft> = {}): M
     policy: model.policy,
     inCatalog: model.inCatalog,
     displayNameOverridden: true,
+    protocolOverride: model.protocolOverride ?? null,
     ...overrides,
   };
 }

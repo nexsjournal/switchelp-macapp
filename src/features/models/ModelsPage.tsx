@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Boxes, Filter, Plus, Search } from 'lucide-react';
 import type { Model, Provider } from '@/contracts/types';
 import { type DesktopClient, toCoreError } from '@/desktop/client';
@@ -41,13 +41,23 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
   onEditModel: (target: Model | 'new') => void;
 }) {
   const [query, setQuery] = useState('');
-  const [providerFilter, setProviderFilter] = useState(providerScope ?? 'all');
+  /**
+   * 嵌入供应商详情时，作用域**不能**复制进 state：`useState(providerScope ?? 'all')` 只在挂载时取值，
+   * 而切换供应商不会重挂载本组件，于是表格会一直停在上一个供应商的模型上（标题已经换了、内容没换）。
+   * 作用域是宿主给的事实，直接派生；只有非嵌入时那个跨供应商下拉才需要自己的 state。
+   */
+  const [pickedProvider, setPickedProvider] = useState('all');
+  const providerFilter = providerScope ?? pickedProvider;
   const [availability, setAvailability] = useState<Availability>('all');
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'name', desc: false });
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState('');
   const [confirm, setConfirm] = useState<{ title: string; body: string; label: string; danger?: boolean; run: () => Promise<void> } | null>(null);
   const [probe, setProbe] = useState<{ model: Model; stages: { stageKey: string; status: string; messageKey: string; elapsedMs?: number | null }[] } | null>(null);
+
+  // 换供应商就丢掉上一家的勾选：批量条会照旧报「已选 N 个」，但那些模型已经不在屏幕上，
+  // 「批量删除」于是可能删掉用户看不见的行。
+  useEffect(() => { setSelected([]); }, [providerScope]);
 
   const providerName = (id: string) => providers.find(provider => provider.id === id)?.name ?? t('common.unknownProvider');
 
@@ -156,13 +166,13 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
 
   const body = <>
     <div className={embedded ? styles.toolbarEmbedded : styles.toolbar}>
-      <div className={styles.search}><Search size={17} />
+      <div className={styles.search}><Search size={18} />
         <input aria-label={t('models.searchAria')} placeholder={t('models.searchPlaceholder')} value={query} onChange={event => setQuery(event.target.value)} />
       </div>
       <div className={styles.filters}>
-        <Filter size={15} aria-hidden="true" />
+        <Filter size={14} aria-hidden="true" />
         {/* 嵌进供应商详情时已经限定了供应商，就不再多给一个筛选。 */}
-        {!providerScope && <label>{t('editor.provider')}<select aria-label={t('models.providerFilter')} value={providerFilter} onChange={event => setProviderFilter(event.target.value)}>
+        {!providerScope && <label>{t('editor.provider')}<select aria-label={t('models.providerFilter')} value={providerFilter} onChange={event => setPickedProvider(event.target.value)}>
           <option value="all">{t('logs.levelAll')}</option>
           {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
         </select></label>}
@@ -170,7 +180,7 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
           {(Object.keys(availabilityKeys) as Availability[]).map(key => <option key={key} value={key}>{t(availabilityKeys[key])}</option>)}
         </select></label>
       </div>
-      {!embedded && <button className="primary" onClick={() => onEditModel('new')} disabled={!providers.length}><Plus size={17} />{t('action.addModel')}</button>}
+      {!embedded && <button className="primary" onClick={() => onEditModel('new')} disabled={!providers.length}><Plus size={18} />{t('action.addModel')}</button>}
     </div>
 
 
@@ -249,7 +259,7 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
         <p className={styles.count}>{t('models.count', { visible: visible.length })}{visible.length !== models.length ? t('models.countOfTotal', { total: models.length }) : ''}</p>
       </section>}
 
-    {probe && <Dialog title={t('models.probeTitle', { name: probe.model.displayName })} busy={busy === 'probe'}
+    {probe && <Dialog width="normal" title={t('models.probeTitle', { name: probe.model.displayName })} busy={busy === 'probe'}
       description={t('models.probeBody')}
       onClose={() => setProbe(null)}
       footer={<footer className="form-footer">
@@ -266,7 +276,7 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
       </div>
     </Dialog>}
 
-    {confirm && <Dialog title={confirm.title} description={confirm.body} onClose={() => setConfirm(null)} busy={busy !== ''} footer={<footer className="form-footer">
+    {confirm && <Dialog width="narrow" title={confirm.title} description={confirm.body} onClose={() => setConfirm(null)} busy={busy !== ''} footer={<footer className="form-footer">
         <span>{t('common.irreversible')}</span>
         <div className="actions">
           <button onClick={() => setConfirm(null)} disabled={busy !== ''}>{t('action.cancel')}</button>

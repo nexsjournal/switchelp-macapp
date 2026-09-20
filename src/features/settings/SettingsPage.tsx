@@ -15,10 +15,12 @@ import { readLocalePreference, setLocalePreference, t, type LocalePreference } f
  * 原则：**能读到的真实状态就显示真值，做不到的就明说未实现**，
  * 不放一个看起来能点、实际不生效的开关。危险操作单独成组，不与日常项混在一起。
  */
-export function SettingsPage({ client, gateway, onNavigate }: {
+export function SettingsPage({ client, gateway, onNavigate, onReopenOnboarding }: {
   client: DesktopClient;
   gateway: GatewayReport | null;
   onNavigate: (page: 'codexConfig' | 'logs' | 'diagnostics') => void;
+  /** 重新打开首次接入向导（概览页）。向导被「稍后再说」关掉之后，这里是唯一的入口。 */
+  onReopenOnboarding: () => void;
 }) {
   const [instances, setInstances] = useState<CodexInstance[]>([]);
   const [error, setError] = useState('');
@@ -86,7 +88,7 @@ export function SettingsPage({ client, gateway, onNavigate }: {
     {error && <div className="error-message" role="alert">{error}</div>}
 
     <section className={styles.card}>
-      <h2><Palette size={17} />{t('settings.appearance')}</h2>
+      <h2><Palette size={18} />{t('settings.appearance')}</h2>
       <dl className={styles.rows}>
         <dt>{t('settings.themeLabel')}</dt><dd>
           <select aria-label={t('settings.themeLabel')} value={preference} onChange={event => applyPreference(event.target.value as ThemePreference)}>
@@ -109,7 +111,7 @@ export function SettingsPage({ client, gateway, onNavigate }: {
     </section>
 
     <section className={styles.card}>
-      <h2><Network size={17} />{t('settings.gateway')}</h2>
+      <h2><Network size={18} />{t('settings.gateway')}</h2>
       <dl className={styles.rows}>
         <dt>{t('settings.status')}</dt><dd className={gateway?.running ? styles.online : styles.offline}>
           {gateway?.running ? t('settings.running') : t('settings.notRunning')}
@@ -128,7 +130,7 @@ export function SettingsPage({ client, gateway, onNavigate }: {
     </section>
 
     <section className={styles.card}>
-      <h2><Cpu size={17} />{t('codex.instances')}</h2>
+      <h2><Cpu size={18} />{t('codex.instances')}</h2>
       {instances.length === 0
         ? <EmptyState icon={Cpu} title={t('settings.noInstance')} description={t('settings.noInstanceBody')} />
         : <ul className={styles.instances}>{instances.map(instance => <li key={instance.id}>
@@ -140,10 +142,14 @@ export function SettingsPage({ client, gateway, onNavigate }: {
             {instance.conflictingManagers.length > 0 && <span className="badge warning">{t('settings.otherTool', { names: instance.conflictingManagers.join(t('common.itemSeparator')) })}</span>}
           </div>
         </li>)}</ul>}
+      <div className={styles.actions}>
+        <button onClick={onReopenOnboarding}>{t('settings.reopenOnboarding')}</button>
+      </div>
+      <p className={styles.note}>{t('settings.reopenOnboardingNote')}</p>
     </section>
 
     <section className={styles.card}>
-      <h2><ScrollText size={17} />{t('settings.logsAndDiagnostics')}</h2>
+      <h2><ScrollText size={18} />{t('settings.logsAndDiagnostics')}</h2>
       <dl className={styles.rows}>
         <dt>{t('settings.backupRetention')}</dt><dd>{t('settings.retentionValue')}<span className="text-muted">{t('settings.retentionNote')}</span></dd>
         <dt>{t('settings.scope')}</dt><dd>{t('settings.scopeValue')}<span className="text-muted">{t('settings.scopeNote')}</span></dd>
@@ -155,7 +161,7 @@ export function SettingsPage({ client, gateway, onNavigate }: {
     </section>
 
     <section className={styles.card}>
-      <h2><Wrench size={17} />{t('settings.backupAndUpdate')}</h2>
+      <h2><Wrench size={18} />{t('settings.backupAndUpdate')}</h2>
       <dl className={styles.rows}>
         <dt>{t('settings.autoBackup')}</dt><dd>{t('settings.autoBackupValue')}<span className="text-muted">{t('settings.autoBackupNote')}</span></dd>
         <dt>{t('settings.backupRetention')}</dt><dd>{t('settings.backupRetentionValue')}<span className="text-muted">{t('settings.backupRetentionNote')}</span></dd>
@@ -190,7 +196,7 @@ export function SettingsPage({ client, gateway, onNavigate }: {
     </section>
 
     <section className={styles.card}>
-      <h2><Info size={17} />{t('settings.about')}</h2>
+      <h2><Info size={18} />{t('settings.about')}</h2>
       <dl className={styles.rows}>
         <dt>{t('settings.version')}</dt><dd className="text-mono">{__APP_VERSION__}</dd>
         <dt>{t('settings.repository')}</dt><dd><a href="https://github.com/nexsjournal/switchelp-macapp" rel="noreferrer noopener" target="_blank" className="text-mono">github.com/nexsjournal/switchelp-macapp</a></dd>
@@ -199,7 +205,7 @@ export function SettingsPage({ client, gateway, onNavigate }: {
     </section>
 
     <section className={`${styles.card} ${styles.dangerZone}`}>
-      <h2><ShieldAlert size={17} />{t('settings.dangerZone')}</h2>
+      <h2><ShieldAlert size={18} />{t('settings.dangerZone')}</h2>
       <p className="text-muted">{t('settings.dangerZoneNote')}</p>
       <div className={styles.actions}>
         <button onClick={() => onNavigate('codexConfig')}>{t('settings.restoreCodex')}</button>
@@ -208,7 +214,7 @@ export function SettingsPage({ client, gateway, onNavigate }: {
       <p className={styles.note}>{t('settings.dangerNote')}</p>
     </section>
 
-    {restore && <Dialog title={t('settings.restoreAction')} busy={busy === 'restore'}
+    {restore && <Dialog width="narrow" title={t('settings.restoreAction')} busy={busy === 'restore'}
       description={t('settings.restoreBody', { path: restore.sourcePath, time: restore.createdAt })}
       onClose={() => setRestore(null)} footer={<footer className="form-footer">
         <span>{t('settings.restoreNote')}</span>

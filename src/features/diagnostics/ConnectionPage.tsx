@@ -235,7 +235,7 @@ export function ConnectionPage({ client, providers }: { client: DesktopClient; p
       <section className={styles.card}>
         <div className={styles.header}><div><h2>{t('diag.advice')}</h2></div></div>
         {suggestions.length === 0
-          ? <p className={styles.ok}><Check size={15} />{t('diag.allPassed')}</p>
+          ? <p className={styles.ok}><Check size={14} />{t('diag.allPassed')}</p>
           : <ul className={styles.advice}>{suggestions.map(item => <li key={item.messageKey}>
             <strong>{item.title}</strong>
             <ul>{item.steps.map(step => <li key={step}>{step}</li>)}</ul>

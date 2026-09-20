@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import type { Model, Provider } from '@/contracts/types';
+import type { Model, Protocol, Provider } from '@/contracts/types';
 import { type DesktopClient, isCoreError } from '@/desktop/client';
 import { CheckCell, CheckCells } from '@/components/CheckCell';
 import { Dialog } from '@/components/Dialog';
@@ -93,6 +93,7 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
         }, policy, reasoningTouched),
         inCatalog,
         displayNameOverridden: true,
+        protocolOverride: (String(data.get('protocolOverride') ?? '') || null) as Protocol | null,
       }, model?.version ?? 0);
       updateDirty(false);
       await onSaved();
@@ -107,7 +108,7 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
   return <div className={styles.page}>
     <header className={styles.header}>
       <div>
-        <button className="text-button" onClick={leave}><ChevronLeft size={15} />{t('diag.model')}</button>
+        <button className="text-button" onClick={leave}><ChevronLeft size={14} />{t('diag.model')}</button>
         <h1 className="text-page-title">{model ? model.displayName : t('editor.new')}</h1>
       </div>
     </header>
@@ -138,6 +139,14 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
             <input name="outputLimit" defaultValue={policy.outputLimit ?? ''} placeholder={t('editor.outputPlaceholder')} /></label>
         </div>
         <p className="field-hint">{t('editor.limitsHint')}</p>
+
+        {/* 只有一个字段，不再另起一个小节标题：标题与字段名同为「接口协议」是重复的。 */}
+        <label><span className="field-label">{t('editor.protocol')}<FieldHelp text={t('editor.protocolHint')} /></span>
+          <select name="protocolOverride" defaultValue={model?.protocolOverride ?? ''}>
+            <option value="">{t('editor.protocolFollowProvider')}</option>
+            <option value="responses">Responses</option>
+            <option value="chat_completions">Chat Completions</option>
+          </select></label>
 
         <h3 className="form-section">{t('editor.inputsTitle')}</h3>
         <CheckCells>{EDITABLE_INPUT_KINDS.map(kind => <CheckCell key={kind}
@@ -176,7 +185,7 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
 
         <details className={styles.advanced}>
           <summary className={styles.advancedSummary}>
-            <ChevronRight size={15} className={styles.chevron} aria-hidden="true" />
+            <ChevronRight size={14} className={styles.chevron} aria-hidden="true" />
             {t('editor.advanced')}
           </summary>
           <div className={styles.advancedBody}>
@@ -197,7 +206,7 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
       </footer>
     </form>
 
-    {discard && <Dialog title={t('editor.discardTitle')} dirty={false} description={t('editor.discardBody')} onClose={() => setDiscard(false)} footer={<footer className="form-footer">
+    {discard && <Dialog width="narrow" title={t('editor.discardTitle')} dirty={false} description={t('editor.discardBody')} onClose={() => setDiscard(false)} footer={<footer className="form-footer">
         <span>{t('editor.discardIrreversible')}</span>
         <div className="actions">
           <button onClick={() => setDiscard(false)} autoFocus>{t('editor.keepEditing')}</button>

@@ -95,11 +95,18 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
   const [gateway, setGateway] = useState<GatewayReport | null>(null);
   /** 当前已生效的配置；用于概览的“当前配置”卡。 */
   const [summary, setSummary] = useState<AppliedSummary | null>(null);
-  /** 首次接入向导：没有供应商时自动进入，用户可「稍后再说」并在设置里重新打开。 */
+  /** 首次接入向导是否已被主动结束（「稍后再说」或走完最后一步），记住了就不再自动展开。 */
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
     try { return localStorage.getItem('gptswitch.onboarding.dismissed') === 'true'; } catch { return false; }
   });
-  const [onboardingForced, setOnboardingForced] = useState(false);
+  /** 向导当前是否打开。**不能**由「零供应商」推导出来：那个推导会在保存第一个供应商的瞬间把向导关掉，
+   *  于是第 3 步「测试并应用」永远走不到，主线就在半路断掉了。向导一旦打开就留到用户自己结束它。 */
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  /**
+   * 向导走到第几步。**放在宿主里**，与模型编辑器同源：向导在第 2 步会把人送去整页模型编辑器，
+   * 那一刻向导会卸载；步骤留在组件内部的话，人一回来就又被扔回第 1 步。
+   */
+  const [onboardingStep, setOnboardingStep] = useState(0);
   const [selectedProviderId, setSelectedProviderId] = useState('');
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -122,9 +129,25 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
   const [confirm, setConfirm] = useState<{ title: string; body: string; confirmLabel: string; run: () => Promise<void> } | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const selectedProvider = providers.find(p => p.id === selectedProviderId);
-  /** 没有供应商就是首次接入；用户主动关掉之后不再自动展开。 */
-  const showOnboarding = (onboardingForced || (providers.length === 0 && !onboardingDismissed))
-    && page === 'overview' && !modelEditor && !providerEditor;
+  /**
+   * 向导渲染在概览页里。供应商弹窗是覆盖在上面的模态，**不**让向导卸载——否则用户点
+   * 「添加供应商」再关掉弹窗，向导会退回第 1 步，白走一遍。整页模型编辑器是替换式渲染，
+   * 那种情况下由 `onboardingStep` 记住位置。
+   */
+  const showOnboarding = onboardingOpen && page === 'overview' && !modelEditor;
+
+  /** 结束向导：关掉并记住，之后不再自动展开（要再来一次得从设置页主动打开）。 */
+  const closeOnboarding = useCallback(() => {
+    setOnboardingOpen(false);
+    setOnboardingDismissed(true);
+    try { localStorage.setItem('gptswitch.onboarding.dismissed', 'true'); } catch { /* 存不了只影响下次是否自动展开 */ }
+  }, []);
+  /** 重新打开向导时从第 1 步开始：主动重来一遍的人要的是完整流程，不是上次停在哪。 */
+  const openOnboarding = useCallback(() => {
+    setOnboardingStep(0);
+    setOnboardingOpen(true);
+    setPage('overview');
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true); setError('');
@@ -137,6 +160,13 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
     finally { setLoading(false); setLoaded(true); }
   }, [client]);
   useEffect(() => { void refresh(); }, [refresh]);
+  /**
+   * 首次接入自动展开一次：还没有供应商，且用户没主动结束过向导。
+   * 只在首屏加载完成后判断，避免数据还没到就先闪出一个向导。
+   */
+  useEffect(() => {
+    if (loaded && !onboardingDismissed && providers.length === 0) setOnboardingOpen(true);
+  }, [loaded, onboardingDismissed, providers.length]);
   useEffect(() => {
     let current = true;
     client.platformInfo()
@@ -189,11 +219,13 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
     <a className="skip-link" href="#main-content" onClick={() => document.getElementById('main-content')?.focus()}>{t('common.skipToContent')}</a>
     <aside className={styles.sidebar}>
       <div className={styles.brand} data-tauri-drag-region="deep"><div className={styles.brandIcon}><AppLogo size={20} /></div><div><strong>{t('app.name')}</strong><span>{t('app.subtitle')}</span></div></div>
-      <nav aria-label={t('shell.navLabel')}>{navigation.map(({ id, icon: Icon }) => <button key={id} className={page === id ? styles.active : ''} aria-current={page === id ? 'page' : undefined} onClick={() => navigate(id)}><Icon size={18} />{t(`nav.${id}`)}</button>)}</nav>
+      {/* 文字包在 span 里：窄窗（含 200% 缩放）侧栏收窄成图标栏时把它视觉隐藏，
+          但保留在无障碍树里——收起文字不该把按钮的可见名字也一起收掉。 */}
+      <nav aria-label={t('shell.navLabel')}>{navigation.map(({ id, icon: Icon }) => <button key={id} className={page === id ? styles.active : ''} aria-current={page === id ? 'page' : undefined} onClick={() => navigate(id)}><Icon size={18} /><span className={styles.navLabel}>{t(`nav.${id}`)}</span></button>)}</nav>
       {/* 设置按设计放在侧栏底部，与日常导航分开。 */}
       <button className={`${styles.settingsEntry} ${page === 'settings' ? styles.active : ''}`}
         aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}>
-        <SettingsIcon size={18} />{t('nav.settings')}
+        <SettingsIcon size={18} /><span className={styles.navLabel}>{t('nav.settings')}</span>
       </button>
       <div className={styles.sidebarBottom}><ShieldCheck size={18} /><div><strong>{t('shell.localConfig')}</strong><span>{t('shell.credentialsInSecureStore')}</span></div></div>
       <div className={styles.version}>{t('app.name')} <span>{__APP_VERSION__} · {t('app.inDevelopment')}</span></div>
@@ -207,31 +239,36 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
           onCancel={() => { setModelEditor(null); setEditorDirty(false); }}
           onSaved={async () => { setModelEditor(null); setEditorDirty(false); showToast(t('copy.draftSaved')); await refresh(); }} /> : <>
         {!showOnboarding && <header className={styles.pageHeader}><div><h1 className="text-page-title">{t(`nav.${page}`)}</h1><p>{({ overview: t('page.overviewHint'), providers: t('page.providersHint'), codexConfig: t('page.codexHint'), diagnostics: t('page.diagnosticsHint'), logs: t('page.logsHint'), settings: t('page.settingsHint') })[page]}</p></div>
-          <div className="actions"><button className="icon-button" aria-label={t('common.reload')} disabled={loading} onClick={() => void refresh()}><RefreshCw size={17} className={loading ? styles.spin : ''} /></button>
-            {page !== 'codexConfig' && page !== 'logs' && page !== 'diagnostics' && page !== 'settings' && <button className="primary" disabled={loading} onClick={() => setProviderEditor('new')}><Plus size={17} />{t('action.addProvider')}</button>}</div></header>}
+          <div className="actions"><button className="icon-button" aria-label={t('common.reload')} disabled={loading} onClick={() => void refresh()}><RefreshCw size={18} className={loading ? styles.spin : ''} /></button>
+            {page !== 'codexConfig' && page !== 'logs' && page !== 'diagnostics' && page !== 'settings' && <button className="primary" disabled={loading} onClick={() => setProviderEditor('new')}><Plus size={18} />{t('action.addProvider')}</button>}</div></header>}
         {/* 页面状态（加载失败）留在页面里：它要一直看得见，直到状态本身改变。
             动作结果（已保存、已应用…）走全局 Toast，弹窗与常规界面共用同一个位置。 */}
         {error && <div className="error-message" role="alert">{error}</div>}
         {!loaded && !error ? <div className={styles.empty} role="status" aria-live="polite">{t('shell.loading')}</div> : <>
           {showOnboarding && <OnboardingPage client={client} providers={providers} models={models}
             credentialsByProvider={credentialsByProvider}
+            step={onboardingStep} onStepChange={setOnboardingStep}
             onOpenProviderForm={() => setProviderEditor('new')}
             onOpenModelEditor={() => { if (providers.length) setModelEditor('new'); }}
-            onViewDiff={() => navigate('codexConfig')}
-            onDismiss={() => {
-              setOnboardingForced(false);
-              setOnboardingDismissed(true);
-              try { localStorage.setItem('gptswitch.onboarding.dismissed', 'true'); } catch { /* 存不了只影响下次是否自动展开 */ }
-            }} />}
+            /* 走到最后一步就是「去应用」：向导的活干完了，不再留在概览页上。 */
+            onViewDiff={() => { closeOnboarding(); navigate('codexConfig'); }}
+            onDismiss={closeOnboarding} />}
           {page === 'overview' && !showOnboarding && <OverviewPage providers={providers} models={models}
             credentialsByProvider={credentialsByProvider} gateway={gateway} summary={summary}
             pendingCount={pending.length} onNavigate={navigate} onAddProvider={() => setProviderEditor('new')} />}
           {page === 'providers' && !providers.length && <section className={styles.card}>
             <EmptyState icon={Server} title={t('empty.addFirstProviderTitle')}
               description={t('providers.addFirstBody')}
-              action={<button className="primary" onClick={() => setProviderEditor('new')}><Plus size={17} />{t('action.addProvider')}</button>} />
+              action={<button className="primary" onClick={() => setProviderEditor('new')}><Plus size={18} />{t('action.addProvider')}</button>} />
           </section>}
           {page === 'providers' && providers.length > 0 && <div className={styles.providerLayout}><section className={styles.providerList} aria-label={t('providers.list')}>
+            {/* 搜索框以前缺着：`query` 状态、过滤逻辑与「没有匹配」的空态都在，就是没有输入的地方——
+                供应商一多只能靠眼睛在 300px 的列表里找。 */}
+            {providers.length > 1 && <div className={styles.providerSearch}>
+              <Search size={16} aria-hidden="true" />
+              <input type="search" value={query} aria-label={t('providers.searchAria')} placeholder={t('providers.searchPlaceholder')}
+                onChange={event => setQuery(event.target.value)} />
+            </div>}
             {visibleProviders.map(provider => {
               const status = providerStatus(provider, credentialsByProvider[provider.id] ?? []);
               const modelCount = models.filter(m => m.providerId === provider.id).length;
@@ -270,7 +307,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
               测试连接都在供应商弹窗里，由「编辑配置」进入。同一件事只有一个入口，
               才不会出现两处谁才算数的问题。
             */}
-            <div className={styles.cardHeader}><h3><Boxes size={17} />{t('models.title')}</h3>
+            <div className={styles.cardHeader}><h3><Boxes size={18} />{t('models.title')}</h3>
               <button onClick={() => setModelEditor('new')} disabled={!selectedProvider}><Plus size={16} />{t('action.addModel')}</button></div>
             <ModelsPage client={client} providers={providers} models={models} onChanged={refresh}
               onEditModel={target => setModelEditor(target)} providerScope={selectedProvider.id} embedded />
@@ -278,7 +315,8 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
           {page === 'codexConfig' && <CodexConfigPage client={client} models={models} summary={summary} onApplied={() => void refresh()} />}
           {page === 'diagnostics' && <ConnectionPage client={client} providers={providers} />}
           {page === 'logs' && <LogsPage client={client} />}
-          {page === 'settings' && <SettingsPage client={client} gateway={gateway} onNavigate={navigate} />}
+          {page === 'settings' && <SettingsPage client={client} gateway={gateway} onNavigate={navigate}
+            onReopenOnboarding={openOnboarding} />}
           {/* 待应用条常驻在页面内容之后：配好供应商与模型之后，生效只差「应用 + 重启」这一步，
               入口不能只在 Codex 配置页里（真机上用户在自己配的页面上找不到任何能生效的按钮）。
               Codex 配置页自己就有完整的操作行，那里不重复出现。 */}
@@ -293,7 +331,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
       providers={providers} models={models}
       onSaved={providerSaved} onKeysChanged={keysChanged} onChanged={refresh}
       onClose={() => setProviderEditor(null)} />}
-    {pendingNav && <Dialog title={t('editor.discardTitle')} description={t('editor.discardBody')} dirty={false}
+    {pendingNav && <Dialog width="narrow" title={t('editor.discardTitle')} description={t('editor.discardBody')} dirty={false}
       onClose={() => setPendingNav(null)} footer={<footer className="form-footer">
         <span>{t('editor.discardIrreversible')}</span>
         <div className="actions">
@@ -310,7 +348,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
     {/* 唯一的提示宿主：不论从哪个页面、哪个弹窗推的提示，都出现在同一个位置。 */}
     <ToastHost />
 
-    {confirm && <Dialog title={confirm.title} description={confirm.body} onClose={() => setConfirm(null)} busy={confirmBusy}
+    {confirm && <Dialog width="narrow" title={confirm.title} description={confirm.body} onClose={() => setConfirm(null)} busy={confirmBusy}
       footer={<footer className="form-footer">
           <span>{t('common.irreversible')}</span>
           <div className="actions">

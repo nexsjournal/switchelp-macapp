@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ChevronRight } from 'lucide-react';
-import type { Model } from '@/contracts/types';
+import type { Model, Protocol } from '@/contracts/types';
 import { type DesktopClient, isCoreError } from '@/desktop/client';
 import { CheckCell, CheckCells } from '@/components/CheckCell';
 import { Dialog } from '@/components/Dialog';
@@ -47,6 +47,8 @@ export function ModelFormDialog({ client, providerId, model, onSaved, onClose }:
   const [ability, setAbility] = useState<CapabilityState>(() => capabilityState(policy));
   /** 档位 chip 只表达「档位式」：没动过就别改写已保存的声明（核心还支持开关式与预算式）。 */
   const [reasoningTouched, setReasoningTouched] = useState(false);
+  /** 协议覆盖：默认跟随供应商。同一家上游可能一套模型走 Responses、另一套只有 chat/completions。 */
+  const [protocolOverride, setProtocolOverride] = useState<Protocol | null>(model?.protocolOverride ?? null);
   const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
@@ -89,6 +91,7 @@ export function ModelFormDialog({ client, providerId, model, onSaved, onClose }:
         policy: policyFromCapability(next, policy, reasoningTouched),
         inCatalog: model?.inCatalog ?? true,
         displayNameOverridden: model?.displayNameLayer.overridden ?? false,
+        protocolOverride,
       }, model?.version ?? 0);
       setDirty(false);
       await onSaved(saved);
@@ -129,9 +132,18 @@ export function ModelFormDialog({ client, providerId, model, onSaved, onClose }:
           <input value={output} onChange={event => { setOutput(event.target.value); setDirty(true); }}
             placeholder={fallback(output, DISCOVERY_DEFAULT_LIMITS.outputLimit) ?? t('editor.outputPlaceholder')} /></label>
 
+        <label><span className="field-label">{t('editor.protocol')}<FieldHelp text={t('editor.protocolHint')} /></span>
+          {/* 默认跟随供应商：绝大多数模型不需要单独设协议，把「跟随」放在第一项。 */}
+          <select aria-label={t('editor.protocol')} value={protocolOverride ?? ''}
+            onChange={event => { setProtocolOverride(event.target.value === '' ? null : event.target.value as Protocol); setDirty(true); }}>
+            <option value="">{t('editor.protocolFollowProvider')}</option>
+            <option value="responses">Responses</option>
+            <option value="chat_completions">Chat Completions</option>
+          </select></label>
+
         <details className={styles.advanced}>
           <summary className={styles.advancedSummary}>
-            <ChevronRight size={15} className={styles.chevron} aria-hidden="true" />
+            <ChevronRight size={14} className={styles.chevron} aria-hidden="true" />
             {t('editor.advanced')}
           </summary>
           <div className={styles.advancedBody}>

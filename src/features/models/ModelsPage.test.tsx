@@ -1,8 +1,9 @@
-import { screen, within } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ModelsPage } from './ModelsPage';
+import { ToastHost } from '@/components/Toast';
 import type { Model, Provider } from '@/contracts/types';
 import { testClient } from '../../../tests/helpers/client';
 import { renderWithToasts } from '../../../tests/helpers/render';
@@ -137,6 +138,34 @@ describe('模型列表', () => {
 
     await user.click(screen.getByRole('button', { name: '测试 目录中的模型' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('还没有可用的 Key，无法测试');
+  });
+});
+
+describe('宿主给定的供应商作用域', () => {
+  /**
+   * 回归：作用域曾经被复制进 `useState(providerScope ?? 'all')`，而切换供应商不会重挂载本组件，
+   * 于是标题已经换成 B、表格里还是 A 的模型，B 的模型在界面上完全没有入口。
+   */
+  const client = testClient();
+  const scoped = (providerScope: string) =>
+    <><ModelsPage client={client} providers={[providerA, providerB]} models={[catalogModel, looseModel]}
+      onChanged={vi.fn()} onEditModel={vi.fn()} providerScope={providerScope} embedded /><ToastHost /></>;
+
+  it('切换作用域后表格内容跟着换，勾选不跨供应商保留', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(scoped('p_a'));
+    expect(screen.getByText('目录中的模型')).toBeInTheDocument();
+    expect(screen.queryByText('目录外的模型')).not.toBeInTheDocument();
+
+    // 在 A 上勾一个，再去 B：那个勾不能跟过去，否则批量删除会作用在看不见的行上。
+    await user.click(screen.getByLabelText('选择 目录中的模型'));
+    expect(screen.getByRole('region', { name: '批量操作' })).toBeInTheDocument();
+
+    rerender(scoped('p_b'));
+
+    expect(screen.getByText('目录外的模型')).toBeInTheDocument();
+    expect(screen.queryByText('目录中的模型')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '批量操作' })).not.toBeInTheDocument();
   });
 });
 

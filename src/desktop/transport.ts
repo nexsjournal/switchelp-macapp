@@ -32,11 +32,12 @@ export const desktopClient: DesktopClient = {
     return { items: query ? providers.filter(p => `${p.name} ${p.endpoint}`.toLocaleLowerCase().includes(query)) : providers, nextCursor: null };
   },
   saveProvider: (draft, expectedVersion) => call<Provider>('providers_save', { draft, expectedVersion }),
-  listPresets: async () => [],
   listCredentials: providerId => call<Credential[]>('credentials_list', { providerId }),
   addCredential: (providerId, label, secret) => call<Credential>('credentials_add', { providerId, label, secret }),
   replaceCredential: (credentialId, secret, expectedVersion) => call<Credential>('credentials_replace', { credentialId, secret, expectedVersion }),
   selectCredential: (providerId, credentialId) => call<void>('credentials_select', { providerId, credentialId }),
+  renameCredential: (credentialId, label, expectedVersion) => call<Credential>('credentials_rename', { credentialId, label, expectedVersion }),
+  setCredentialDisabled: (credentialId, disabled, expectedVersion) => call<Credential>('credentials_set_disabled', { credentialId, disabled, expectedVersion }),
   listModels: () => call<Model[]>('models_list'),
   saveModel: (draft, expectedVersion) => call<Model>('models_save', { draft, expectedVersion }),
   deleteModel: (modelId, expectedVersion) => call<void>('models_delete', { modelId, expectedVersion }),

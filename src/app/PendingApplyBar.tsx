@@ -103,7 +103,7 @@ export function PendingApplyBar({ client, providers, models, onApplied, onOpenDi
       </div>
     </div>
 
-    {plan && <ApplyConfirmDialog plan={plan} kind="apply" busy={busy} error={error}
+    {plan && <ApplyConfirmDialog plan={plan} kind="apply" busy={busy} error={error} models={models}
       commitLabel={t('codex.applyAndRestart')}
       onConfirm={() => void confirmApply()} onClose={() => { setPlan(null); setError(''); }} />}
   </>;

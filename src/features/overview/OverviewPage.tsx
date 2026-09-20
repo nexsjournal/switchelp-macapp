@@ -74,7 +74,7 @@ export function OverviewPage({ providers, models, credentialsByProvider, gateway
   if (!providers.length) {
     return <section className={styles.card}><EmptyState icon={Server} title={t('empty.addFirstProviderTitle')}
       description={t('overview.addFirstProviderBody')}
-      action={<button className="primary" onClick={onAddProvider}><Plus size={17} />{t('action.addProvider')}</button>} /></section>;
+      action={<button className="primary" onClick={onAddProvider}><Plus size={18} />{t('action.addProvider')}</button>} /></section>;
   }
 
   return <div className={styles.page}>
@@ -103,12 +103,12 @@ export function OverviewPage({ providers, models, credentialsByProvider, gateway
         </div>
         {/* 外层 flex 只放图标与文字块；文字必须包在同一个子元素里，
             否则文字块会自己成为 flex 项而被块化、排版打散。 */}
-        <div className={styles.note}><ShieldCheck size={15} />
+        <div className={styles.note}><ShieldCheck size={14} />
           <p>{t('overview.configBoundary')}</p></div>
       </section>
 
       <section className={styles.card}>
-        <div className={styles.cardHeader}><h2>{t('overview.connectionStatus')}</h2><Activity size={17} /></div>
+        <div className={styles.cardHeader}><h2>{t('overview.connectionStatus')}</h2><Activity size={18} /></div>
         <ul className={styles.status}>
           <li>
             <span className={`${styles.dot} ${gateway?.running ? styles.ok : styles.warn}`} aria-hidden="true" />
@@ -159,7 +159,7 @@ export function OverviewPage({ providers, models, credentialsByProvider, gateway
       <div className={styles.cardHeader}><h2>{t('overview.pendingModels')}<span className="badge">{pendingCount}</span></h2>
         <button className="text-button" onClick={() => onNavigate('providers')}>{t('overview.viewAll')}<ArrowRight size={14} /></button></div>
       {pendingCount === 0
-        ? <p className={styles.muted}><Boxes size={15} />{t('overview.nothingPending')}</p>
+        ? <p className={styles.muted}><Boxes size={14} />{t('overview.nothingPending')}</p>
         : <ul className={styles.pending}>{models.filter(model => model.inCatalog && model.hostState !== 'loaded').slice(0, 5).map(model => <li key={model.id}>
           <span className="text-mono text-muted">{model.upstreamId}</span>
           <span className={styles.pendingName}>{model.displayName}</span>
@@ -170,7 +170,7 @@ export function OverviewPage({ providers, models, credentialsByProvider, gateway
     {pendingCount > 0 && <div className={styles.applyBar} role="region" aria-label={t('overview.pendingChanges')}>
       <span><KeyRound size={16} />{t('overview.pendingBar', { count: pendingCount })}</span>
       <div className="actions">
-        <button onClick={() => onNavigate('providers')}><CircleHelp size={15} />{t('overview.whereToChange')}</button>
+        <button onClick={() => onNavigate('providers')}><CircleHelp size={14} />{t('overview.whereToChange')}</button>
         <button className="primary" onClick={() => onNavigate('codexConfig')}>{t('overview.viewDiffAndApply')}</button>
       </div>
     </div>}

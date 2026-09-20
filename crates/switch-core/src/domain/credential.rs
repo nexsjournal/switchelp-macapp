@@ -138,6 +138,19 @@ impl Credential {
         Ok(())
     }
 
+    /// 停用 / 重新启用。
+    ///
+    /// 重新启用回到「已保存、尚未检测」而不是停用前的状态：停用期间上游可能已经换过政策，
+    /// 把旧的「已验证」带回来等于替用户确认了一件没验证过的事。
+    pub fn set_disabled(&mut self, disabled: bool) {
+        self.status = if disabled {
+            CredentialStatus::Disabled
+        } else {
+            CredentialStatus::Saved
+        };
+        self.version += 1;
+    }
+
     /// 设为新请求使用：仅可选择的凭据能被固定。
     pub fn mark_active(&self) -> Result<(), CoreError> {
         if !self.status.is_selectable() {

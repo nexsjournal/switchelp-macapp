@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from './App';
 import { instance, plan, provider, testClient } from '../../tests/helpers/client';
+import type { Credential, Provider } from '@/contracts/types';
 
 test('首次接入保存真实草稿调用，失败后保留表单且不宣称 Codex 已加载', async () => {
   const user = userEvent.setup();
@@ -48,7 +49,7 @@ test('回归：保存供应商不会因为「刚把 Key 设为当前」而误报
   // 既没原因也没出路的「保存失败，请刷新后重试」——这正是真机上发生的事。
   const user = userEvent.setup();
   let version = 0;
-  const stored = () => ({ ...provider, id: 'p_new', name: 'qiyuan', version, activeCredentialId: version > 1 ? 'k_new' : null });
+  const stored = () => ({ ...provider, id: 'p_new', name: '示例中转', version, activeCredentialId: version > 1 ? 'k_new' : null });
   const saveProvider = vi.fn().mockImplementation(async (draft: Record<string, unknown>, expected: number) => {
     if (expected !== version) throw { code: 'CONFLICT', messageKey: 'error.conflict', safeDetails: [], retryable: false, recoveryActions: [] };
     version += 1;
@@ -66,8 +67,8 @@ test('回归：保存供应商不会因为「刚把 Key 设为当前」而误报
   await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
   await user.click(screen.getAllByRole('button', { name: '添加供应商' })[0]!);
   const dialog = screen.getByRole('dialog');
-  await user.type(within(dialog).getByLabelText('供应商名称'), 'qiyuan');
-  await user.type(within(dialog).getByLabelText('Base URL'), 'https://api.qiyuanapi.cc/v1');
+  await user.type(within(dialog).getByLabelText('供应商名称'), '示例中转');
+  await user.type(within(dialog).getByLabelText('Base URL'), 'https://api.relay.example.test/v1');
   await user.type(within(dialog).getByLabelText('API Key'), 'synthetic-secret');
 
   // 「获取可用模型」会先落库，并把 Key 设为当前 Key —— 版本因此从 1 变成 2。
@@ -77,7 +78,7 @@ test('回归：保存供应商不会因为「刚把 Key 设为当前」而误报
   await user.click(within(dialog).getByRole('button', { name: '保存' }));
   expect(await screen.findByText('已保存。')).toBeInTheDocument();
   expect(screen.queryByText('保存失败，请刷新后重试。')).not.toBeInTheDocument();
-  expect(saveProvider).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'qiyuan' }), 2);
+  expect(saveProvider).toHaveBeenLastCalledWith(expect.objectContaining({ name: '示例中转' }), 2);
 });
 
 test('回归：宿主的版本还没刷新上来时，撞上冲突会自己重读再写一次', async () => {
@@ -526,4 +527,150 @@ test('移出目录要确认，并按版本号提交 inCatalog=false', async () =
 
   await user.click(within(dialog).getByRole('button', { name: '移出目录' }));
   expect(saveModel).toHaveBeenCalledWith(expect.objectContaining({ id: 'm_1', inCatalog: false }), 3);
+});
+
+/**
+ * 模拟全新安装。向导的「已看过」标记存在 localStorage 里，且用例之间刻意不清
+ * （见 vitest.setup.ts），所以「首次接入」这类用例必须自己清掉，否则会静默地
+ * 跑在「已经看过向导」的状态下，断言一个永远不会出现的向导。
+ */
+function freshInstall() { localStorage.removeItem('gptswitch.onboarding.dismissed'); }
+
+test('回归：保存第一个供应商之后向导不消失，第 3 步仍然走得到', async () => {
+  /*
+   * 向导曾经是从「零供应商」推导出来的：保存第一家供应商的瞬间它就整体消失，
+   * 第 3 步「测试并应用」永远走不到，用户被扔在一个只走了一半的流程里。
+   * 向导一旦打开就该留到用户自己结束它。
+   */
+  freshInstall();
+  const user = userEvent.setup();
+  let saved = false;
+  const stored: Provider = { ...provider, id: 'p_test', activeCredentialId: 'k_1', version: 2 };
+  const key: Credential = { id: 'k_1', providerId: 'p_test', label: '默认', secretRef: 'gptswitch/p_test/k_1/v1',
+    secretVersion: 1, maskedSuffix: '••••1234', status: 'verified', scope: null, lastVerifiedAt: null,
+    version: 1, createdAt: '2026-09-18T00:00:00Z' };
+  const client = testClient({
+    listProviders: vi.fn().mockImplementation(async () => ({ items: saved ? [stored] : [], nextCursor: null })),
+    listCredentials: vi.fn().mockImplementation(async () => saved ? [key] : []),
+    saveProvider: vi.fn().mockImplementation(async () => { saved = true; return stored; }),
+    addCredential: vi.fn().mockResolvedValue(key),
+    selectCredential: vi.fn().mockResolvedValue(undefined),
+  });
+  render(<App client={client} />);
+
+  // 首次接入：没有供应商，向导自动展开。
+  expect(await screen.findByRole('heading', { name: '接入向导' })).toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: '下一步' }));
+  await user.click(await screen.findByRole('button', { name: '添加供应商' }));
+  const dialog = await screen.findByRole('dialog');
+  await user.type(within(dialog).getByLabelText('供应商名称'), '测试服务');
+  await user.type(within(dialog).getByLabelText('Base URL'), 'https://example.test/v1');
+  await user.type(within(dialog).getByLabelText('API Key'), 'synthetic-secret');
+  await user.click(within(dialog).getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(client.saveProvider).toHaveBeenCalled());
+  await user.click(within(dialog).getByRole('button', { name: '取消' }));
+
+  // 供应商已经存在了，但向导必须还在——否则第 3 步永远到不了。
+  expect(await screen.findByRole('heading', { name: '接入向导' })).toBeInTheDocument();
+  // 清单要反映刚存进去的那家供应商，而不是还停在空白状态。
+  expect(await screen.findByText('已添加 1 个供应商')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '下一步' }));
+  expect(screen.getByRole('heading', { name: '测试并应用' })).toBeInTheDocument();
+  // 第 3 步要自己说清为什么「应用」会重启 Codex，而不是让用户自己猜。
+  expect(screen.getByText(/Codex 只在启动时读配置/)).toBeInTheDocument();
+});
+
+test('退出向导后可以从设置页重新打开', async () => {
+  freshInstall();
+  const user = userEvent.setup();
+  render(<App client={testClient()} />);
+  await user.click(await screen.findByRole('button', { name: '稍后再说' }));
+  expect(screen.queryByRole('heading', { name: '接入向导' })).not.toBeInTheDocument();
+
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(screen.getByRole('button', { name: '设置' }));
+  await user.click(await screen.findByRole('button', { name: '重新打开接入向导' }));
+  expect(await screen.findByRole('heading', { name: '接入向导' })).toBeInTheDocument();
+});
+
+test('Key 池：加第二个 Key、改名、停用、删除都能做，当前 Key 受保护', async () => {
+  // 回归：核心与数据库一直支持多个 Key，但界面只有一个输入框——留空＝不动、填了＝替换当前那个。
+  // 于是「新增、替换、禁用」这三件事里有三件做不了，而它们是 P0 要求。
+  const user = userEvent.setup();
+  const first: Credential = { id: 'k_1', providerId: 'p_test', label: '日常', secretRef: 'r1', secretVersion: 1,
+    maskedSuffix: '••••4f2a', status: 'verified', scope: null, lastVerifiedAt: null, version: 1, createdAt: '2026-09-18T00:00:00Z' };
+  const second: Credential = { ...first, id: 'k_2', label: '备用', secretRef: 'r2', maskedSuffix: '••••91c7', status: 'saved', version: 1 };
+  const active = { ...provider, activeCredentialId: 'k_1' };
+  const addCredential = vi.fn().mockResolvedValue(second);
+  const renameCredential = vi.fn().mockResolvedValue({ ...second, label: '按量', version: 2 });
+  const setCredentialDisabled = vi.fn().mockResolvedValue({ ...second, status: 'disabled', version: 2 });
+  const deleteCredential = vi.fn().mockResolvedValue(undefined);
+  const client = testClient({
+    listProviders: vi.fn().mockResolvedValue({ items: [active], nextCursor: null }),
+    listCredentials: vi.fn().mockResolvedValue([first, second]),
+    addCredential, renameCredential, setCredentialDisabled, deleteCredential,
+  });
+  render(<App client={client} />);
+  await screen.findByText('测试供应商');
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(screen.getByRole('button', { name: '编辑配置' }));
+  const dialog = await screen.findByRole('dialog');
+
+  const pool = within(dialog).getByRole('region', { name: '已保存的 Key' });
+  expect(within(pool).getByText('日常')).toBeInTheDocument();
+  expect(within(pool).getByText('备用')).toBeInTheDocument();
+
+  // 当前 Key 不能停用也不能删——理由写在 title 里，而不是点下去才报错。
+  const currentRow = within(pool).getAllByRole('listitem')[0]!;
+  expect(within(currentRow).getByRole('button', { name: '停用' })).toBeDisabled();
+  expect(within(currentRow).getByRole('button', { name: '停用' })).toHaveAttribute('title', '当前 Key 不能停用，请先把别的 Key 设为当前');
+
+  // 非当前的那条：停用会走核心调用，并把版本号带上。
+  const otherRow = within(pool).getAllByRole('listitem')[1]!;
+  await user.click(within(otherRow).getByRole('button', { name: '停用' }));
+  await waitFor(() => expect(setCredentialDisabled).toHaveBeenCalledWith('k_2', true, 1));
+
+  // 改名：行内编辑，保存时带上版本号。
+  await user.click(within(otherRow).getByRole('button', { name: '编辑' }));
+  const nameInput = within(pool).getByLabelText('重命名「备用」');
+  await user.clear(nameInput);
+  await user.type(nameInput, '按量');
+  await user.click(within(pool).getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(renameCredential).toHaveBeenCalledWith('k_2', '按量', 1));
+
+  // 加第二个 Key：行内表单，备注名必填。
+  await user.click(within(pool).getByRole('button', { name: '添加 Key' }));
+  await user.click(within(pool).getByRole('button', { name: '保存这个 Key' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('备注名');
+  expect(addCredential).not.toHaveBeenCalled();
+  await user.type(within(pool).getByLabelText('备注名'), '第三个');
+  await user.type(within(pool).getByLabelText('API Key'), 'synthetic-secret');
+  await user.click(within(pool).getByRole('button', { name: '保存这个 Key' }));
+  await waitFor(() => expect(addCredential).toHaveBeenCalledWith('p_test', '第三个', 'synthetic-secret'));
+
+  // 删除非当前 Key。
+  await user.click(within(otherRow).getByRole('button', { name: '删除' }));
+  await waitFor(() => expect(deleteCredential).toHaveBeenCalledWith('k_2'));
+});
+
+test('供应商列表可以搜索：过滤逻辑早就在，缺的是输入框', async () => {
+  // 回归：`query` 状态、`visibleProviders` 过滤与「没有匹配」的空态都已经写好，
+  // 但没有任何地方能输入——供应商一多只能在 300px 宽的列表里用眼睛找。
+  const user = userEvent.setup();
+  const other = { ...provider, id: 'p_other', name: '另一家' };
+  render(<App client={testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider, other], nextCursor: null }) })} />);
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  const list = await screen.findByRole('region', { name: '供应商列表' });
+  expect(within(list).getByText('测试供应商')).toBeInTheDocument();
+  expect(within(list).getByText('另一家')).toBeInTheDocument();
+
+  await user.type(screen.getByLabelText('搜索供应商'), '另一');
+  expect(within(list).queryByText('测试供应商')).not.toBeInTheDocument();
+  expect(within(list).getByText('另一家')).toBeInTheDocument();
+
+  // 搜不到时给空态，而不是一张空白列表。
+  await user.clear(screen.getByLabelText('搜索供应商'));
+  await user.type(screen.getByLabelText('搜索供应商'), '不存在的东西');
+  expect(await screen.findByText('没有匹配的供应商')).toBeInTheDocument();
 });
