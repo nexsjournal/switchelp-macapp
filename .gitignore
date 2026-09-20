@@ -10,6 +10,9 @@ test-results/
 playwright-report/
 .local/
 
+# 代理会话的计划草稿：本机工作记录，不进仓库（.zcode/skills 是项目技能，要进）。
+.zcode/plans/
+
 # 第三方产品的界面参考截图：用户提供的本地调研素材，不随仓库再分发。
 # 若要随仓库分发，请先确认这些截图的使用授权，然后删除下面这一行。
 referimg/

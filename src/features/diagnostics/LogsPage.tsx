@@ -200,7 +200,7 @@ export function LogsPage({ client }: { client: DesktopClient }) {
       </div>
 
       <div className={styles.scopes}>
-        {CATEGORIES.map(scope => <label key={scope} className={styles.checkbox}>
+        {CATEGORIES.map(scope => <label key={scope} className="check-label">
           <input type="checkbox" checked={selectedScopes.includes(scope)}
             onChange={event => {
               setSelectedScopes(list => event.target.checked ? [...list, scope] : list.filter(item => item !== scope));

@@ -342,10 +342,14 @@ impl WorkspaceService {
             .repository
             .get_provider(&credential.provider_id)?
             .ok_or_else(|| CoreError::not_found("供应商"))?;
+        // 删「当前 Key」是允许的：只有一个 Key 时无从切换，拒绝删除会让供应商永远删不掉。
+        // 删掉之后这个供应商就没有当前 Key，模型探测与应用会照旧拦下来并说明原因。
         if provider.active_credential_id.as_ref() == Some(&credential.id) {
-            return Err(CoreError::validation(
-                "该 Key 正被供应商使用，请先选择另一个 Key 再删除",
-            ));
+            let mut updated = provider;
+            updated.active_credential_id = None;
+            updated.updated_at = now();
+            let version = updated.version;
+            self.repository.save_provider(updated, version)?;
         }
         CredentialResolver::without_cache(self.vault.as_ref()).revoke(&credential)?;
         match self.repository.delete_credential(&credential.id) {
@@ -373,19 +377,28 @@ impl WorkspaceService {
             .repository
             .get_provider(&provider_id)?
             .ok_or_else(|| CoreError::not_found("供应商"))?;
-        let credentials = self.repository.list_credentials(&provider_id)?.len();
-        let models = self
+        // 有依赖也允许删：界面上会先把「将一并删除 N 个 Key、M 个模型」说清楚再确认。
+        // 拒绝删除而依赖又删不掉（见上面删 Key 的死结）会把用户卡死在角落里。
+        // 先清掉「当前 Key」：仓库层还会拦一次「有人在用这个 Key」，那是删凭据的最后一道守卫。
+        if provider.active_credential_id.is_some() {
+            let mut cleared = provider.clone();
+            cleared.active_credential_id = None;
+            cleared.updated_at = now();
+            let version = cleared.version;
+            self.repository.save_provider(cleared, version)?;
+        }
+        for credential in self.repository.list_credentials(&provider_id)? {
+            CredentialResolver::without_cache(self.vault.as_ref()).revoke(&credential)?;
+            self.repository.delete_credential(&credential.id)?;
+        }
+        for model in self
             .repository
             .list_models()?
             .into_iter()
             .filter(|model| model.provider_id == provider_id)
-            .count();
-        if credentials > 0 || models > 0 {
-            return Err(CoreError::validation(format!(
-                "该供应商还有 {credentials} 个 Key、{models} 个模型；请先删除它们再删除供应商"
-            )));
+        {
+            self.repository.delete_model(&model.id)?;
         }
-        let _ = provider;
         self.repository.delete_provider(&provider_id)
     }
 

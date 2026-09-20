@@ -95,6 +95,8 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
   const [inspect, setInspect] = useState<InspectResult | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [draft, setDraft] = useState<{ kind: 'apply' | 'restore'; plan: ApplyPlan } | null>(null);
+  /** 可以应用的模型：纳入目录且没被停用。一个都没有时「应用到 Codex」没有意义。 */
+  const applicableCount = models.filter(model => model.inCatalog && model.lifecycle !== 'disabled').length;
   const [status, setStatus] = useState<ApplyStatus | null>(null);
   // 初始即视为「正在检测」：挂载后立刻就会检测，先渲染空态会闪一下。
   const [busy, setBusy] = useState('detect');
@@ -140,6 +142,24 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
     setNotice(kind === 'apply' ? t('codex.diffPreviewed') : t('codex.restorePreviewed'));
   });
 
+  /**
+   * 把重启结果翻译成一句准确的话。
+   *
+   * 三种情况分别说清楚，因为用户接下来要做的事不一样：重启成功可以去菜单里找模型；
+   * 没退出去要他自己退出；退出但没起来要他自己打开。笼统说「已重启」会让他在一个
+   * 没更新的菜单里找模型。
+   */
+  function restartNotice(report: { quitConfirmed: boolean; quitForced: boolean; launchedConfirmed: boolean } | null, applied: boolean): string {
+    if (!report) return t('codex.restartHostFailed');
+    if (report.quitConfirmed && report.launchedConfirmed) {
+      // 用了兜底信号就说明它没来得及自己退出：未保存的对话可能已经丢了，必须说。
+      if (report.quitForced) return t('codex.restartHostForced');
+      return applied ? t('codex.appliedAndRestarted') : t('codex.restartHostRequested');
+    }
+    if (!report.quitConfirmed) return t('codex.restartHostStillRunning');
+    return t('codex.restartHostFailed');
+  }
+
   const commit = () => run('commit', async () => {
     if (!draft) return;
     const request = { planId: draft.plan.id, planHash: draft.plan.planHash, idempotencyKey: newIdempotencyKey() };
@@ -151,17 +171,17 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
     // 配置写完了，但 Codex 只在启动时读它：直接重启，省掉「再点一次重启」这一步。
     // 重启失败不影响已经提交的配置，所以这里只降级成提示。
     const report = await client.restartHost(instanceId).catch(() => null);
-    setNotice(report?.launched ? t('codex.appliedAndRestarted') : t('codex.restartHostFailed'));
+    setNotice(restartNotice(report, true));
   });
 
   /**
    * 重启宿主。Codex 只在启动时读 `config.toml`：写完配置不重启，模型不会出现在它的菜单里。
-   * 命令只负责「请求退出 + 重新打开」，所以这里说的是「已请求重启」，不是「已生效」。
+   * 结果按进程是否真的退出、是否真的回来报告，而不是按命令有没有发出去。
    */
   const restartHost = () => run('restart', async () => {
     const report = await client.restartHost(instanceId);
     setRestartConfirm(false);
-    setNotice(report.launched ? t('codex.restartHostRequested') : t('codex.restartHostFailed'));
+    setNotice(restartNotice(report, false));
   });
 
   const confirmReload = (loaded: boolean) => run('confirm', async () => {
@@ -253,6 +273,11 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
         <button onClick={() => void makePlan('restore')} disabled={!instanceId || busy === 'plan'}><History size={16} />{t('action.restorePrevious')}</button>
         <button onClick={() => setRestartConfirm(true)} disabled={!instanceId || busy === 'restart'}><RefreshCw size={15} />{t('action.restartHost')}</button>
       </div>
+      {/*
+        没有可应用的模型时提前说明，而不是让用户点一个必然失败的按钮。
+        按钮本身不禁用：模型列表可能还没加载完，禁用会造成「明明有模型却点不动」。
+      */}
+      {applicableCount === 0 && <p className={styles.subtle}>{t('codex.noApplicableModels')}</p>}
     </section>
 
     {inspect && <section className={styles.card}>

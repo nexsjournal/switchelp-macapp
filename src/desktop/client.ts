@@ -103,11 +103,17 @@ export interface GatewayReport {
 }
 
 /** 当前已生效的配置摘要。`defaultModel` 为空表示历史事务没有记录，不用当前表单值顶替。 */
-/** 一次重启请求的结果。`launched` 只表示进程起来了，不表示配置已生效。 */
+/**
+ * 一次重启的结果。两个字段都是**观察到**的结论，不是「命令发出去了」：
+ * `quitConfirmed` 为 false 表示旧进程还在跑，本次没有重启；`launchedConfirmed`
+ * 为 false 表示 Codex 已经退出但没有重新起来。界面按这两个值说准确的话。
+ */
 export interface HostRestart {
   appPath: string;
-  quitRequested: boolean;
-  launched: boolean;
+  quitConfirmed: boolean;
+  /** 优雅退出没成、最后是发信号结束的；界面要提醒未保存内容可能丢失。 */
+  quitForced: boolean;
+  launchedConfirmed: boolean;
 }
 
 export interface AppliedSummary {

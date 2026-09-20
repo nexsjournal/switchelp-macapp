@@ -200,7 +200,7 @@ export function ConnectionPage({ client, providers }: { client: DesktopClient; p
       </div>
 
       <div className={styles.run}>
-        <label className={styles.checkbox}>
+        <label className="check-label">
           <input type="checkbox" checked={includeGenerate} onChange={event => setIncludeGenerate(event.target.checked)} />{t('diag.includeGenerate')}</label>
         <div className={styles.runActions}>
           <span className="text-muted">{t('diag.readOnlyNote')}</span>

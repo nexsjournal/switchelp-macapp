@@ -1,0 +1,13 @@
+/*
+ * 思考档位：一个 chip = 一个档位，chip 一半是「设为默认」，一半是「删掉」，
+ * 末尾的加号是唯一的添加入口（参考界面的样子）。
+ */
+.levels { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.level { display: inline-flex; align-items: center; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-input); }
+.pick { height: var(--control-height-compact); padding: 0 8px 0 12px; border: 0; border-radius: 0; background: transparent;
+  font-size: var(--font-size-control); font-family: var(--font-mono); }
+.pick[aria-pressed='true'] { background: var(--accent-subtle); color: var(--accent); font-weight: 500; }
+.remove { width: 24px; height: var(--control-height-compact); padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text-muted); }
+.add { width: var(--control-height-compact); height: var(--control-height-compact); padding: 0; }
+/* 类名写两遍以压过全局的输入框规则（见 ProviderForm.module.css 里的说明）。 */
+.input.input { width: 120px; height: var(--control-height-compact); font-size: var(--font-size-control); font-family: var(--font-mono); }

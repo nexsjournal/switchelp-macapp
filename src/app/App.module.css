@@ -73,17 +73,23 @@
 .search input:not([type='checkbox']) { padding-left: 38px; }
 .providerLayout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 24px; align-items: start; }
 .providerList { display: grid; gap: 10px; }
-/* 每行直接给出状态与操作入口，而不是只留一个箭头。 */
-/* 侧栏列只有 280px：状态与操作放到第二行，避免文字被裁掉。 */
-.providerItem { display: flex; flex-direction: column; align-items: stretch; gap: 10px; min-height: 76px; padding: 14px 16px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+/*
+ * 一行就是选中这家供应商：状态直接写在行里，行上不再放操作按钮——
+ * Key 的添加、替换、删除都在详情页那一栏，行上再放一个只是把同一个弹窗开了第二遍。
+ * 侧栏列只有 300px：状态放到第二行，避免文字被裁掉。
+ */
+.providerItem { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 10px; min-height: 76px; height: auto; padding: 14px 16px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font-size: var(--font-size-body); white-space: normal; text-align: left; }
 .providerItem.selected { background: var(--bg-selected); border-color: var(--accent-border); }
-.providerSelect { flex: 1; min-width: 0; height: auto; padding: 0; gap: 12px; justify-content: flex-start; text-align: left; background: transparent; border-color: transparent; }
-.providerSelect:hover:not(:disabled) { background: transparent; }
-.providerName { min-width: 0; }
+/* 选中底色会把 --text-muted 压到 4.5 以下（实测深 4.11 / 浅 4.38），选中行内提级为次级色。 */
+.providerItem.selected .providerName span,
+.providerItem.selected .statusLabel { color: var(--text-secondary); }
+/* 选中态要盖过全局的 button:hover 底色，否则一悬停选中看着就“掉了”。 */
+.providerItem.selected:hover:not(:disabled) { background: var(--bg-selected); border-color: var(--accent-border); }
+.providerHead { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.providerName { flex: 1; min-width: 0; }
 .providerName strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
 .providerName span { display: block; color: var(--text-muted); font-size: 11px; margin-top: 4px; }
-.providerStatus { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.providerStatus button { height: 30px; font-size: 12px; padding: 0 12px; }
+.providerStatus { display: flex; align-items: center; gap: 8px; }
 .statusLabel { color: var(--text-secondary); font-size: 11px; white-space: nowrap; }
 .statusDot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--border-control); }
 .statusDot.success { background: var(--status-success); }

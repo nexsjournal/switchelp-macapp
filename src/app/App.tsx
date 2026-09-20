@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, Boxes, Check, ChevronRight, KeyRound, LayoutDashboard, ListChecks, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, SlidersHorizontal, Settings as SettingsIcon } from 'lucide-react';
+import { Activity, Boxes, Check, ChevronRight, LayoutDashboard, ListChecks, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, SlidersHorizontal, Settings as SettingsIcon } from 'lucide-react';
 import type { Credential, Model, Provider } from '@/contracts/types';
 import { type AppliedSummary, type DesktopClient, type GatewayReport, type PlatformReport, toCoreError } from '@/desktop/client';
 import { desktopClient } from '@/desktop/transport';
 import { ProviderForm } from '@/features/providers/ProviderForm';
-import { CredentialForm } from '@/features/providers/CredentialForm';
 import { ModelEditorPage } from '@/features/models/ModelEditorPage';
 import { OnboardingPage } from '@/features/onboarding/OnboardingPage';
 import { OverviewPage } from '@/features/overview/OverviewPage';
@@ -13,7 +12,6 @@ import { Dialog } from '@/components/Dialog';
 import { EmptyState } from '@/components/EmptyState';
 import { AppLogo } from '@/components/AppLogo';
 import { CodexConfigPage } from '@/features/codex/CodexConfigPage';
-import { ProbePanel } from '@/features/providers/ProbePanel';
 import { ConnectionPage } from '@/features/diagnostics/ConnectionPage';
 import { LogsPage } from '@/features/diagnostics/LogsPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
@@ -68,14 +66,17 @@ function applyPlatform(report: PlatformReport) {
 /**
  * 供应商行的状态摘要。参考截图里每一行都能直接看到状态，而不是只有一个箭头；
  * 判定只依据本工具自己保存的 Key 元数据，不猜测连接是否可用。
+ *
+ * 这里只给状态，不给操作按钮：Key 与模型的增删改、测试连接都在供应商弹窗里，
+ * 由「编辑配置」进入，行上不放第二套入口。
  */
-function providerStatus(provider: Provider, credentials: Credential[]): { tone: 'success' | 'warning' | 'muted'; label: string; action: string } {
-  if (!credentials.length) return { tone: 'muted', label: t('overview.keysMissing'), action: t('overview.configure') };
+function providerStatus(provider: Provider, credentials: Credential[]): { tone: 'success' | 'warning' | 'muted'; label: string } {
+  if (!credentials.length) return { tone: 'muted', label: t('overview.keysMissing') };
   const active = credentials.find(credential => credential.id === provider.activeCredentialId);
-  if (!active) return { tone: 'warning', label: t('overview.keysNoSelection', { count: credentials.length }), action: t('overview.manage') };
-  if (active.status === 'verified') return { tone: 'success', label: t('overview.keyVerified', { label: active.label }), action: t('overview.manage') };
-  if (active.status === 'auth_failed') return { tone: 'warning', label: t('overview.keyAuthFailed', { label: active.label }), action: t('overview.manage') };
-  return { tone: 'muted', label: t('overview.keyUntested', { label: active.label }), action: t('overview.manage') };
+  if (!active) return { tone: 'warning', label: t('overview.keysNoSelection', { count: credentials.length }) };
+  if (active.status === 'verified') return { tone: 'success', label: t('overview.keyVerified', { label: active.label }) };
+  if (active.status === 'auth_failed') return { tone: 'warning', label: t('overview.keyAuthFailed', { label: active.label }) };
+  return { tone: 'muted', label: t('overview.keyUntested', { label: active.label }) };
 }
 
 export function App({ client = desktopClient, initialPage = 'overview' }: { client?: DesktopClient; initialPage?: Page }) {
@@ -102,14 +103,20 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
   const [loading, setLoading] = useState(true);
   /** 首次加载完成前才整页占位；后续刷新不得卸载当前页面（会丢失事务流程状态）。 */
   const [loaded, setLoaded] = useState(false);
-  const [keyLoading, setKeyLoading] = useState(false);
   const [keyVersion, setKeyVersion] = useState(0);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [providerEditor, setProviderEditor] = useState<Provider | 'new' | null>(null);
+  /**
+   * 模型编辑器全 App 只有一份状态：模型目录页、供应商卡片、接入向导都从这里打开。
+   * 只有一个入口才能在侧栏导航时统一拦截脏表单，而不是各自为政地丢内容。
+   * `'new'` 表示新建；`Model` 表示编辑既有模型。
+   */
   const [modelEditor, setModelEditor] = useState<Model | 'new' | null>(null);
-  const [keyEditor, setKeyEditor] = useState<Credential | 'new' | null>(null);
-  const [switching, setSwitching] = useState(false);
+  /** 编辑器是否已有未保存内容；侧栏导航据此决定是直接离开还是先确认。 */
+  const [editorDirty, setEditorDirty] = useState(false);
+  /** 导航目标暂存：用户在确认框里选择放弃后，才真正离开编辑器。 */
+  const [pendingNav, setPendingNav] = useState<Page | null>(null);
   /** 破坏性操作一律走确认：说明后果、说清不能撤销，再执行。 */
   const [confirm, setConfirm] = useState<{ title: string; body: string; confirmLabel: string; run: () => Promise<void> } | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
@@ -117,7 +124,6 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
   /** 没有供应商就是首次接入；用户主动关掉之后不再自动展开。 */
   const showOnboarding = (onboardingForced || (providers.length === 0 && !onboardingDismissed))
     && page === 'overview' && !modelEditor && !providerEditor;
-  const credentials = credentialsByProvider[selectedProviderId] ?? [];
 
   const refresh = useCallback(async () => {
     setLoading(true); setError('');
@@ -139,33 +145,32 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
   }, [client]);
   useEffect(() => {
     let current = true;
-    if (!providers.length) { setCredentialsByProvider({}); setKeyLoading(false); return; }
-    setKeyLoading(true);
+    if (!providers.length) { setCredentialsByProvider({}); return; }
     Promise.all(providers.map(provider => client.listCredentials(provider.id)
       .then(items => [provider.id, items] as const)
       .catch(() => [provider.id, [] as Credential[]] as const)))
       .then(pairs => { if (current) setCredentialsByProvider(Object.fromEntries(pairs)); })
-      .catch(e => { if (current) setError(toCoreError(e).safeDetails.join(t('common.listSeparator')) || t('shell.keysLoadFailed')); })
-      .finally(() => { if (current) setKeyLoading(false); });
+      .catch(e => { if (current) setError(toCoreError(e).safeDetails.join(t('common.listSeparator')) || t('shell.keysLoadFailed')); });
     return () => { current = false; };
   }, [client, providers, keyVersion]);
 
-  function navigate(next: Page) { setPage(next); setQuery(''); setNotice(''); }
-  function saved(kind: 'provider' | 'model' | 'key') {
-    setProviderEditor(null); setModelEditor(null); setKeyEditor(null);
-    setNotice(kind === 'key' ? t('providers.keySaved') : t('copy.draftSaved'));
-    setKeyVersion(version => version + 1); void refresh();
+  function navigate(next: Page) {
+    // 编辑器开着时侧栏导航不是死路：脏表单先确认，干净则直接走。
+    // 以前 navigate 只改 page、从不清编辑器，面包屑说在别处、正文却还停在表单上。
+    if (modelEditor) {
+      if (editorDirty) { setPendingNav(next); return; }
+      setModelEditor(null);
+      setEditorDirty(false);
+    }
+    setPage(next); setQuery(''); setNotice('');
   }
-  async function selectKey(credential: Credential) {
-    if (!selectedProvider) return;
-    setSwitching(true); setError('');
-    try {
-      await client.selectCredential(selectedProvider.id, credential.id);
-      setNotice(t('providers.keySelectedBody', { label: credential.label }));
-      await refresh();
-    } catch (e) { setError(toCoreError(e).safeDetails.join(t('common.listSeparator')) || t('providers.switchKeyFailed')); }
-    finally { setSwitching(false); }
-  }
+  /** Key 变了：供应商行的状态与详情里的当前 Key 都要跟着变。 */
+  function keysChanged() { setKeyVersion(version => version + 1); void refresh(); }
+  /**
+   * 供应商弹窗保存成功后只刷新数据，**不关弹窗**：它就地变成这家供应商的编辑态，
+   * 用户接着加 Key、获取模型，不必保存完再去找回来。
+   */
+  function providerSaved() { setNotice(t('copy.draftSaved')); keysChanged(); }
   const pending = models.filter(m => m.inCatalog && m.hostState !== 'loaded');
   const search = query.trim().toLocaleLowerCase();
   const visibleProviders = providers.filter(p => `${p.name} ${p.endpoint}`.toLocaleLowerCase().includes(search));
@@ -196,9 +201,9 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
       <main className={styles.main} id="main-content" tabIndex={-1}>
         {modelEditor ? <ModelEditorPage client={client} providers={providers}
           model={modelEditor === 'new' ? undefined : modelEditor}
-          onCancel={() => setModelEditor(null)}
-          onViewDiff={() => { setModelEditor(null); navigate('codexConfig'); }}
-          onSaved={async () => { setModelEditor(null); setNotice(t('copy.draftSaved')); await refresh(); }} /> : <>
+          onDirtyChange={setEditorDirty}
+          onCancel={() => { setModelEditor(null); setEditorDirty(false); }}
+          onSaved={async () => { setModelEditor(null); setEditorDirty(false); setNotice(t('copy.draftSaved')); await refresh(); }} /> : <>
         {!showOnboarding && <header className={styles.pageHeader}><div><h1 className="text-page-title">{t(`nav.${page}`)}</h1><p>{({ overview: t('page.overviewHint'), providers: t('page.providersHint'), codexConfig: t('page.codexHint'), diagnostics: t('page.diagnosticsHint'), logs: t('page.logsHint'), settings: t('page.settingsHint') })[page]}</p></div>
           <div className="actions"><button className="icon-button" aria-label={t('common.reload')} disabled={loading} onClick={() => void refresh()}><RefreshCw size={17} className={loading ? styles.spin : ''} /></button>
             {page !== 'codexConfig' && page !== 'logs' && page !== 'diagnostics' && page !== 'settings' && <button className="primary" disabled={loading} onClick={() => setProviderEditor('new')}><Plus size={17} />{t('action.addProvider')}</button>}</div></header>}
@@ -228,17 +233,17 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
               const status = providerStatus(provider, credentialsByProvider[provider.id] ?? []);
               const modelCount = models.filter(m => m.providerId === provider.id).length;
               const selected = selectedProviderId === provider.id;
-              return <div key={provider.id} className={`${styles.providerItem} ${selected ? styles.selected : ''}`}>
-                <button className={styles.providerSelect} onClick={() => setSelectedProviderId(provider.id)} aria-current={selected ? 'true' : undefined}>
-                  <div className={styles.monogram}>{provider.name.slice(0, 1)}</div>
-                  <div className={styles.providerName}><strong>{provider.name}</strong><span>{provider.enabled ? t('providers.modelCount', { count: modelCount }) : t('providers.disabledModelCount', { count: modelCount })}</span></div>
-                </button>
-                <div className={styles.providerStatus}>
+              return <button key={provider.id} className={`${styles.providerItem} ${selected ? styles.selected : ''}`}
+                onClick={() => setSelectedProviderId(provider.id)} aria-current={selected ? 'true' : undefined}>
+                <span className={styles.providerHead}>
+                  <span className={styles.monogram}>{provider.name.slice(0, 1)}</span>
+                  <span className={styles.providerName}><strong>{provider.name}</strong><span>{provider.enabled ? t('providers.modelCount', { count: modelCount }) : t('providers.disabledModelCount', { count: modelCount })}</span></span>
+                </span>
+                <span className={styles.providerStatus}>
                   <span className={`${styles.statusDot} ${styles[status.tone]}`} aria-hidden="true" />
                   <span className={styles.statusLabel}>{status.label}</span>
-                  <button onClick={() => { setSelectedProviderId(provider.id); setKeyEditor('new'); }}>{status.action}</button>
-                </div>
-              </div>;
+                </span>
+              </button>;
             })}
             {!visibleProviders.length && <EmptyState icon={Search} title={t('providers.noMatch')} description={t('providers.noMatchBody')} />}
           </section>{selectedProvider ? <section className={styles.card}>
@@ -247,31 +252,25 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
               <button className="danger" aria-label={t('providers.deleteProviderAria', { name: selectedProvider.name })}
                 onClick={() => setConfirm({
                   title: t('providers.deleteProvider'),
-                  body: t('providers.deleteProviderBody', { name: selectedProvider.name }),
+                  body: t('providers.deleteProviderBody', {
+                    name: selectedProvider.name,
+                    keys: (credentialsByProvider[selectedProvider.id] ?? []).length,
+                    models: models.filter(model => model.providerId === selectedProvider.id).length,
+                  }),
                   confirmLabel: t('providers.deleteProvider'),
                   run: async () => { await client.deleteProvider(selectedProvider.id); },
                 })}>{t('providers.deleteProvider')}</button>
             </div></div>
             <dl className={styles.details}><dt>{t('providers.endpoint')}</dt><dd className="text-mono break-anywhere">{selectedProvider.endpoint}</dd><dt>{t('providers.protocol')}</dt><dd>{selectedProvider.protocol === 'responses' ? 'Responses' : t('providers.chatPending')}</dd><dt>{t('providers.authKind')}</dt><dd>{selectedProvider.authKind === 'api_key' ? t('auth.apiKey') : t('providers.noAuth')}</dd></dl>
-            <div className={styles.cardHeader}><h3><KeyRound size={17} />{t('auth.apiKey')}</h3><button onClick={() => setKeyEditor('new')}><Plus size={16} />{t('action.addKey')}</button></div>
-            {keyLoading ? <p role="status">{t('providers.loadingKeys')}</p> : credentials.length ? <ul className={styles.keyList}>{credentials.map(credential => <li key={credential.id}><div><strong>{credential.label}</strong><span className="text-mono text-muted">{credential.maskedSuffix}</span></div><div className="actions"><button disabled={switching || selectedProvider.activeCredentialId === credential.id} onClick={() => void selectKey(credential)}>{selectedProvider.activeCredentialId === credential.id ? t('providers.currentKey') : t('providers.selectKey')}</button><button onClick={() => setKeyEditor(credential)} aria-label={t('providers.replaceAria', { label: credential.label })}>{t('providers.replaceKey')}</button>
-              <button className="danger" disabled={selectedProvider.activeCredentialId === credential.id}
-                title={selectedProvider.activeCredentialId === credential.id ? t('providers.keyInUse') : undefined}
-                aria-label={t('providers.deleteKeyAria', { label: credential.label })}
-                onClick={() => setConfirm({
-                  title: t('providers.deleteKey'),
-                  body: t('providers.deleteKeyBody', { label: credential.label }),
-                  confirmLabel: t('providers.deleteKey'),
-                  run: async () => { await client.deleteCredential(credential.id); },
-                })}>{t('action.delete')}</button></div></li>)}</ul> : <div className={styles.empty}><KeyRound size={24} /><h3>{t('empty.noKeyTitle')}</h3><p>{t('providers.noKeysBody')}</p></div>}
-            <div className={styles.note}><ShieldCheck size={17} /><p>{t('providers.keyHint')}</p></div>
-            <ProbePanel key={selectedProvider.id} client={client} provider={selectedProvider} credentialId={selectedProvider.activeCredentialId ?? null} />
-
-            {/* 供应商与它的模型在同一页：它们本来就是一件事（Key → 地址 → 模型 → 应用）。 */}
+            {/*
+              这一页只放事实（地址、协议、模型）与动作入口：Key 的增删改、获取模型、
+              测试连接都在供应商弹窗里，由「编辑配置」进入。同一件事只有一个入口，
+              才不会出现两处谁才算数的问题。
+            */}
             <div className={styles.cardHeader}><h3><Boxes size={17} />{t('models.title')}</h3>
               <button onClick={() => setModelEditor('new')} disabled={!selectedProvider}><Plus size={16} />{t('action.addModel')}</button></div>
             <ModelsPage client={client} providers={providers} models={models} onChanged={refresh}
-              onViewDiff={() => navigate('codexConfig')} providerScope={selectedProvider.id} embedded />
+              onEditModel={target => setModelEditor(target)} providerScope={selectedProvider.id} embedded />
           </section> : <section className={styles.card}><EmptyState icon={Settings2} title={t('providers.noneSelected')} description={t('providers.noneSelectedBody')} /></section>}</div>}
           {page === 'codexConfig' && <CodexConfigPage client={client} models={models} summary={summary} onApplied={() => void refresh()} />}
           {page === 'diagnostics' && <ConnectionPage client={client} providers={providers} />}
@@ -282,7 +281,26 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
       </main>
       <footer className={styles.statusbar}><span><span className={`${styles.dot} ${gateway?.running ? styles.online : styles.offline}`} />{gatewayText(gateway)}</span><span>{t('shell.pendingModels', { count: pending.length })} <span className={styles.separator}>/</span>{t('shell.configOnDevice')}</span></footer>
     </div>
-    {providerEditor && <ProviderForm client={client} provider={providerEditor === 'new' ? undefined : providerEditor} onSaved={() => saved('provider')} onClose={() => setProviderEditor(null)} />}
+    {providerEditor && <ProviderForm client={client} provider={providerEditor === 'new' ? undefined : providerEditor}
+      models={models}
+      onSaved={providerSaved} onKeysChanged={keysChanged} onModelsChanged={refresh}
+      onClose={() => setProviderEditor(null)} />}
+    {pendingNav && <Dialog title={t('editor.discardTitle')} description={t('editor.discardBody')} dirty={false}
+      onClose={() => setPendingNav(null)}>
+      <div className="form-fields"><div className="form-footer">
+        <span>{t('editor.discardIrreversible')}</span>
+        <div className="actions">
+          <button onClick={() => setPendingNav(null)} autoFocus>{t('editor.keepEditing')}</button>
+          <button className="danger" onClick={() => {
+            const target = pendingNav;
+            setPendingNav(null);
+            setModelEditor(null);
+            setEditorDirty(false);
+            setPage(target); setQuery(''); setNotice('');
+          }}>{t('editor.leaveDiscard')}</button>
+        </div>
+      </div></div>
+    </Dialog>}
     {confirm && <Dialog title={confirm.title} description={confirm.body} onClose={() => setConfirm(null)} busy={confirmBusy}>
       <div className="form-fields">
         <div className="form-footer">
@@ -303,6 +321,5 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
         </div>
       </div>
     </Dialog>}
-    {keyEditor && selectedProvider && <CredentialForm client={client} provider={selectedProvider} credential={keyEditor === 'new' ? undefined : keyEditor} onSaved={() => saved('key')} onClose={() => setKeyEditor(null)} />}
   </div>;
 }

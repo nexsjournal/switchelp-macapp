@@ -52,6 +52,80 @@ fn setup() -> (WorkspaceService, Arc<MemoryVault>, Arc<SqliteRepository>) {
     )
 }
 
+/// 只有一个 Key 时也要能删掉它。
+///
+/// 回归：过去 `delete_credential` 拒绝删除「当前 Key」，而只有一个 Key 时无从切换，
+/// 于是 Key 删不掉、供应商也就永远删不掉——用户被卡死在角落里。
+#[test]
+fn the_active_key_can_be_deleted_and_clears_the_selection() {
+    let (service, vault, _repo) = setup();
+    let provider = service.save_provider(provider_draft(), 0).unwrap();
+    let key = service
+        .add_credential(provider.id.as_str(), "日常", "synthetic-secret".into())
+        .unwrap();
+    service
+        .select_credential(provider.id.as_str(), key.id.as_str())
+        .unwrap();
+
+    service.delete_credential(key.id.as_str()).unwrap();
+
+    assert!(service
+        .list_credentials(provider.id.as_str())
+        .unwrap()
+        .is_empty());
+    let after = service
+        .list_providers()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == provider.id)
+        .unwrap();
+    assert_eq!(
+        after.active_credential_id, None,
+        "删掉当前 Key 之后不应再指向它"
+    );
+    assert!(
+        vault.load(&key.secret_ref).unwrap().is_none(),
+        "安全条目要一并撤销"
+    );
+}
+
+/// 删除供应商会连同它的 Key 与模型一起删掉。
+///
+/// 回归：过去有依赖就拒绝删除，叠加上面那个死结，供应商再也删不掉。
+#[test]
+fn deleting_a_provider_removes_its_keys_and_models() {
+    let (service, vault, _repo) = setup();
+    let provider = service.save_provider(provider_draft(), 0).unwrap();
+    let key = service
+        .add_credential(provider.id.as_str(), "日常", "synthetic-secret".into())
+        .unwrap();
+    service
+        .select_credential(provider.id.as_str(), key.id.as_str())
+        .unwrap();
+    service
+        .save_model(
+            ready_model(provider.id.as_str(), "vendor/model-x", "模型甲"),
+            0,
+        )
+        .unwrap();
+
+    service.delete_provider(provider.id.as_str()).unwrap();
+
+    assert!(service.list_providers().unwrap().is_empty());
+    assert!(service
+        .list_credentials(provider.id.as_str())
+        .unwrap()
+        .is_empty());
+    assert!(
+        service.list_models().unwrap().is_empty(),
+        "它的模型也应一并删除"
+    );
+    assert!(
+        vault.load(&key.secret_ref).unwrap().is_none(),
+        "安全条目要一并撤销"
+    );
+}
+
 #[test]
 fn key_rotation_keeps_old_request_secret_and_rejects_stale_edit() {
     let (service, vault, repo) = setup();
@@ -346,7 +420,7 @@ fn deleting_a_model_rejects_a_stale_version() {
 
 /// 删除 Key：正在使用的不能删；删掉后安全条目必须一起消失。
 #[test]
-fn deleting_a_credential_revokes_its_secret_and_refuses_the_active_one() {
+fn deleting_a_credential_revokes_its_secret_and_allows_the_active_one() {
     let (service, vault, _repo) = setup();
     let provider = service.save_provider(provider_draft(), 0).unwrap();
     let active = service
@@ -359,52 +433,29 @@ fn deleting_a_credential_revokes_its_secret_and_refuses_the_active_one() {
         .select_credential(provider.id.as_str(), active.id.as_str())
         .unwrap();
 
-    // 正在使用的 Key 不能删。
-    let error = service.delete_credential(active.id.as_str()).unwrap_err();
-    assert_eq!(error.code, ErrorCode::ValidationFailed);
-    assert!(error
-        .safe_details
-        .iter()
-        .any(|detail| detail.contains("先选择另一个 Key")));
-
     let before = vault.len();
     assert_eq!(before, 2);
+
+    // 当前 Key 也能删：删掉之后供应商没有当前 Key，而不是留下一个走不出去的死结。
+    service.delete_credential(active.id.as_str()).unwrap();
+    let after_active = service
+        .list_providers()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == provider.id)
+        .unwrap();
+    assert_eq!(after_active.active_credential_id, None);
+    assert!(
+        vault.load(&active.secret_ref).unwrap().is_none(),
+        "秘密必须一起撤销"
+    );
+
     service.delete_credential(spare.id.as_str()).unwrap();
 
-    assert_eq!(
-        service
-            .list_credentials(provider.id.as_str())
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(vault.len(), 1, "秘密必须随元数据一起撤销");
+    assert!(service
+        .list_credentials(provider.id.as_str())
+        .unwrap()
+        .is_empty());
+    assert_eq!(vault.len(), 0, "秘密必须随元数据一起撤销");
     assert!(vault.load(&spare.secret_ref).unwrap().is_none());
-}
-
-/// 删除供应商：还有 Key 或模型时明确拒绝，不静默级联。
-#[test]
-fn deleting_a_provider_refuses_until_its_children_are_gone() {
-    let (service, _vault, _repo) = setup();
-    let provider = service.save_provider(provider_draft(), 0).unwrap();
-    let credential = service
-        .add_credential(provider.id.as_str(), "日常", "synthetic".into())
-        .unwrap();
-
-    let error = service.delete_provider(provider.id.as_str()).unwrap_err();
-    assert!(error
-        .safe_details
-        .iter()
-        .any(|detail| detail.contains("请先删除它们")));
-
-    service.delete_credential(credential.id.as_str()).unwrap();
-    let mut draft = ready_model(provider.id.as_str(), "vendor/a", "模型");
-    draft.in_catalog = false;
-    let model = service.save_model(draft, 0).unwrap();
-    service
-        .delete_model(model.id.as_str(), model.version)
-        .unwrap();
-
-    service.delete_provider(provider.id.as_str()).unwrap();
-    assert!(service.list_providers().unwrap().is_empty());
 }
