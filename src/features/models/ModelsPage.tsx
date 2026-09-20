@@ -6,7 +6,7 @@ import { Dialog } from '@/components/Dialog';
 import { EmptyState } from '@/components/EmptyState';
 import { showToast } from '@/components/Toast';
 import { RowMenu } from '@/components/RowMenu';
-import { hostStateKeys, modelDraft } from './policy';
+import { hostStateKeys, hostStateVariant, modelDraft } from './policy';
 import styles from './ModelsPage.module.css';
 
 import { currentLocale, t } from '@/i18n';
@@ -226,7 +226,7 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
               <td><strong>{model.displayName}</strong><span className={`${styles.line} text-mono break-anywhere`}>{model.upstreamId}</span></td>
               {!providerScope && <td>{providerName(model.providerId)}</td>}
               <td className="text-mono">{model.policy.contextLimit?.toLocaleString() ?? t('common.undeclared')}<span className={styles.line}>{model.policy.outputLimit?.toLocaleString() ?? t('common.undeclared')}</span></td>
-              <td><span className={`badge ${model.hostState === 'pending_apply' ? 'warning' : ''}`}>{t(hostStateKeys[model.hostState])}</span></td>
+              <td><span className={`badge ${hostStateVariant(model.hostState)}`}>{t(hostStateKeys[model.hostState])}</span></td>
               <td><div className={styles.rowActions}>
                 <button onClick={() => onEditModel(model)} aria-label={t('models.editAria', { name: model.displayName })}>{t('common.edit')}</button>
                 <button onClick={() => void probeModel(model)} disabled={busy === 'probe'} aria-label={t('models.testAria', { name: model.displayName })}>{t('common.test')}</button>

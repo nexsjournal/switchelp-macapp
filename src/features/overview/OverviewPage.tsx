@@ -3,7 +3,7 @@ import { Activity, ArrowRight, Boxes, CircleHelp, KeyRound, Plus, Server, Settin
 import type { Credential, Model, Provider } from '@/contracts/types';
 import type { AppliedSummary, GatewayReport } from '@/desktop/client';
 import { EmptyState } from '@/components/EmptyState';
-import { hostStateKeys } from '@/features/models/policy';
+import { hostStateKeys, hostStateVariant } from '@/features/models/policy';
 import styles from './OverviewPage.module.css';
 
 import { t } from '@/i18n';
@@ -166,7 +166,7 @@ export function OverviewPage({ providers, models, credentialsByProvider, gateway
         : <ul className={styles.pending}>{models.filter(model => model.inCatalog && model.hostState !== 'loaded').slice(0, 5).map(model => <li key={model.id}>
           <span className="text-mono text-muted">{model.upstreamId}</span>
           <span className={styles.pendingName}>{model.displayName}</span>
-          <span className="badge warning">{t(hostStateKeys[model.hostState])}</span>
+          <span className={`badge ${hostStateVariant(model.hostState)}`}>{t(hostStateKeys[model.hostState])}</span>
         </li>)}</ul>}
     </section>
 

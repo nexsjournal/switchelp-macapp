@@ -49,6 +49,27 @@ function renderPage(overrides: Partial<Parameters<typeof testClient>[0]> = {}, m
 }
 
 describe('模型列表', () => {
+  it('Codex 状态用语义色：已加载是成功色，待应用与等待重载是警告色', () => {
+    // 真机反馈：配置早已生效、Codex 也重启过了，界面却一直把「已加载」显示成中性甚至
+    // 琥珀色。语义色只有两格，映射集中在一处，避免两个页面各写一套。
+    renderPage({}, [
+      { ...catalogModel, id: 'm_loaded', displayName: '已加载的', hostState: 'loaded' },
+      { ...catalogModel, id: 'm_pending', displayName: '待应用的', hostState: 'pending_apply' },
+      { ...catalogModel, id: 'm_await', displayName: '等待重载的', hostState: 'awaiting_reload' },
+      { ...catalogModel, id: 'm_loose', displayName: '不在目录的', hostState: 'not_in_catalog', inCatalog: false },
+    ]);
+
+    // 按状态文案找到那个徽章再读 class——不依赖列结构，也不依赖文案之外的东西。
+    const chip = (label: string) => screen.getByText(label).closest('td')!.querySelector('span.badge')!.className;
+    expect(chip('已加载')).toContain('success');
+    expect(chip('待应用')).toContain('warning');
+    expect(chip('等待重载')).toContain('warning');
+    // 「未加入目录」不是问题状态，不该用颜色替用户下结论。
+    expect(chip('未加入目录')).not.toContain('warning');
+    expect(chip('未加入目录')).not.toContain('success');
+  });
+
+
   it('按名称搜索、按供应商与目录归属筛选', async () => {
     const user = userEvent.setup();
     renderPage();
