@@ -45,7 +45,12 @@ struct MockUpstream {
 
 enum MockReply {
     Sse(&'static str),
-    Status { code: u16, body: String },
+    Status {
+        code: u16,
+        body: String,
+    },
+    /// 先读请求、停一会儿再回：用来观察「请求进行中」的中间状态。
+    SseDelayed(&'static str, Duration),
 }
 
 impl MockUpstream {
@@ -64,6 +69,7 @@ impl MockUpstream {
                         code: *code,
                         body: body.clone(),
                     },
+                    MockReply::SseDelayed(body, delay) => MockReply::SseDelayed(body, *delay),
                 };
                 std::thread::spawn(move || {
                     let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -91,8 +97,11 @@ impl MockUpstream {
                         .push(String::from_utf8_lossy(&body).into_owned());
 
                     let mut stream = stream;
+                    if let MockReply::SseDelayed(_, delay) = reply {
+                        std::thread::sleep(delay);
+                    }
                     let response = match reply {
-                        MockReply::Sse(body) => format!(
+                        MockReply::SseDelayed(body, _) | MockReply::Sse(body) => format!(
                             "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{body}"
                         ),
                         MockReply::Status { code, body } => format!(
@@ -127,6 +136,10 @@ struct Harness {
     port: u16,
     token: GatewayToken,
     upstream: MockUpstream,
+    /// 用例据此制造「路由快照还在、底层实体已经没了」这类竞态。
+    repository: Arc<dyn Repository>,
+    /// 检查请求结束后目录版本的引用计数有没有回到 0。
+    router: Arc<GatewayRouter>,
 }
 
 /// 路由上冻结的模型策略。
@@ -200,6 +213,7 @@ impl Harness {
                     policy,
                     in_catalog: true,
                     display_name_overridden: true,
+                    protocol_override: None,
                 },
                 0,
             )
@@ -235,7 +249,7 @@ impl Harness {
         let gateway = Arc::new(Gateway::new(
             repository.clone(),
             vault,
-            router,
+            router.clone(),
             GatewayConfig {
                 instance_id: InstanceId::new(INSTANCE),
                 token: token.clone(),
@@ -248,6 +262,8 @@ impl Harness {
         gateway.spawn().unwrap();
         Self {
             gateway,
+            router,
+            repository,
             alias: model.catalog_alias.as_str().to_owned(),
             port,
             token,
@@ -281,6 +297,24 @@ impl Harness {
 
     fn request_body(&self) -> Value {
         request_body(&self.alias)
+    }
+
+    /// 任意路径上的 GET，用来看错误响应本身（而不是只看状态码）。
+    fn get_path(path: &str, token: Option<&str>) -> (u16, String) {
+        let agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .build()
+            .new_agent();
+        let mut call = agent.get(path).header("host", "127.0.0.1");
+        if let Some(token) = token {
+            call = call.header("authorization", format!("Bearer {token}"));
+        }
+        // 判定阶段失败的旧行为是**直接关掉连接**，于是这里会 `Err` 而不是拿到响应。
+        // 用例直接 unwrap：拿不到响应本身就是失败，报错信息比断言状态码更直白。
+        let response = call.call().expect("网关必须给出响应，而不是关掉连接");
+        let status = response.status().as_u16();
+        let text = response.into_body().read_to_string().unwrap_or_default();
+        (status, text)
     }
 }
 
@@ -890,4 +924,213 @@ fn pausing_the_gateway_rejects_new_requests_without_affecting_in_flight_ones() {
     harness.gateway.set_paused(false);
     let (status, _) = harness.post("responses", Some(&token), &harness.request_body());
     assert_eq!(status, 200, "恢复后应可继续");
+}
+
+/// 判定阶段的失败**必须**给一个可读的 HTTP 错误。
+///
+/// 回归：这些分支过去用 `?` 把错误冒到接受循环，而那里是 `let _ = handle(...)`，
+/// 于是连接被直接关掉——宿主看到的是 `Empty reply`，既没有状态码也没有原因，
+/// 用户只能看到界面「没反应」。项目自己在风险文档里写死了「失败必须可判定」，
+/// 这条用例就是那句话的可执行版本。
+mod every_failure_is_answerable {
+    use super::*;
+    use switch_core::domain::provider::Provider;
+
+    #[test]
+    fn models_with_an_unpublished_revision_answers_with_a_readable_error() {
+        let harness = Harness::start(
+            CHAT_COMPLETIONS_V1,
+            MockReply::Sse(CHAT_SSE),
+            Protocol::ChatCompletions,
+        );
+        let token = harness.token.expose().to_owned();
+        let url = format!(
+            "http://127.0.0.1:{}/i/{INSTANCE}/c/rev_missing/v1/models",
+            harness.port
+        );
+
+        let (status, body) = Harness::get_path(&url, Some(&token));
+        assert_eq!(status, 404, "未发布的目录版本不回落、也不该静默断开");
+        let payload: Value = serde_json::from_str(&body).expect("错误必须是 JSON 正文");
+        assert_eq!(payload["error"]["code"], "ROUTE_MISMATCH");
+        assert!(
+            payload["error"]["details"][0]
+                .as_str()
+                .unwrap_or_default()
+                .contains("rev_missing"),
+            "错误正文要说清是哪个版本，否则用户无从下手：{body}"
+        );
+    }
+
+    /// 请求进行中必须**真的**持有引用。
+    ///
+    /// 上一条用例只断言「结束后归零」——`retain` 从来没被调用时它同样成立（缺条目时
+    /// `release` 是空操作）。所以还需要这条：在请求还没结束时，引用数必须大于 0，
+    /// 否则回收策略会在别人正用着这个版本时把它删掉。
+    #[test]
+    fn an_in_flight_request_holds_a_reference_to_its_revision() {
+        let harness = Harness::start(
+            CHAT_COMPLETIONS_V1,
+            MockReply::SseDelayed(CHAT_SSE, Duration::from_millis(700)),
+            Protocol::ChatCompletions,
+        );
+        let token = harness.token.expose().to_owned();
+        let body = harness.request_body();
+
+        std::thread::scope(|scope| {
+            let request = scope.spawn(|| harness.post("responses", Some(&token), &body));
+            std::thread::sleep(Duration::from_millis(250));
+            let during = harness.router.refs(REVISION).total();
+            let (status, _) = request.join().unwrap();
+            assert_eq!(status, 200);
+            assert!(during > 0, "请求进行中必须持有引用，实际为 {during}");
+            assert_eq!(
+                harness.router.refs(REVISION).total(),
+                0,
+                "请求结束后引用必须归还"
+            );
+        });
+    }
+
+    /// 引用计数必须配对：请求期间 >0，请求结束回到 0。
+    ///
+    /// 这条保证的是回收策略能工作。`retain` 过去根本没被调用过，于是「有没有人正在用
+    /// 这个版本」永远是未知的——回收就只能在「留得太多」和「敢不敢删」之间瞎猜。
+    /// 配对释放靠 `Drop`，所以**每一条提前返回的分支**都必须走到它。
+    #[test]
+    fn a_finished_request_releases_the_revision_it_referenced() {
+        let harness = Harness::start(
+            CHAT_COMPLETIONS_V1,
+            MockReply::Sse(CHAT_SSE),
+            Protocol::ChatCompletions,
+        );
+        let token = harness.token.expose().to_owned();
+
+        // 正常完成的一条。
+        let (status, _) = harness.post("responses", Some(&token), &harness.request_body());
+        assert_eq!(status, 200);
+        assert_eq!(
+            harness.router.refs(REVISION).total(),
+            0,
+            "请求结束后引用必须归零，否则这个版本永远无法回收"
+        );
+
+        // 提前返回的一条：缺 model 走的是「判定阶段失败」的出口。
+        let (status, _) = harness.post("responses", Some(&token), &json!({"input": []}));
+        assert_eq!(status, 400);
+        assert_eq!(
+            harness.router.refs(REVISION).total(),
+            0,
+            "被拒绝的请求同样要释放引用"
+        );
+
+        // 上游报错的一条：错误发生在已经开流之后。
+        let failing = Harness::start(
+            CHAT_COMPLETIONS_V1,
+            MockReply::Status {
+                code: 403,
+                body: "{\"error\":\"forbidden\"}".to_owned(),
+            },
+            Protocol::ChatCompletions,
+        );
+        let failing_token = failing.token.expose().to_owned();
+        let (status, _) = failing.post("responses", Some(&failing_token), &failing.request_body());
+        assert_eq!(status, 403);
+        assert_eq!(
+            failing.router.refs(REVISION).total(),
+            0,
+            "上游失败的分支也要释放引用"
+        );
+    }
+
+    #[test]
+    fn models_refuses_an_instance_that_does_not_own_the_revision() {
+        // /v1/models 过去只查版本在不在、不查实例归属，于是换个前缀就能列出别人的模型。
+        let harness = Harness::start(
+            CHAT_COMPLETIONS_V1,
+            MockReply::Sse(CHAT_SSE),
+            Protocol::ChatCompletions,
+        );
+        let token = harness.token.expose().to_owned();
+        let url = format!(
+            "http://127.0.0.1:{}/i/inst_somebody_else/c/{REVISION}/v1/models",
+            harness.port
+        );
+
+        let (status, body) = Harness::get_path(&url, Some(&token));
+        assert_ne!(status, 200, "展示接口不该比推理接口更松");
+        assert_eq!(status, 401);
+        let payload: Value = serde_json::from_str(&body).expect("错误必须是 JSON 正文");
+        assert_eq!(payload["error"]["code"], "UNAUTHORIZED");
+    }
+
+    #[test]
+    fn a_request_without_a_model_answers_instead_of_hanging_up() {
+        let harness = Harness::start(
+            CHAT_COMPLETIONS_V1,
+            MockReply::Sse(CHAT_SSE),
+            Protocol::ChatCompletions,
+        );
+        let token = harness.token.expose().to_owned();
+        // 有合法 alias 之外的形状：完全没有 model 字段。
+        let (status, body) = harness.post("responses", Some(&token), &json!({"input": []}));
+
+        assert_eq!(status, 400);
+        let payload: Value = serde_json::from_str(&body).expect("错误必须是 JSON 正文");
+        assert_eq!(payload["error"]["code"], "VALIDATION_FAILED");
+        assert!(
+            payload["error"]["details"][0]
+                .as_str()
+                .unwrap_or_default()
+                .contains("alias"),
+            "要说清这里是按 alias 路由：{body}"
+        );
+    }
+
+    #[test]
+    fn a_deleted_provider_is_reported_as_an_error_not_a_dropped_connection() {
+        // 路由快照在发布时冻结，而供应商可以在那之后被删掉。这是真实竞态，
+        // 过去它会静默断连。
+        let harness = Harness::start(
+            CHAT_COMPLETIONS_V1,
+            MockReply::Sse(CHAT_SSE),
+            Protocol::ChatCompletions,
+        );
+        let token = harness.token.expose().to_owned();
+        // 按外键顺序拆掉：模型与 Key 引用供应商，所以先删它们。路由快照是内存里的，
+        // 不会被这轮删除碰到——这正是真实竞态的形状：快照冻结在发布那一刻。
+        for model in harness.repository.list_models().unwrap() {
+            harness
+                .repository
+                .delete_model(&model.id)
+                .expect("删除模型");
+        }
+        for provider in harness.repository.list_providers().unwrap() {
+            // 当前 Key 受保护（删它就等于悄悄换路由），先解除选中状态。
+            let cleared = Provider {
+                active_credential_id: None,
+                ..provider.clone()
+            };
+            harness
+                .repository
+                .save_provider(cleared, provider.version)
+                .expect("解除当前 Key");
+            for credential in harness.repository.list_credentials(&provider.id).unwrap() {
+                harness
+                    .repository
+                    .delete_credential(&credential.id)
+                    .expect("删除 Key");
+            }
+            harness
+                .repository
+                .delete_provider(&provider.id)
+                .expect("删除供应商");
+        }
+
+        let (status, body) = harness.post("responses", Some(&token), &harness.request_body());
+        assert_eq!(status, 404);
+        let payload: Value = serde_json::from_str(&body).expect("错误必须是 JSON 正文");
+        assert_eq!(payload["error"]["code"], "NOT_FOUND");
+        assert_eq!(harness.upstream.requests(), 0, "不该触达上游");
+    }
 }

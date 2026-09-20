@@ -269,6 +269,33 @@ mod tests {
         assert!(text.contains("••••"));
     }
 
+    /// Canary：一条**无前缀**的供应商密钥穿过整条导出链路，不能出现在诊断包里。
+    ///
+    /// 这条走的是完整路径（allowlist 键 → 脱敏 → 序列化 → 打包），所以它拦的是
+    /// 「规则漏了一种形态」这类回归，而不只是单个函数的行为。
+    #[test]
+    fn export_never_contains_an_unprefixed_provider_key() {
+        const CANARY: &str = "Qw3Er5Ty7Ui9Op1As3Df5Gh7Jk9Lz2Xc";
+        let log = DiagnosticLog::default();
+        log.record(
+            DiagnosticEvent::new(
+                "2026-09-18T00:00:00Z",
+                LogLevel::Error,
+                "gateway",
+                "alias",
+                "error.upstreamFailed",
+            )
+            .with_metadata("error_code", format!("upstream echoed {CANARY}"))
+            .with_metadata("model_id", format!("model-{CANARY}")),
+        );
+
+        let text = String::from_utf8(build_export(&log, &[], "0.1.0").unwrap()).unwrap();
+        assert!(!text.contains(CANARY), "无前缀密钥不得出现在诊断包里");
+        // 脱敏要留下痕迹，而不是整条抹掉：诊断仍然要能看出「这里有过一个值」。
+        assert!(text.contains("••••"));
+        assert!(text.contains("upstream echoed"));
+    }
+
     #[test]
     fn write_export_creates_parent_directories() {
         let dir = tempfile::tempdir().unwrap();

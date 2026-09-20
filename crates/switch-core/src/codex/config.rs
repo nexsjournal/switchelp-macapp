@@ -885,11 +885,21 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), CoreError> {
         .parent()
         .ok_or_else(|| CoreError::validation("配置路径缺少父目录"))?;
     std::fs::create_dir_all(parent)?;
+    // 临时名必须**每个写入者唯一**。写死成 `.{name}.gptswitch.tmp` 时，两个并发写入会共用
+    // 同一个临时文件：一个刚 create 完、另一个就把它截断，于是前者 rename 过去的是别人的
+    // 半截内容。实测同一路径并发写 320 次里有 223 次失败，而且失败的是「写坏了」而不是
+    // 「被拒绝」——这比失败更糟。进程号 + 进程内自增序号 + 纳秒，足以在本机区分任何两个写入者。
     let temp = parent.join(format!(
-        ".{}.gptswitch.tmp",
+        ".{}.gptswitch.{}.{}.{}.tmp",
         path.file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("config.toml")
+            .unwrap_or("config.toml"),
+        std::process::id(),
+        next_temp_serial(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|value| value.subsec_nanos())
+            .unwrap_or(0),
     ));
     {
         let mut file = std::fs::File::create(&temp)?;
@@ -910,6 +920,12 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), CoreError> {
         parent_handle.sync_all()?;
     }
     Ok(())
+}
+
+/// 进程内唯一的临时文件序号。
+fn next_temp_serial() -> u64 {
+    static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 #[cfg(test)]
@@ -963,5 +979,64 @@ mod tests {
             ..command_provider()
         };
         assert!(provider.auth.validate().is_err());
+    }
+}
+
+/// 原子写入的并发安全性。
+///
+/// 回归：临时文件名写死成 `.{name}.gptswitch.tmp` 时，同一个路径上的两个并发写入共用
+/// 同一个临时文件——一个刚 create 完、另一个就把它截断，于是 rename 过去的是别人的
+/// 半截内容，或者 rename 到一半发现临时文件已经不见了。实测 320 次并发写里有 223 次失败，
+/// 而且失败形态是「写坏了」而不是「被拒绝」，这比报错更危险：config.toml 是用户唯一的配置。
+#[cfg(test)]
+mod write_atomic_tests {
+    use super::*;
+
+    #[test]
+    fn concurrent_writers_never_produce_a_torn_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let payloads: Vec<String> = (0..4)
+            .map(|index| format!("model = \"payload-{index}\"\n# {}\n", "x".repeat(64 * 1024)))
+            .collect();
+
+        std::thread::scope(|scope| {
+            for index in 0..32usize {
+                let path = path.clone();
+                let payload = payloads[index % payloads.len()].clone();
+                scope.spawn(move || {
+                    write_atomic(&path, &payload).expect("并发写入不应失败");
+                });
+            }
+        });
+
+        let landed = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            payloads.contains(&landed),
+            "落盘内容必须是某一次写入的**完整**内容；长度 {} 与任何一次输入都不相等，说明发生了截断或拼接",
+            landed.len()
+        );
+
+        let leftovers: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name != "config.toml")
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "临时文件必须被清理干净：{leftovers:?}"
+        );
+    }
+
+    #[test]
+    fn a_write_failure_leaves_no_temp_file_behind() {
+        // 临时文件建在目标目录里，所以目标目录不可写时写入必须失败——而不是悄悄写到别处。
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("nope");
+        let path = nested.join("config.toml");
+        // 父目录是个文件而不是目录：create_dir_all 会失败。
+        std::fs::write(&nested, "我只是一个文件").unwrap();
+        assert!(write_atomic(&path, "model = \"x\"\n").is_err());
     }
 }

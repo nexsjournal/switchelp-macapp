@@ -23,6 +23,11 @@ pub enum AdmissionError {
         catalog_revision: String,
     },
     /// 前缀中的实例与快照所属实例不一致。
+    ///
+    /// `expected` 是**调用方要求的**那个实例，`actual` 是实际解析出来的那个。
+    /// 两个调用点的语义不同（一个要求的是令牌所属实例、一个要求的是 URL 前缀里的实例），
+    /// 所以文案必须中性——以前写成「令牌属于 {expected}」，在 URL 前缀那个调用点上
+    /// 恰好把两个实例名说反了。
     InstanceMismatch { expected: String, actual: String },
 }
 
@@ -54,7 +59,7 @@ impl AdmissionError {
                 catalog_revision,
             } => format!("目录版本 {catalog_revision} 不包含 alias {alias}"),
             AdmissionError::InstanceMismatch { expected, actual } => {
-                format!("令牌属于实例 {expected}，请求指向实例 {actual}")
+                format!("实例不匹配：这里要求的是 {expected}，但该目录版本属于 {actual}")
             }
         };
         CoreError::new(self.code(), self.message_key()).with_detail(detail)
@@ -325,6 +330,35 @@ impl GatewayRouter {
                 .map(|entry| entry.alias.clone())
                 .collect()
         })
+    }
+
+    /// 与 `admission` 同样严格的 alias 列表：目录版本必须存在，**且属于 `expected_instance`**。
+    ///
+    /// `/v1/models` 过去走 `aliases()`，只查版本在不在、不查实例归属，于是
+    /// `/i/<任意实例>/c/<真实版本>/v1/models` 都能列出别人的模型。展示接口不该比推理接口更松。
+    pub fn aliases_checked(
+        &self,
+        catalog_revision: &str,
+        expected_instance: &InstanceId,
+    ) -> Result<Vec<String>, AdmissionError> {
+        let snapshots = self.snapshots.lock().expect("锁未被污染");
+        let snapshot =
+            snapshots
+                .get(catalog_revision)
+                .ok_or_else(|| AdmissionError::UnknownPrefix {
+                    catalog_revision: catalog_revision.to_owned(),
+                })?;
+        if &snapshot.instance_id != expected_instance {
+            return Err(AdmissionError::InstanceMismatch {
+                expected: expected_instance.as_str().to_owned(),
+                actual: snapshot.instance_id.as_str().to_owned(),
+            });
+        }
+        Ok(snapshot
+            .routes
+            .iter()
+            .map(|entry| entry.alias.clone())
+            .collect())
     }
 
     pub fn len(&self) -> usize {

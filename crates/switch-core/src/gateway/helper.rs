@@ -30,6 +30,9 @@ fn helper_file_name() -> &'static str {
     crate::platform::helper_file_name(crate::platform::Platform::current())
 }
 
+#[cfg(windows)]
+use crate::domain::error::ErrorCode;
+
 /// 写入令牌并把 helper 安装到应用数据目录，返回 helper 绝对路径。
 ///
 /// 每次调用都会覆盖令牌：上一次运行的令牌立即失效。
@@ -38,28 +41,48 @@ pub fn install(
     instance_id: &str,
     token: &GatewayToken,
 ) -> Result<PathBuf, CoreError> {
-    // 实例标识会被插进脚本文本，必须先证明它只含安全字符；
-    // 否则一个带引号或分号的实例名就能改写脚本内容。
-    if !is_shell_safe(instance_id) {
-        return Err(CoreError::validation(
-            "实例标识含不安全字符，无法生成凭据 helper",
+    // Windows 的 helper 还是个桩（`.cmd` 直接 exit 1）。**必须在这里失败**，不能"装上"：
+    // 装上的话应用会照常写配置、照常显示已应用，而 Codex 每次请求都在鉴权那一步失败，
+    // 报出来的还是一句与真正原因无关的错误。失败在这里，装配层就会把网关标成未启动，
+    // 界面照实显示原因，应用也会被拦住（见 commands.rs 的网关前置检查）。
+    #[cfg(windows)]
+    {
+        let _ = (app_data_dir, instance_id, token);
+        return Err(CoreError::new(
+            ErrorCode::CapabilityUnsupported,
+            "error.windowsHelperUnimplemented",
+        )
+        .with_detail(
+            "Windows 的凭据 helper 尚未实现：它只能取本机网关令牌，而这一步在 Windows 上还是空的。             现在不会写入任何 Codex 配置——写下去只会让 Codex 连不上。"
+                .to_owned(),
         ));
     }
-    let bin_dir = app_data_dir.join("bin");
-    std::fs::create_dir_all(&bin_dir).map_err(|_| CoreError::internal("无法创建 helper 目录"))?;
-    restrict(&bin_dir, 0o700)?;
+    #[cfg(not(windows))]
+    {
+        // 实例标识会被插进脚本文本，必须先证明它只含安全字符；
+        // 否则一个带引号或分号的实例名就能改写脚本内容。
+        if !is_shell_safe(instance_id) {
+            return Err(CoreError::validation(
+                "实例标识含不安全字符，无法生成凭据 helper",
+            ));
+        }
+        let bin_dir = app_data_dir.join("bin");
+        std::fs::create_dir_all(&bin_dir)
+            .map_err(|_| CoreError::internal("无法创建 helper 目录"))?;
+        restrict(&bin_dir, 0o700)?;
 
-    let token_file = token_path(app_data_dir);
-    // 不写结尾换行：helper 用 cat 原样输出，令牌里不应混入空白。
-    std::fs::write(&token_file, token.expose())
-        .map_err(|_| CoreError::internal("无法写入网关令牌"))?;
-    restrict(&token_file, 0o600)?;
+        let token_file = token_path(app_data_dir);
+        // 不写结尾换行：helper 用 cat 原样输出，令牌里不应混入空白。
+        std::fs::write(&token_file, token.expose())
+            .map_err(|_| CoreError::internal("无法写入网关令牌"))?;
+        restrict(&token_file, 0o600)?;
 
-    let helper = helper_path(app_data_dir);
-    std::fs::write(&helper, script(instance_id))
-        .map_err(|_| CoreError::internal("无法写入凭据 helper"))?;
-    restrict(&helper, 0o700)?;
-    Ok(helper)
+        let helper = helper_path(app_data_dir);
+        std::fs::write(&helper, script(instance_id))
+            .map_err(|_| CoreError::internal("无法写入凭据 helper"))?;
+        restrict(&helper, 0o700)?;
+        Ok(helper)
+    }
 }
 
 /// 删除令牌文件。进程退出时调用，避免令牌留在磁盘上。
@@ -110,13 +133,8 @@ cat "$dir/gateway-token"
     )
 }
 
-#[cfg(windows)]
-fn script(_instance_id: &str) -> String {
-    // Windows 版本尚未在真机验证；这里显式留空，由 install 之外的装配层决定是否启用。
-    String::from(
-        "@echo off\r\necho gptswitch-auth-helper: not implemented for windows >&2\r\nexit /b 1\r\n",
-    )
-}
+// Windows 不再有 `script()`：`install` 在 Windows 上直接返回错误，
+// 不再生成一个「装上但一定失败」的桩。少一个会让人以为功能存在的空实现。
 
 #[cfg(test)]
 mod tests {

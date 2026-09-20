@@ -202,6 +202,7 @@ fn model(provider_id: &str, upstream_id: &str, display_name: &str, vision: bool)
         policy,
         in_catalog: true,
         display_name_overridden: true,
+        protocol_override: None,
     }
 }
 

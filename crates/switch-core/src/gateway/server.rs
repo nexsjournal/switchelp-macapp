@@ -107,8 +107,12 @@ impl Gateway {
     pub fn bind(&self) -> Result<u16, CoreError> {
         let address = SocketAddr::from((Ipv4Addr::LOCALHOST, self.config.port));
         let listener = TcpListener::bind(address).map_err(|error| {
-            CoreError::new(ErrorCode::PortInUse, "error.portInUse")
-                .with_detail(format!("无法绑定 {address}：{error}"))
+            // 最可能的成因就是另一个 Switchelp 已经占着端口（一个进程一份网关）。
+            // 这句提示会一路显示到界面上，所以直接说出来，别让用户去猜。
+            CoreError::new(ErrorCode::PortInUse, "error.portInUse").with_detail(format!(
+                "无法绑定 {address}：{error}。端口被占用最常见的原因是已经开着另一个 Switchelp 实例；\
+                 也可能被别的程序占用——本工具不会自动换端口，因为 Codex 配置里写的就是这个地址。"
+            ))
         })?;
         let local = listener
             .local_addr()
@@ -192,6 +196,11 @@ impl Gateway {
     }
 
     /// 处理一个连接。错误在这里被翻译成 HTTP 响应，绝不把 `CoreError` 细节直接吐出。
+    ///
+    /// **不变量：这条连接要么收到一个 HTTP 响应，要么在写出第一个字节之后收到流内的 error 事件。**
+    /// 两者都不会的第三种情况——判定阶段失败、却直接关掉连接——过去真实存在：若分支里用了 `?`，
+    /// 错误会从 `handle` 冒到接受循环，而那里是 `let _ = handle(...)`，于是宿主只看到
+    /// `Empty reply`，既没有状态码也没有原因。下面 `outcome` 之后的兜底就是为它准备的。
     fn handle(&self, stream: TcpStream) -> Result<(), CoreError> {
         let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
         let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
@@ -227,54 +236,110 @@ impl Gateway {
             return write_error(&mut writer, &error);
         }
 
-        match (request.method.as_str(), route_kind(&request.path)) {
-            ("GET", RouteKind::Health) => write_json(
-                &mut writer,
+        let mut response = Response::new(&mut writer);
+        let outcome = match (request.method.as_str(), route_kind(&request.path)) {
+            ("GET", RouteKind::Health) => response.write_json(
                 200,
                 &json!({"status": "ok", "served": self.served_requests()}),
             ),
-            ("GET", RouteKind::Models { revision }) => self.handle_models(&mut writer, &revision),
-            ("POST", RouteKind::Responses) => self.handle_inference(&mut writer, &request),
-            ("POST", RouteKind::Realtime) => write_error(
-                &mut writer,
+            ("GET", RouteKind::Models { revision }) => {
+                self.handle_models(&mut response, &request.path, &revision)
+            }
+            ("POST", RouteKind::Responses) => self.handle_inference(&mut response, &request),
+            ("POST", RouteKind::Realtime) => response.write_error(
                 &CoreError::new(
                     ErrorCode::CapabilityUnsupported,
                     "error.realtimeUnsupported",
                 )
                 .with_detail("本机网关不支持实时语音通道；请使用普通对话。".to_owned()),
             ),
-            (_, RouteKind::Unknown) => write_error(&mut writer, &CoreError::not_found("网关接口")),
-            _ => write_error(&mut writer, &CoreError::validation("该路径不支持此方法")),
+            (_, RouteKind::Unknown) => response.write_error(&CoreError::not_found("网关接口")),
+            _ => response.write_error(&CoreError::validation("该路径不支持此方法")),
+        };
+
+        if let Err(error) = &outcome {
+            // 一个字节都还没写出去，说明失败发生在判定阶段：补一个可读错误再关。
+            // 已经开流的失败由 `pipe_stream` 自己用流内 error 事件收尾，那里不能再写 HTTP 响应头，
+            // 所以这一步必须看 `started`，不能无条件补。
+            if !response.started() {
+                self.config.diagnostics.record(
+                    DiagnosticEvent::new(
+                        crate::diagnostics::now_rfc3339(),
+                        LogLevel::Error,
+                        "gateway",
+                        request.path.clone(),
+                        "result.unansweredRequest",
+                    )
+                    .with_metadata("error_code", format!("{:?}", error.code)),
+                );
+                let _ = response.write_error(error);
+            }
         }
+        outcome
     }
 
     /// 当前目录版本里可用的 alias。宿主用它做诊断，不用于路由决策。
-    fn handle_models(&self, writer: &mut TcpStream, revision: &str) -> Result<(), CoreError> {
-        let aliases = self.router.aliases(revision).ok_or_else(|| {
-            CoreError::new(ErrorCode::RouteMismatch, "error.unknownCatalogRevision")
-                .with_detail(format!("该目录版本未发布：{revision}"))
-        })?;
+    ///
+    /// 实例归属按 `admission` 同样的标准校验：这个接口显示的是「谁能被调用」，
+    /// 不该比推理接口更松，否则一个错误的前缀就能列出别人的模型。
+    fn handle_models(
+        &self,
+        response: &mut Response,
+        path: &str,
+        revision: &str,
+    ) -> Result<(), CoreError> {
+        let instance = crate::storage::snapshot::RuntimePublication::parse_prefix(path)
+            .map(|(instance, _)| instance)
+            .ok_or_else(|| {
+                CoreError::new(ErrorCode::RouteMismatch, "error.unknownCatalogRevision")
+                    .with_detail(format!("无法从路径解析出实例与目录版本：{path}"))
+            })?;
+        let aliases = match self
+            .router
+            .aliases_checked(revision, &InstanceId::new(instance))
+        {
+            Ok(aliases) => aliases,
+            Err(error) => {
+                let error = AdmissionError::to_core_error(&error);
+                self.config.diagnostics.record(
+                    DiagnosticEvent::new(
+                        crate::diagnostics::now_rfc3339(),
+                        LogLevel::Warning,
+                        "gateway",
+                        path.to_owned(),
+                        "result.routeRejected",
+                    )
+                    .with_metadata("revision_id", revision.to_owned())
+                    .with_metadata("error_code", format!("{:?}", error.code)),
+                );
+                return response.write_error(&error);
+            }
+        };
         let data: Vec<Value> = aliases
             .iter()
             .map(|alias| json!({"id": alias, "object": "model", "owned_by": "gptswitch"}))
             .collect();
-        write_json(writer, 200, &json!({"object": "list", "data": data}))
+        response.write_json(200, &json!({"object": "list", "data": data}))
     }
 
     /// 推理主路径：准入 → 取凭据 → 转换为上游请求 → 流式还原 → 回写宿主。
     fn handle_inference(
         &self,
-        writer: &mut TcpStream,
+        response: &mut Response,
         request: &IncomingRequest,
     ) -> Result<(), CoreError> {
         let payload: Value = match serde_json::from_slice(&request.body) {
             Ok(value) => value,
-            Err(_) => return write_error(writer, &CoreError::validation("请求体不是合法 JSON")),
+            Err(_) => return response.write_error(&CoreError::validation("请求体不是合法 JSON")),
         };
-        let alias = payload
-            .get("model")
-            .and_then(Value::as_str)
-            .ok_or_else(|| CoreError::validation("请求缺少 model"))?;
+        let alias = match payload.get("model").and_then(Value::as_str) {
+            Some(alias) => alias,
+            None => {
+                return response.write_error(&CoreError::validation(
+                    "请求缺少 model；本机网关按 alias 路由，不接受空模型",
+                ))
+            }
+        };
 
         // 实例取自 URL 前缀，而不是启动时写死的实例：一个网关可以服务本工具发布过的
         // 任意实例前缀，而前缀本身确定目录版本。`admission` 仍会校验该目录修订
@@ -302,15 +367,26 @@ impl Gateway {
                         .with_metadata("alias", alias)
                         .with_metadata("error_code", format!("{:?}", error.code)),
                     );
-                    return write_error(writer, &error);
+                    return response.write_error(&error);
                 }
             };
         let route = admission.route;
+        // 从这一刻起这个目录版本被引用。没有这一步，旧版本在任何时候都「可回收」，
+        // 而回收策略就只能在「留得太多」和「敢不敢删」之间瞎猜。
+        // 配对释放放在下面 `InferenceGuard` 的 Drop 里：本函数有十几条提前 return，
+        // 靠人肉在每条出口上写 release 迟早会漏。
+        self.router.retain(&route.catalog_revision, 0);
+        let _held = InferenceGuard {
+            router: self.router.clone(),
+            revision: route.catalog_revision.clone(),
+        };
 
         let provider = self
             .repository
             .get_provider(&route.provider_id)?
-            .ok_or_else(|| CoreError::not_found("供应商"))?;
+            .ok_or_else(|| {
+                CoreError::not_found("供应商").with_detail("该路由引用的供应商已被删除".to_owned())
+            })?;
         let credential = self
             .repository
             .get_credential(&route.credential_id)?
@@ -321,8 +397,7 @@ impl Gateway {
         // 目录发布后 Key 被替换：拒绝而不是静默换成新 Key。
         // 续接与在途请求必须绑定发布时的凭据版本。
         if credential.secret_version != route.credential_version {
-            return write_error(
-                writer,
+            return response.write_error(
                 &CoreError::new(
                     ErrorCode::ContinuationBound,
                     "error.credentialVersionChanged",
@@ -333,13 +408,13 @@ impl Gateway {
         let resolver = CredentialResolver::new(self.vault.as_ref());
         let secret = match resolver.resolve(&credential) {
             Ok(secret) => secret,
-            Err(error) => return write_error(writer, &error),
+            Err(error) => return response.write_error(&error),
         };
 
         if self.is_paused() {
             let error = CoreError::new(ErrorCode::Internal, "error.gatewayPaused")
                 .with_detail("本机网关已暂停接受新请求；在途请求不受影响。".to_owned());
-            return write_error(writer, &error);
+            return response.write_error(&error);
         }
 
         // 模态在执行前判定：把图片塞给只声明文本的模型属于模态虚报，
@@ -367,7 +442,7 @@ impl Gateway {
                 .with_metadata("model_id", route.model_id.as_str())
                 .with_metadata("error_code", unsupported.join("+")),
             );
-            return write_error(writer, &error);
+            return response.write_error(&error);
         }
 
         let limits = route.limits();
@@ -379,7 +454,7 @@ impl Gateway {
         };
         let prepared = match prepared {
             Ok(prepared) => prepared,
-            Err(error) => return write_error(writer, &error),
+            Err(error) => return response.write_error(&error),
         };
         if !prepared.losses.is_empty() {
             // 转换损失必须可见：宿主以为生效的参数如果被丢弃，用户只能从这里看出来。
@@ -418,7 +493,7 @@ impl Gateway {
         let upstream = match call.send(prepared.body.as_slice()) {
             Ok(response) => response,
             Err(error) => {
-                return write_error(writer, &upstream_transport_error(&error));
+                return response.write_error(&upstream_transport_error(&error));
             }
         };
 
@@ -447,7 +522,7 @@ impl Gateway {
                 .with_metadata("http_status", status.to_string())
                 .with_metadata("error_code", format!("{:?}", error.code)),
             );
-            return write_error(writer, &error);
+            return response.write_error(&error);
         }
 
         self.config.diagnostics.record(
@@ -477,10 +552,19 @@ impl Gateway {
                 alias: alias.to_owned(),
             }
         };
-        self.pipe_stream(writer, upstream.into_body(), translator, secret.expose())
+        // 从这里开始是原始字节：守卫记为「已开始」，之后不可能再改成 HTTP 错误响应。
+        self.pipe_stream(
+            response.stream_mut(),
+            upstream.into_body(),
+            translator,
+            secret.expose(),
+        )
     }
 
     /// 上游 SSE → 宿主 SSE。逐事件转发并立即 flush，保证宿主能增量看到输出。
+    ///
+    /// 拿到的必须是**已经开过流**的连接：本函数第一件事就是写响应头，
+    /// 之后所有失败都只能靠流内的 error 事件表达。
     fn pipe_stream(
         &self,
         writer: &mut TcpStream,
@@ -736,6 +820,66 @@ impl<'a> Chunked<'a> {
             .write_all(b"0\r\n\r\n")
             .and_then(|_| self.stream.flush())
             .map_err(|_| CoreError::internal("结束流式响应失败"))
+    }
+}
+
+/// 推理请求对某个目录版本的引用，随请求结束自动释放。
+///
+/// 用的是 `Drop` 而不是在每个 `return` 前手写 `release`：这条路径上提前返回的分支有十几条
+/// （缺 model、准入失败、缺凭据、暂停、模态拒绝、转换失败、上游失败……），漏掉任何一条
+/// 都会让那个版本永远不可回收——正好是要修的那个 bug 的另一种形态。
+struct InferenceGuard {
+    router: Arc<GatewayRouter>,
+    revision: String,
+}
+
+impl Drop for InferenceGuard {
+    fn drop(&mut self) {
+        self.router.release(&self.revision, 0);
+    }
+}
+
+/// 连接写出的守卫，记录「响应是否已经开始」。
+///
+/// 这条连接上存在两类失败，它们在返回 `Err` 时长得一模一样：
+/// - **判定阶段失败**（令牌不对、目录版本不认识、请求缺 model）：一个字节都没写出去，
+///   完全可以回一个可读的 HTTP 错误；
+/// - **已经开流之后失败**（上游中途断开、空闲超时）：响应头早发出去了，只剩流内的 error 事件。
+///
+/// 少了这个区分，`handle` 的调用方就没法安全兜底——无条件补错误会把流式响应写坏，
+/// 不补则让判定阶段的失败变成「连接被关掉、宿主看到 Empty reply」，查不出原因。
+struct Response<'a> {
+    stream: &'a mut TcpStream,
+    started: bool,
+}
+
+impl<'a> Response<'a> {
+    fn new(stream: &'a mut TcpStream) -> Self {
+        Self {
+            stream,
+            started: false,
+        }
+    }
+
+    /// 是否已经向宿主写出过任何响应字节。
+    fn started(&self) -> bool {
+        self.started
+    }
+
+    /// 取原始连接。调用方从这一刻起自己负责写出，守卫记为已开始。
+    fn stream_mut(&mut self) -> &mut TcpStream {
+        self.started = true;
+        self.stream
+    }
+
+    fn write_json(&mut self, status: u16, payload: &Value) -> Result<(), CoreError> {
+        self.started = true;
+        write_json(self.stream, status, payload)
+    }
+
+    fn write_error(&mut self, error: &CoreError) -> Result<(), CoreError> {
+        let status = status_for(error.code);
+        self.write_json(status, &error_payload(error))
     }
 }
 

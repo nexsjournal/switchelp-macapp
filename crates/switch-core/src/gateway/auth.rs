@@ -188,16 +188,6 @@ impl RequestGuard {
 
         Ok(())
     }
-
-    /// 解析出请求方声明的来源实例（用于与 URL 前缀比对）。
-    pub fn claimed_instance(&self, headers: &InboundHeaders) -> Option<&str> {
-        headers
-            .authorization
-            .as_deref()
-            .and_then(|value| value.strip_prefix("Bearer "))
-            .filter(|presented| self.token.matches(presented.trim()))
-            .map(|_| self.instance_id.as_str())
-    }
 }
 
 fn unauthorized(detail: impl Into<String>) -> CoreError {
@@ -425,15 +415,6 @@ mod tests {
         assert_eq!(a.code, b.code);
         assert_eq!(a.message_key, b.message_key);
         assert_ne!(a.safe_details, b.safe_details);
-    }
-
-    #[test]
-    fn claimed_instance_requires_valid_token() {
-        let (guard, token) = guard();
-        assert_eq!(guard.claimed_instance(&headers(&token)), Some("inst_1"));
-        let mut request = headers(&token);
-        request.authorization = Some("Bearer other".to_owned());
-        assert_eq!(guard.claimed_instance(&request), None);
     }
 
     #[test]
