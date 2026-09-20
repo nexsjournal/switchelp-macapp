@@ -4,6 +4,9 @@ import type { ApplyStage, FieldChange, OperationEvent } from '@/contracts/types'
 import { App } from '@/app/App';
 import { instance, plan, testClient } from '../../../tests/helpers/client';
 
+/** 提示宿主：页面里也有别的 role=status（等待重载、检测状态），断言提示时必须限定范围。 */
+const notifications = () => screen.getByLabelText('通知');
+
 function event(phase: ApplyStage): OperationEvent {
   return { schemaVersion: 1, operationId: 'op_1', sequence: 1, phase, revisionId: 'rev_test',
     messageKey: `stage.${phase}`, safeArgs: {}, cancellable: false, timestamp: '2026-09-18T00:00:00Z' };
@@ -52,7 +55,8 @@ test('提交成功只显示等待 Codex 重新加载，绝不自行宣称已加�
   // 配置写完就自动重启宿主一次，用户不必再点「重启 Codex」；
   // 但文案仍然只是「已提交 + 已重启」，不说它已经加载了新目录。
   expect(restartHost).toHaveBeenCalledWith(instance.id);
-  expect(screen.getByRole('status')).toHaveTextContent(/配置已提交，Codex 已重启/);
+  // 宿主里可能同时存在「已生成差异」那条信息提示，所以按文案断言而不是按角色取唯一一条。
+  expect(within(notifications()).getByText(/配置已提交，Codex 已重启/)).toBeInTheDocument();
 });
 
 test('用户确认宿主已重新加载后才进入已核验', async () => {
@@ -146,7 +150,7 @@ test('重启宿主：先确认，再调用一次，并按确认到的结果说�
 
   await user.click(within(dialog).getByRole('button', { name: '重启 Codex' }));
   expect(restartHost).toHaveBeenCalledWith(instance.id);
-  expect(await screen.findByRole('status')).toHaveTextContent(/^Codex 已重启/);
+  expect(await within(notifications()).findByRole('status')).toHaveTextContent(/^Codex 已重启/);
 });
 
 test('旧进程没退出去时必须说「没能重启」，绝不报成功', async () => {
@@ -161,7 +165,8 @@ test('旧进程没退出去时必须说「没能重启」，绝不报成功', as
   await user.click(screen.getByRole('button', { name: '重启 Codex' }));
   await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '重启 Codex' }));
 
-  const status = await screen.findByRole('status');
+  // 失败走 alert（读屏会立刻打断），成功才是 status。
+  const status = await within(notifications()).findByRole('alert');
   expect(status).toHaveTextContent(/Codex 仍在运行，没能重启/);
   expect(status).not.toHaveTextContent(/已重启/);
 });
@@ -176,7 +181,7 @@ test('退出了但没起来时，说清楚要手动打开', async () => {
   await user.click(screen.getByRole('button', { name: '重启 Codex' }));
   await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '重启 Codex' }));
 
-  const status = await screen.findByRole('status');
+  const status = await within(notifications()).findByRole('alert');
   expect(status).toHaveTextContent(/已退出，但没有重新起来/);
   expect(status).not.toHaveTextContent(/已重启/);
 });

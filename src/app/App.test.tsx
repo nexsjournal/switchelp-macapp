@@ -18,7 +18,7 @@ test('首次接入保存真实草稿调用，失败后保留表单且不宣称 C
   // 添加时 API Key 必填：不留 Key 的供应商一建出来就停在「待填写 Key」上。
   await user.type(within(dialog).getByLabelText('API Key'), 'synthetic-secret');
   await user.click(within(dialog).getByRole('button', { name: '保存' }));
-  expect(await within(dialog).findByRole('alert')).toHaveTextContent('HTTPS');
+  expect(await screen.findByRole('alert')).toHaveTextContent('HTTPS');
   expect(within(dialog).getByLabelText('供应商名称')).toHaveValue('测试服务');
   expect(client.saveProvider).toHaveBeenCalledWith(expect.objectContaining({ name: '测试服务', endpoint: 'http://example.test/v1' }), 0);
   expect(client.executeApply).not.toHaveBeenCalled();
@@ -40,6 +40,98 @@ test('编辑脏表单按 Escape 需要确认，放弃后焦点返回入口', asy
   await user.click(screen.getByRole('button', { name: '放弃修改' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   await waitFor(() => expect(trigger).toHaveFocus());
+});
+
+test('回归：保存供应商不会因为「刚把 Key 设为当前」而误报冲突', async () => {
+  // 核心按版本号拒绝覆盖别人的修改，而「把新 Key 设为当前 Key」这一步本身就会把供应商的版本推高
+  // （保存 v1 → 选当前 Key → v2）。弹窗如果继续拿创建时那份 v1 去写，用户看到的就是一句
+  // 既没原因也没出路的「保存失败，请刷新后重试」——这正是真机上发生的事。
+  const user = userEvent.setup();
+  let version = 0;
+  const stored = () => ({ ...provider, id: 'p_new', name: 'qiyuan', version, activeCredentialId: version > 1 ? 'k_new' : null });
+  const saveProvider = vi.fn().mockImplementation(async (draft: Record<string, unknown>, expected: number) => {
+    if (expected !== version) throw { code: 'CONFLICT', messageKey: 'error.conflict', safeDetails: [], retryable: false, recoveryActions: [] };
+    version += 1;
+    return { ...stored(), ...draft, id: draft.id ?? 'p_new' };
+  });
+  const selectCredential = vi.fn().mockImplementation(async () => { version += 1; });
+  const client = testClient({
+    listProviders: vi.fn().mockImplementation(async () => ({ items: version ? [stored()] : [], nextCursor: null })),
+    saveProvider, selectCredential,
+    addCredential: vi.fn().mockResolvedValue({ id: 'k_new', label: '默认' }),
+    listCredentials: vi.fn().mockResolvedValue([]),
+    discoverModels: vi.fn().mockResolvedValue([{ upstreamId: 'vendor/a', displayName: 'a', alreadySaved: false }]),
+  });
+  render(<App client={client} />);
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(screen.getAllByRole('button', { name: '添加供应商' })[0]!);
+  const dialog = screen.getByRole('dialog');
+  await user.type(within(dialog).getByLabelText('供应商名称'), 'qiyuan');
+  await user.type(within(dialog).getByLabelText('Base URL'), 'https://api.qiyuanapi.cc/v1');
+  await user.type(within(dialog).getByLabelText('API Key'), 'synthetic-secret');
+
+  // 「获取可用模型」会先落库，并把 Key 设为当前 Key —— 版本因此从 1 变成 2。
+  await user.click(within(dialog).getByRole('button', { name: '获取可用模型' }));
+  await user.click(within(await screen.findByRole('dialog', { name: '选择要添加的模型' })).getByRole('button', { name: /取消/ }));
+
+  await user.click(within(dialog).getByRole('button', { name: '保存' }));
+  expect(await screen.findByText('已保存。')).toBeInTheDocument();
+  expect(screen.queryByText('保存失败，请刷新后重试。')).not.toBeInTheDocument();
+  expect(saveProvider).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'qiyuan' }), 2);
+});
+
+test('回归：宿主的版本还没刷新上来时，撞上冲突会自己重读再写一次', async () => {
+  const user = userEvent.setup();
+  const saveProvider = vi.fn()
+    .mockRejectedValueOnce({ code: 'CONFLICT', messageKey: 'error.conflict', safeDetails: [], retryable: false, recoveryActions: [] })
+    .mockImplementation(async (draft: Record<string, unknown>) => ({ ...provider, ...draft, version: 3 }));
+  const active = { ...provider, activeCredentialId: 'k_1' };
+  const credential = { id: 'k_1', providerId: 'p_test', label: '日常', secretRef: 'r', secretVersion: 1,
+    maskedSuffix: '••••1c7', status: 'saved' as const, scope: null, lastVerifiedAt: null, version: 1,
+    createdAt: '2026-09-18T00:00:00Z' };
+  const client = testClient({
+    // 打开页面时看到的还是 v1（宿主列表还没刷新），而库里已经是 v2 —— 冲突就是这么来的。
+    // 重读时返回 v2，第二次写才能成功。
+    listProviders: vi.fn()
+      .mockResolvedValueOnce({ items: [{ ...active, version: 1 }], nextCursor: null })
+      .mockResolvedValue({ items: [{ ...active, version: 2 }], nextCursor: null }),
+    saveProvider, listCredentials: vi.fn().mockResolvedValue([credential]),
+  });
+  render(<App client={client} />);
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(screen.getByRole('button', { name: '编辑配置' }));
+  const dialog = await screen.findByRole('dialog');
+
+  await user.click(within(dialog).getByRole('button', { name: '保存' }));
+  expect(await screen.findByText('已保存。')).toBeInTheDocument();
+  // 第一次用旧版本被拒，第二次带着重读到的版本写成。
+  expect(saveProvider).toHaveBeenNthCalledWith(1, expect.anything(), 1);
+  expect(saveProvider).toHaveBeenNthCalledWith(2, expect.anything(), 2);
+});
+
+test('供应商弹窗：标题是文字，名称是表单字段，「更多」里有停用与删除', async () => {
+  const user = userEvent.setup();
+  const deleteProvider = vi.fn().mockResolvedValue(undefined);
+  const client = testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
+    listCredentials: vi.fn().mockResolvedValue([]), deleteProvider, listModels: vi.fn().mockResolvedValue([]) });
+  render(<App client={client} />);
+  await screen.findByText('测试供应商');
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(screen.getByRole('button', { name: '编辑配置' }));
+  const dialog = await screen.findByRole('dialog');
+
+  // 标题就是普通文字（以前它是个没有边框的输入框，没人看得出能点）；名字回到表单里。
+  expect(within(dialog).getByRole('heading', { level: 2, name: '测试供应商' })).toBeInTheDocument();
+  expect(within(dialog).getByLabelText('供应商名称')).toHaveValue('测试供应商');
+
+  // 启用开关不再挂在标题栏；停用与删除都在菜单里。
+  expect(within(dialog).queryByRole('switch', { name: '启用此供应商' })).not.toBeInTheDocument();
+  await user.click(within(dialog).getByRole('button', { name: '更多操作' }));
+  expect(await screen.findByRole('menuitem', { name: '停用此供应商' })).toBeInTheDocument();
+  await user.click(screen.getByRole('menuitem', { name: '删除供应商' }));
+  const confirm = await screen.findByRole('dialog', { name: '删除供应商' });
+  await user.click(within(confirm).getByRole('button', { name: '删除供应商' }));
+  await waitFor(() => expect(deleteProvider).toHaveBeenCalledWith('p_test'));
 });
 
 test('替换当前 Key 只通过专用调用传递秘密，不把掩码当原值提交', async () => {
@@ -68,7 +160,7 @@ test('替换当前 Key 只通过专用调用传递秘密，不把掩码当原值
 
   expect(replaceCredential).toHaveBeenCalledWith('k_1', 'synthetic-secret', 2);
   expect(client.addCredential).not.toHaveBeenCalled();
-  expect(await within(dialog).findByRole('alert')).toHaveTextContent('系统凭据库不可用');
+  expect(await screen.findByRole('alert')).toHaveTextContent('系统凭据库不可用');
   // 允许保存界面偏好（例如主题、向导是否已看过），但绝不允许出现秘密或 Key 明文。
   expect(JSON.stringify(localStorage)).not.toContain('synthetic-secret');
   expect(JSON.stringify(localStorage)).not.toContain('synthetic');
@@ -95,7 +187,7 @@ test('添加供应商时第一个 Key 一起保存并设为当前，弹窗留在
   await waitFor(() => expect(addCredential).toHaveBeenCalledWith('p_new', '默认', 'synthetic-secret'));
   expect(selectCredential).toHaveBeenCalledWith('p_new', 'k_new');
   // 弹窗不关：就地变成这家供应商的编辑态，接着还能获取可用模型、加模型。
-  expect(await within(dialog).findByText('已保存。')).toBeInTheDocument();
+  expect(await screen.findByText('已保存。')).toBeInTheDocument();
   expect(within(dialog).getByRole('button', { name: '获取可用模型' })).toBeInTheDocument();
   expect(within(dialog).getByRole('button', { name: '添加模型' })).toBeInTheDocument();
 });
@@ -115,7 +207,7 @@ test('没有 Key 时点获取可用模型会说明缺什么，而不是静默失
 
   // Key 有，但不是当前 Key：先把原因说出来，别让人对着一个没反应的按钮猜。
   await user.click(within(dialog).getByRole('button', { name: '获取可用模型' }));
-  expect(await within(dialog).findByRole('alert')).toHaveTextContent('先给这家供应商添加并选择一个 Key');
+  expect(await screen.findByRole('alert')).toHaveTextContent('先给这家供应商添加并选择一个 Key');
   expect(client.discoverModels).not.toHaveBeenCalled();
 });
 
@@ -182,7 +274,7 @@ test('获取可用模型：弹窗里勾选确认，一次把模型按默认长�
   const policy = saveModel.mock.calls[0]![0]!.policy;
   expect(policy.contextLimit).toBe(128_000);
   expect(policy.outputLimit).toBe(8_192);
-  expect(within(dialog).getByText('已添加 2 个模型。')).toBeInTheDocument();
+  expect(screen.getByText('已添加 2 个模型。')).toBeInTheDocument();
 });
 
 test('手工添加模型：模型 ID 与长度落进策略，供应商弹窗留在原地', async () => {
@@ -266,13 +358,13 @@ test('模型行的测试连接把结论说出来，成功与失败都不含糊',
   await user.click(await within(dialog).findByRole('button', { name: '测试 目录中的模型 的连接' }));
 
   // 结论指名道姓：哪家供应商、哪个模型。只读探测，不发真实生成。
-  expect(await within(dialog).findByText('测试供应商 / 目录中的模型 连接成功')).toBeInTheDocument();
+  expect(await screen.findByText('测试供应商 / 目录中的模型 连接成功')).toBeInTheDocument();
   expect(startProbe).toHaveBeenCalledWith({ providerId: 'p_test', modelId: 'm_1', credentialId: 'k_1' }, { includeGenerate: false });
 
   startProbe.mockResolvedValue({ id: 'probe_2', targetLabel: 'x', startedAt: '2026-09-18T00:00:00Z',
     stages: [{ stageKey: 'credential', status: 'failed', messageKey: 'probe.credentialRejected' }] });
   await user.click(within(dialog).getByRole('button', { name: '测试 目录中的模型 的连接' }));
-  expect(await within(dialog).findByText(/连接失败/)).toBeInTheDocument();
+  expect(await screen.findByText(/连接失败/)).toBeInTheDocument();
 });
 
 test('删除已纳入目录的模型：先移出目录，再用新版本号删除', async () => {

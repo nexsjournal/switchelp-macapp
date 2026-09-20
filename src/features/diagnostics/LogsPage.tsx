@@ -3,6 +3,7 @@ import { AlertTriangle, Download, Info, RefreshCw, Save, ScrollText, ShieldCheck
 import type { DiagnosticEvent, LogLevel } from '@/contracts/types';
 import { type DesktopClient, type DiagnosticsPreview, toCoreError } from '@/desktop/client';
 import { Dialog } from '@/components/Dialog';
+import { showToast } from '@/components/Toast';
 import { EmptyState } from '@/components/EmptyState';
 import styles from './LogsPage.module.css';
 
@@ -42,7 +43,6 @@ export function LogsPage({ client }: { client: DesktopClient }) {
   const [savedPath, setSavedPath] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
 
   /** 加载序号：连续切换筛选时，先返回的旧响应不得覆盖后发起的查询。 */
@@ -66,7 +66,7 @@ export function LogsPage({ client }: { client: DesktopClient }) {
   useEffect(() => { void load(); }, [load]);
 
   async function run(label: string, work: () => Promise<void>) {
-    setBusy(label); setError(''); setNotice('');
+    setBusy(label); setError('');
     try { await work(); }
     catch (thrown) { setError(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('common.failed')); }
     finally { setBusy(''); }
@@ -110,7 +110,7 @@ export function LogsPage({ client }: { client: DesktopClient }) {
     const removed = await client.clearDiagnostics();
     setConfirmClear(false);
     setDetail(null);
-    setNotice(t('logs.cleared', { count: removed }));
+    showToast(t('logs.cleared', { count: removed }));
     await load();
   });
 
@@ -126,7 +126,6 @@ export function LogsPage({ client }: { client: DesktopClient }) {
 
   return <div className={styles.page}>
     {error && <div className="error-message" role="alert">{error}</div>}
-    {notice && <div className={styles.notice} role="status">{notice}</div>}
 
     <section className={styles.card}>
       <div className={styles.header}>

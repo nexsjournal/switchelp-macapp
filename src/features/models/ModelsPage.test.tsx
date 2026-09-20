@@ -1,10 +1,11 @@
-import { render, screen, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ModelsPage } from './ModelsPage';
 import type { Model, Provider } from '@/contracts/types';
 import { testClient } from '../../../tests/helpers/client';
+import { renderWithToasts } from '../../../tests/helpers/render';
 
 /**
  * 模型列表页。
@@ -42,7 +43,7 @@ function renderPage(overrides: Partial<Parameters<typeof testClient>[0]> = {}, m
   const client = testClient(overrides);
   const onChanged = vi.fn();
   const onEditModel = vi.fn();
-  render(<ModelsPage client={client} providers={[providerA, providerB]} models={models} onChanged={onChanged} onEditModel={onEditModel} />);
+  renderWithToasts(<ModelsPage client={client} providers={[providerA, providerB]} models={models} onChanged={onChanged} onEditModel={onEditModel} />);
   return { client, onChanged, onEditModel };
 }
 
@@ -107,7 +108,8 @@ describe('模型列表', () => {
 
     // 回归：任由异常冒出去会导致列表不刷新——界面上看不到已经成功的那一条，
     // 用户会以为整批都没生效。
-    expect(await screen.findByRole('status')).toHaveTextContent(/已完成 1 \/ 2 项/);
+    // 部分完成会要求人处理剩下的，属于失败档：提示不自动消失（role=alert）。
+    expect(await screen.findByRole('alert')).toHaveTextContent(/已完成 1 \/ 2 项/);
     expect(onChanged).toHaveBeenCalled();
   });
 

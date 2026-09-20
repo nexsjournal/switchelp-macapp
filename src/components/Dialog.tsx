@@ -10,7 +10,7 @@ import { t } from '@/i18n';
  * `footer` 是滚动区**之外**的底栏。表单型弹窗把保存按钮放这里，而不是写在 `<form>` 末尾：
  * 写在表单末尾时页脚属于滚动内容，长表单一打开就会盖住最后几个字段。
  */
-export function Dialog({ title, description, onClose, dirty = false, busy = false, leadingIcon, headerActions, width = 'normal', banner, children, footer }: {
+export function Dialog({ title, description, onClose, dirty = false, busy = false, leadingIcon, headerActions, width = 'normal', children, footer }: {
   /**
    * 标题。可以是元素：供应商弹窗把**名称输入框**放在这里（标题本身就是这个名字），
    * 那种情况下调用方要在标题里额外放一段 visually-hidden 的文字，
@@ -28,8 +28,6 @@ export function Dialog({ title, description, onClose, dirty = false, busy = fals
   /** 标题右侧、关闭按钮左侧的控件（启用开关、更多菜单）。 */
   headerActions?: ReactNode;
   width?: 'narrow' | 'normal' | 'wide';
-  /** 滚动区之外、底栏之上的结论条（例如「连接成功」）。它不该跟着内容滚走。 */
-  banner?: ReactNode;
   children?: ReactNode; footer?: ReactNode;
 }) {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -57,7 +55,6 @@ export function Dialog({ title, description, onClose, dirty = false, busy = fals
             <button className="danger" onClick={onClose}>{t('editor.discardTitle')}</button></div>
         </div>}
         <div className={styles.body} hidden={confirmDiscard}>{children}</div>
-        {banner && <div className={styles.banner} hidden={confirmDiscard}>{banner}</div>}
         {footer && <div className={styles.footer} hidden={confirmDiscard}>{footer}</div>}
       </Primitive.Content>
     </Primitive.Portal>

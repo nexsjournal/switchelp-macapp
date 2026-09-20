@@ -1,5 +1,6 @@
 import { Cpu, Info, Network, Palette, ScrollText, ShieldAlert, Trash2, Wrench } from 'lucide-react';
 import { Dialog } from '@/components/Dialog';
+import { showToast } from '@/components/Toast';
 import { EmptyState } from '@/components/EmptyState';
 import { useCallback, useEffect, useState } from 'react';
 import type { CodexInstance } from '@/contracts/types';
@@ -26,7 +27,6 @@ export function SettingsPage({ client, gateway, onNavigate }: {
   const [previewText, setPreviewText] = useState('');
   const [update, setUpdate] = useState<UpdateReport | null>(null);
   const [restore, setRestore] = useState<BackupEntry | null>(null);
-  const [notice, setNotice] = useState('');
   /** 暂停状态取自后端，不在前端自己翻转，避免与托盘菜单不一致。 */
   const [preference, setPreference] = useState<ThemePreference>(() => readThemePreference());
   const [resolved, setResolved] = useState(() => applyTheme(readThemePreference()));
@@ -51,7 +51,7 @@ export function SettingsPage({ client, gateway, onNavigate }: {
   useEffect(() => { void loadBackups(); }, [loadBackups]);
 
   async function run(label: string, work: () => Promise<void>) {
-    setBusy(label); setError(''); setNotice('');
+    setBusy(label); setError('');
     try { await work(); }
     catch (thrown) { setError(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('common.failed')); }
     finally { setBusy(''); }
@@ -61,7 +61,7 @@ export function SettingsPage({ client, gateway, onNavigate }: {
 
   const createBackup = () => run('backup', async () => {
     await client.createBackup(instances[0]!.id);
-    setNotice(t('settings.backupCreated'));
+    showToast(t('settings.backupCreated'));
     await loadBackups();
   });
 
@@ -70,7 +70,7 @@ export function SettingsPage({ client, gateway, onNavigate }: {
   const restoreBackup = (entry: BackupEntry) => run('restore', async () => {
     const target = await client.restoreBackup(entry.id);
     setRestore(null);
-    setNotice(t('settings.restored', { path: target }));
+    showToast(t('settings.restored', { path: target }));
     await loadBackups();
   });
 
@@ -84,7 +84,6 @@ export function SettingsPage({ client, gateway, onNavigate }: {
 
   return <div className={styles.page}>
     {error && <div className="error-message" role="alert">{error}</div>}
-    {notice && <div className={styles.notice} role="status">{notice}</div>}
 
     <section className={styles.card}>
       <h2><Palette size={17} />{t('settings.appearance')}</h2>

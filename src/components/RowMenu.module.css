@@ -1,9 +1,18 @@
 .root { position: relative; display: inline-flex; }
+/*
+ * 菜单挂在 body 上、用 fixed 定位（坐标由触发按钮算出）。
+ * 因此它不再受任何祖先的 overflow 影响：不会被弹窗裁掉，也不会把表格撑出滚动条。
+ * 层级取层级表的天花板 tooltip（60）：它必须浮在弹窗（40）与提示条（50）之上。
+ */
 .menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 20;
+  position: fixed;
+  z-index: var(--z-tooltip);
+  /*
+   * 必须显式写 `pointer-events: auto`：模态弹窗打开时 Radix 会把 `document.body` 设成
+   * `pointer-events: none`，只给弹窗内容开例外。菜单挂在 body 上（不在弹窗内容里），
+   * 不写这一行就会「看得见、点不动」——弹窗里的「更多」菜单正好是这条路径。
+   */
+  pointer-events: auto;
   min-width: 176px;
   padding: 6px;
   display: grid;

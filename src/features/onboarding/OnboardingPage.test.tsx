@@ -48,11 +48,16 @@ test('多个实例必须由用户选择，不自动挑一个', async () => {
   expect(radios.every(radio => !(radio as HTMLInputElement).checked)).toBe(true);
 });
 
-test('检测到其他配置管理工具时说明冲突，并说明前面填的不会丢', async () => {
+test('检测到其他配置管理工具时说明冲突：残留是什么、在哪个文件、删之前先备份', async () => {
   setup({ client: testClient({ detectInstances: vi.fn().mockResolvedValue([{ ...instance, conflictingManagers: ['other-tool'] }]) }) });
 
   expect(await screen.findByText(/检测到其他配置管理工具：other-tool/)).toBeInTheDocument();
-  expect(screen.getByText(/应用这一步会先停下来让你处理冲突/)).toBeInTheDocument();
+  // 只报一个工具名等于把「去哪儿删、删什么」留给用户猜。
+  expect(screen.getByText(/托管标记还在配置文件里/)).toBeInTheDocument();
+  const conflict = within(screen.getByRole('note'));
+  expect(conflict.getByText('涉及的文件')).toBeInTheDocument();
+  expect(conflict.getByText(instance.configFile)).toBeInTheDocument();
+  expect(conflict.getByText(/删之前先备份文件/)).toBeInTheDocument();
 });
 
 test('第二步的清单反映真实数据，未满足条件时说明缺什么', async () => {

@@ -4,6 +4,7 @@ import type { Model, Provider } from '@/contracts/types';
 import { type DesktopClient, toCoreError } from '@/desktop/client';
 import { Dialog } from '@/components/Dialog';
 import { EmptyState } from '@/components/EmptyState';
+import { showToast } from '@/components/Toast';
 import { RowMenu } from '@/components/RowMenu';
 import { hostStateKeys, modelDraft } from './policy';
 import styles from './ModelsPage.module.css';
@@ -45,8 +46,6 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'name', desc: false });
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState('');
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [confirm, setConfirm] = useState<{ title: string; body: string; label: string; danger?: boolean; run: () => Promise<void> } | null>(null);
   const [probe, setProbe] = useState<{ model: Model; stages: { stageKey: string; status: string; messageKey: string; elapsedMs?: number | null }[] } | null>(null);
 
@@ -77,14 +76,18 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
   const selectedModels = models.filter(model => selected.includes(model.id));
   const selectableIds = visible.map(model => model.id);
 
+  /**
+   * 跑一次动作。失败走全局 Toast：它是**这次动作**的结果，跟页面状态（读不到数据）不是一回事，
+   * 不该在工具栏下面占一条常驻的红条。
+   */
   async function run(label: string, work: () => Promise<void>) {
-    setBusy(label); setError(''); setNotice('');
+    setBusy(label);
     try { await work(); }
-    catch (thrown) { setError(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('common.failed')); }
+    catch (thrown) { showToast(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('common.failed'), 'danger'); }
     finally { setBusy(''); }
   }
 
-  const finish = async (message: string) => { setNotice(message); setSelected([]); await onChanged(); };
+  const finish = async (message: string) => { showToast(message); setSelected([]); await onChanged(); };
 
   function askBulk(kind: 'leave' | 'delete') {
     const targets = kind === 'leave' ? selectedModels.filter(model => model.inCatalog) : selectedModels.filter(model => !model.inCatalog);
@@ -110,15 +113,17 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
             else await client.deleteModel(model.id, model.version);
             done += 1;
           }
-        } finally {
-          // 中途失败也必须刷新：前面已经成功的改动要出现在列表里，否则界面与服务端不一致，
-          // 用户会以为整批都没生效。
-          setSelected([]);
-          await onChanged();
-          setNotice(done === targets.length
-            ? t(kind === 'leave' ? 'models.bulkLeaveDone' : 'models.bulkDeleteDone', { count: done })
-            : t('models.bulkPartial', { done, total: targets.length }));
+        } catch {
+          // 中途失败：**不**把原始错误再往外冒一条。下面按完成数统一说明，
+          // 两个提示说同一件事只会让人以为发生了两种错误。
         }
+        // 失败也要刷新：前面已经成功的改动必须出现在列表里，否则界面与服务端不一致，
+        // 用户会以为整批都没生效。
+        setSelected([]);
+        await onChanged();
+        showToast(done === targets.length
+          ? t(kind === 'leave' ? 'models.bulkLeaveDone' : 'models.bulkDeleteDone', { count: done })
+          : t('models.bulkPartial', { done, total: targets.length }), done === targets.length ? 'success' : 'danger');
       },
     });
   }
@@ -128,7 +133,7 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
     const credentials = await client.listCredentials(model.providerId);
     const active = credentials.find(credential => credential.status !== 'disabled' && credential.status !== 'missing');
     if (!active) {
-      setError(t('models.probeNoKey', { name: providerName(model.providerId) }));
+      showToast(t('models.probeNoKey', { name: providerName(model.providerId) }), 'danger');
       return;
     }
     const report = await client.startProbe(
@@ -168,8 +173,6 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
       {!embedded && <button className="primary" onClick={() => onEditModel('new')} disabled={!providers.length}><Plus size={17} />{t('action.addModel')}</button>}
     </div>
 
-    {error && <div className="error-message" role="alert">{error}</div>}
-    {notice && <div className={styles.notice} role="status">{notice}</div>}
 
     {selected.length > 0 && <div className={styles.bulkBar} role="region" aria-label={t('models.bulkRegion')}>
       <span>{t('models.selectedSummary', { count: selected.length, providers: new Set(selectedModels.map(m => providerName(m.providerId))).size })}</span>
@@ -218,7 +221,7 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
                 <button onClick={() => onEditModel(model)} aria-label={t('models.editAria', { name: model.displayName })}>{t('common.edit')}</button>
                 <button onClick={() => void probeModel(model)} disabled={busy === 'probe'} aria-label={t('models.testAria', { name: model.displayName })}>{t('common.test')}</button>
                 <RowMenu label={t('models.moreActions', { name: model.displayName })} items={[
-                  { key: 'copy', label: t('action.copyModelId'), onSelect: () => void navigator.clipboard?.writeText(model.upstreamId).then(() => setNotice(t('models.copied', { id: model.upstreamId })), () => setError(t('common.copyFailed'))) },
+                  { key: 'copy', label: t('action.copyModelId'), onSelect: () => void navigator.clipboard?.writeText(model.upstreamId).then(() => showToast(t('models.copied', { id: model.upstreamId })), () => showToast(t('common.copyFailed'), 'danger')) },
                   {
                     key: 'catalog', label: model.inCatalog ? t('models.moveOut') : t('models.moveIn'),
                     onSelect: () => setConfirm({
