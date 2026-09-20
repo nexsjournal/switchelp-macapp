@@ -59,6 +59,42 @@ test('提交成功只显示等待 Codex 重新加载，绝不自行宣称已加�
   expect(within(notifications()).getByText(/配置已提交，Codex 已重启/)).toBeInTheDocument();
 });
 
+test('回归：还原之后同样重启 Codex，并说清它回到了原生', async () => {
+  // 真机上的表现：点了还原、也重启了 Codex，左下角却仍然显示本工具——一是记录里的基线
+  // 本身就是我们写的（核心侧已修），二是还原这条路过去**不重启宿主**，界面里看不出变化。
+  const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitConfirmed: true, quitForced: false, launchedConfirmed: true });
+  const user = await openCodexPage({
+    detectInstances: vi.fn().mockResolvedValue([instance]),
+    planRestore: vi.fn().mockResolvedValue(plan([modelChange], { changes: [{ ...modelChange, reasonKey: 'reason.restore' }] })),
+    executeRestore: vi.fn().mockResolvedValue({ operationId: 'op_r' }),
+    applyStatus: vi.fn().mockResolvedValue({ operationId: 'op_r', open: false, events: [event('restored')] }),
+    restartHost,
+  });
+
+  await user.click(screen.getByRole('button', { name: '还原为原生 Codex' }));
+  await user.click(await screen.findByRole('button', { name: '确认还原' }));
+
+  expect(restartHost).toHaveBeenCalledWith(instance.id);
+  expect(await within(notifications()).findByText(/回到原生登录与原生模型列表/)).toBeInTheDocument();
+});
+
+test('还原后宿主没能重启时，明说需要手动打开', async () => {
+  const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitConfirmed: true, quitForced: false, launchedConfirmed: false });
+  const user = await openCodexPage({
+    detectInstances: vi.fn().mockResolvedValue([instance]),
+    planRestore: vi.fn().mockResolvedValue(plan([modelChange], { changes: [{ ...modelChange, reasonKey: 'reason.restore' }] })),
+    executeRestore: vi.fn().mockResolvedValue({ operationId: 'op_r' }),
+    applyStatus: vi.fn().mockResolvedValue({ operationId: 'op_r', open: false, events: [event('restored')] }),
+    restartHost,
+  });
+
+  await user.click(screen.getByRole('button', { name: '还原为原生 Codex' }));
+  await user.click(await screen.findByRole('button', { name: '确认还原' }));
+
+  const alert = await within(notifications()).findByRole('alert');
+  expect(alert).toHaveTextContent(/没能重启/);
+});
+
 test('用户确认宿主已重新加载后才进入已核验', async () => {
   const confirmReload = vi.fn().mockResolvedValue({ operationId: 'op_1', open: false, events: [event('awaiting_reload'), event('verified')] });
   const user = await openCodexPage({
