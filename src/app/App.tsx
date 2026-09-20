@@ -161,6 +161,23 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
   }, [client]);
   useEffect(() => { void refresh(); }, [refresh]);
   /**
+   * 宿主回执对账：宿主可能在我们不知情的时候重启过——用户自己重开了 Codex，或应用重启后
+   * 再打开窗口。补记成功就重读数据，界面上的「等待重载」会自己消失。
+   *
+   * 失败不提示：这是后台对账，不是用户发起的动作；真失败时界面上仍留着「等待重载」与
+   * 配置页那个手动确认入口，不会卡住。
+   */
+  const reconcileReload = useCallback(async () => {
+    const result = await client.reconcileReload().catch(() => null);
+    if (result?.confirmedOperationIds.length) await refresh();
+  }, [client, refresh]);
+  useEffect(() => { void reconcileReload(); }, [reconcileReload]);
+  useEffect(() => {
+    // 窗口重新获得焦点是对账的最佳时机：用户切去重启 Codex、再切回来就走这条。
+    window.addEventListener('focus', reconcileReload);
+    return () => window.removeEventListener('focus', reconcileReload);
+  }, [reconcileReload]);
+  /**
    * 首次接入自动展开一次：还没有供应商，且用户没主动结束过向导。
    * 只在首屏加载完成后判断，避免数据还没到就先闪出一个向导。
    */
@@ -204,6 +221,8 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
    */
   function providerSaved() { keysChanged(); }
   const pending = models.filter(m => m.inCatalog && m.hostState !== 'loaded');
+  /** 待办只剩「等宿主回执」时，底栏改说事实：已经应用了，只是还没确认 Codex 读过。 */
+  const awaitingHostOnly = pending.length > 0 && pending.every(m => m.hostState === 'awaiting_reload');
   const search = query.trim().toLocaleLowerCase();
   const visibleProviders = providers.filter(p => `${p.name} ${p.endpoint}`.toLocaleLowerCase().includes(search));
 
@@ -231,7 +250,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
       <div className={styles.version}>{t('app.name')} <span>{__APP_VERSION__} · {t('app.inDevelopment')}</span></div>
     </aside>
     <div className={styles.workspace}>
-      <div className={styles.topbar} data-tauri-drag-region="deep"><span>{t('common.workspace')}<ChevronRight size={14} /> {t(`nav.${page}`)}</span>{gateway && !gateway.running ? <span className="badge warning">{t('overview.loadStateGatewayDown')}</span> : pending.length ? <span className="badge warning">{t('shell.pendingCountBadge', { count: pending.length })}</span> : gateway?.revisions.length ? <span className="badge">{t('shell.applied')}</span> : <span className="badge">{t('shell.notApplied')}</span>}</div>
+      <div className={styles.topbar} data-tauri-drag-region="deep"><span>{t('common.workspace')}<ChevronRight size={14} /> {t(`nav.${page}`)}</span>{gateway && !gateway.running ? <span className="badge warning">{t('overview.loadStateGatewayDown')}</span> : pending.length ? <span className="badge warning">{awaitingHostOnly ? t('shell.awaitingHostBadge', { count: pending.length }) : t('shell.pendingCountBadge', { count: pending.length })}</span> : gateway?.revisions.length ? <span className="badge">{t('shell.applied')}</span> : <span className="badge">{t('shell.notApplied')}</span>}</div>
       <main className={styles.main} id="main-content" tabIndex={-1}>
         {modelEditor ? <ModelEditorPage client={client} providers={providers}
           model={modelEditor === 'new' ? undefined : modelEditor}
@@ -255,7 +274,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
             onDismiss={closeOnboarding} />}
           {page === 'overview' && !showOnboarding && <OverviewPage providers={providers} models={models}
             credentialsByProvider={credentialsByProvider} gateway={gateway} summary={summary}
-            pendingCount={pending.length} onNavigate={navigate} onAddProvider={() => setProviderEditor('new')} />}
+            pendingCount={pending.length} awaitingHostOnly={awaitingHostOnly} onNavigate={navigate} onAddProvider={() => setProviderEditor('new')} />}
           {page === 'providers' && !providers.length && <section className={styles.card}>
             <EmptyState icon={Server} title={t('empty.addFirstProviderTitle')}
               description={t('providers.addFirstBody')}
@@ -321,11 +340,11 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
               入口不能只在 Codex 配置页里（真机上用户在自己配的页面上找不到任何能生效的按钮）。
               Codex 配置页自己就有完整的操作行，那里不重复出现。 */}
           {page !== 'codexConfig' && !showOnboarding && !modelEditor && <PendingApplyBar client={client} providers={providers}
-            models={models} onApplied={refresh} onOpenDiff={() => navigate('codexConfig')} />}
+            models={models} summary={summary} onApplied={refresh} onOpenDiff={() => navigate('codexConfig')} />}
         </>}
       </>}
       </main>
-      <footer className={styles.statusbar}><span><span className={`${styles.dot} ${gateway?.running ? styles.online : styles.offline}`} />{gatewayText(gateway)}</span><span>{t('shell.pendingModels', { count: pending.length })} <span className={styles.separator}>/</span>{t('shell.configOnDevice')}</span></footer>
+      <footer className={styles.statusbar}><span><span className={`${styles.dot} ${gateway?.running ? styles.online : styles.offline}`} />{gatewayText(gateway)}</span><span>{awaitingHostOnly ? t('shell.awaitingHost', { count: pending.length }) : t('shell.pendingModels', { count: pending.length })} <span className={styles.separator}>/</span>{t('shell.configOnDevice')}</span></footer>
     </div>
     {providerEditor && <ProviderForm client={client} provider={providerEditor === 'new' ? undefined : providerEditor}
       providers={providers} models={models}

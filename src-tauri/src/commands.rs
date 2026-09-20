@@ -458,6 +458,47 @@ pub async fn apply_confirm_reload(
     .await
 }
 
+/// 自动补记宿主回执的结果。空数组表示「没有可确认的事务」，不是失败。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconciledReload {
+    /// 本次被补记的 operation id；界面据此决定要不要重读数据。
+    pub confirmed_operation_ids: Vec<String>,
+}
+
+/// 宿主进程在这次发布之后重新启动过，就把它记成回执。
+///
+/// 界面在**应用完成**、**窗口重新获得焦点**、**启动**三个时机各调一次：这三处覆盖了
+/// 「宿主可能已经重启过、而我们还没记账」的全部时机。查不到宿主启动时间（没在运行、
+/// 平台还不支持）时什么都不做，事务留在等待人工确认上——不用「大概重启过了」顶替回执。
+#[tauri::command]
+pub async fn apply_reconcile_reload(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<ReconciledReload, CoreError> {
+    run(window, state, reconcile_host_reload).await
+}
+
+fn reconcile_host_reload(desktop: &DesktopState) -> Result<ReconciledReload, CoreError> {
+    use switch_core::platform::{host_process_name, Platform, ProcessProbe, SystemProcessProbe};
+
+    let platform = Platform::current();
+    // 取探测结果里的第一个实例，与界面上「重启 Codex」用的是同一条选中规则——
+    // 两边指向同一个宿主，否则会出现「重启了 A、按 B 的进程时间记账」。
+    let host_started_at_unix = desktop
+        .detect_instances(None)?
+        .into_iter()
+        .next()
+        .and_then(|instance| instance.app_path)
+        .and_then(|app_path| {
+            let process_name = host_process_name(platform, &app_path);
+            SystemProcessProbe.started_at_unix(&process_name)
+        });
+    Ok(ReconciledReload {
+        confirmed_operation_ids: desktop.apply.reconcile_host_reload(host_started_at_unix)?,
+    })
+}
+
 /// 生成还原计划。只撤销本工具写入且未被外部修改的字段。
 #[tauri::command]
 pub async fn restore_plan(

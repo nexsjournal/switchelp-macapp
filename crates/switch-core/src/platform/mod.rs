@@ -166,6 +166,11 @@ pub trait ProcessProbe {
     fn spawn_detached(&self, spec: &CommandSpec) -> bool;
     /// 等待若干毫秒。测试里立刻返回，不真的睡。
     fn sleep_ms(&self, ms: u64);
+    /// 这个进程名**最早**那个实例的启动时间（Unix 秒）；没有实例或查不到时 `None`。
+    ///
+    /// 取最早的那个是有意的：调用方拿它判断「宿主是否在这次发布之后重新启动过」，
+    /// 而只要还有一个更早的实例在跑，就不能断言宿主读的是新配置。宁可不确认，也不能错认。
+    fn started_at_unix(&self, name: &str) -> Option<i64>;
 }
 
 /// 重启各阶段的等待预算。
@@ -353,6 +358,83 @@ impl ProcessProbe for SystemProcessProbe {
     fn sleep_ms(&self, ms: u64) {
         std::thread::sleep(std::time::Duration::from_millis(ms));
     }
+
+    fn started_at_unix(&self, name: &str) -> Option<i64> {
+        if name.trim().is_empty() {
+            return None;
+        }
+        // Windows 上还没有对应实现，返回「查不到」而不是猜一个时间——调用方据此
+        // 停在等待人工确认上。目前也走不到这里：Windows 的凭据 helper 还是桩，
+        // 网关起不来，apply 在 commands.rs 的前置检查里就被拦住了。
+        #[cfg(target_os = "windows")]
+        {
+            let _ = name;
+            return None;
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let pids = std::process::Command::new("pgrep")
+                .arg("-x")
+                .arg(name)
+                .output()
+                .ok()?;
+            if !pids.status.success() {
+                return None;
+            }
+            let list: Vec<String> = String::from_utf8_lossy(&pids.stdout)
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect();
+            if list.is_empty() {
+                return None;
+            }
+            // macOS 的 ps **没有** `etimes`（只有格式化的 `etime`），所以这里解析
+            // `[[dd-]hh:]mm:ss` 而不是拿现成的秒数。Linux 上两者都有，用同一个更省事。
+            let output = std::process::Command::new("ps")
+                .arg("-o")
+                .arg("etime=")
+                .arg("-p")
+                .args(&list)
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let oldest_elapsed = String::from_utf8_lossy(&output.stdout)
+                .split_whitespace()
+                .filter_map(parse_elapsed_seconds)
+                .max()?;
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            Some(now - oldest_elapsed)
+        }
+    }
+}
+
+/// 解析 `ps -o etime=` 的输出：`MM:SS`、`HH:MM:SS`、`DD-HH:MM:SS`。
+///
+/// 不依赖 `lstart`：那是本地化格式（星期缩写随语言变），而这个只有数字和冒号。
+/// 字段数不在预期内的输入一律返回 `None`——把「看不懂」当成 0 秒，等于把「查不到」
+/// 变成「刚刚启动」，那会凭空确认一次宿主回执。
+fn parse_elapsed_seconds(text: &str) -> Option<i64> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let (days, clock) = match text.split_once('-') {
+        Some((days, rest)) => (days.trim().parse::<i64>().ok()?, rest),
+        None => (0, text),
+    };
+    let fields = clock
+        .split(':')
+        .map(|field| field.trim().parse::<i64>().ok())
+        .collect::<Option<Vec<i64>>>()?;
+    // 最短形态是 `MM:SS`：ps 从不只打印一个字段。
+    let (seconds, minutes, hours) = match fields.as_slice() {
+        [minutes, seconds] => (*seconds, *minutes, 0),
+        [hours, minutes, seconds] => (*seconds, *minutes, *hours),
+        _ => return None,
+    };
+    Some(((days * 24 + hours) * 60 + minutes) * 60 + seconds)
 }
 
 /// 各平台的窗口策略。
@@ -675,6 +757,33 @@ mod tests {
         fn sleep_ms(&self, _ms: u64) {
             self.sleeps.set(self.sleeps.get() + 1);
         }
+        fn started_at_unix(&self, _name: &str) -> Option<i64> {
+            // 重启流程不用启动时间；回执判定在 apply 层，时间由装配层探测后传进去。
+            None
+        }
+    }
+
+    #[test]
+    fn elapsed_seconds_parses_every_shape_ps_etime_prints() {
+        // ps 实际会打印的三种形态：刚起来、跑了几小时、跨了天。
+        assert_eq!(parse_elapsed_seconds("00:00"), Some(0));
+        assert_eq!(parse_elapsed_seconds("00:42"), Some(42));
+        assert_eq!(parse_elapsed_seconds("05:23"), Some(5 * 60 + 23));
+        assert_eq!(
+            parse_elapsed_seconds("02:05:23"),
+            Some(2 * 3600 + 5 * 60 + 23)
+        );
+        assert_eq!(
+            parse_elapsed_seconds("3-02:05:23"),
+            Some((3 * 24 + 2) * 3600 + 5 * 60 + 23)
+        );
+        // 空行与畸形输入不能被当成 0 秒：那等于把「查不到」变成「刚刚启动」，
+        // 会凭空确认一次宿主回执。
+        assert_eq!(parse_elapsed_seconds(""), None);
+        assert_eq!(parse_elapsed_seconds("   "), None);
+        assert_eq!(parse_elapsed_seconds("42"), None);
+        assert_eq!(parse_elapsed_seconds("1:2:3:4"), None);
+        assert_eq!(parse_elapsed_seconds("abc"), None);
     }
 
     fn timing() -> RestartTiming {
