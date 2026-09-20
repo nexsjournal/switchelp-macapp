@@ -22,10 +22,14 @@ import { homedir } from 'node:os';
 
 const LOG = '/tmp/switchelp-bridge.log';
 const REAL_CODEX = '/Applications/ChatGPT.app/Contents/Resources/codex';
-/** 原生那份：用户真实的 home，只读使用，一个字节都不写。 */
-const NATIVE_HOME = `${homedir()}/.codex`;
-/** 托管那份：含网关 provider 与我们发布的目录。 */
-const MANAGED_HOME = process.env.SWITCHELP_PROTO_HOME;
+/**
+ * 两份 home 用环境变量指定，便于在真机上做对照实验：
+ * - 原生那份应当是**没被我们改过**的配置（真实场景里由产品决定放哪，原型里用备份拼一份）；
+ * - 托管那份是含网关 provider 与我们发布目录的那份。
+ * 默认值只是原地退化：没有指定时两边都指向用户真实的 home，等于纯透传。
+ */
+const NATIVE_HOME = process.env.SWITCHELP_PROTO_NATIVE_HOME ?? `${homedir()}/.codex`;
+const MANAGED_HOME = process.env.SWITCHELP_PROTO_MANAGED_HOME ?? process.env.SWITCHELP_PROTO_HOME;
 const argv = process.argv.slice(2);
 
 writeFileSync(LOG, '');

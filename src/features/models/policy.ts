@@ -32,6 +32,17 @@ export const hostStateKeys: Record<Model['hostState'], string> = {
   load_unconfirmed: 'host.loadUnconfirmed',
 };
 
+/**
+ * 宿主状态的语义色。设计规范里语义色与强调色是两套，状态不借强调色表达，
+ * 所以这里只映射到成功 / 警告，其余状态保持中性——「不纳入目录」不是问题，
+ * 「无法确认」也不该用一个颜色替用户下结论。
+ */
+export function hostStateVariant(state: Model['hostState']): 'success' | 'warning' | '' {
+  if (state === 'loaded') return 'success';
+  if (state === 'pending_apply' || state === 'awaiting_reload') return 'warning';
+  return '';
+}
+
 /** 从上游发现结果带出的预填：上游只给 ID 与显示名，其余能力值仍要人确认。 */
 export type ModelPreset = { providerId: string; upstreamId: string; displayName: string };
 

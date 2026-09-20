@@ -83,6 +83,7 @@ input[type='checkbox'] { accent-color: var(--text-primary); width: 18px; height:
 .actions { display: flex; gap: 8px; align-items: center; }
 .badge { display: inline-flex; align-items: center; min-height: 22px; border: 1px solid var(--border-subtle); border-radius: var(--radius-pill); padding: 2px 8px; color: var(--text-secondary); font-size: var(--font-size-caption); line-height: var(--line-height-caption); white-space: nowrap; font-weight: 400; }
 .badge.warning { color: var(--status-warning); background: var(--status-warning-bg); border-color: transparent; }
+.badge.success { color: var(--status-success); background: var(--status-success-bg); border-color: transparent; }
 .form-fields { border: 0; min-width: 0; margin: 0; padding: 24px; display: grid; gap: 16px; }
 .form-fields label { display: flex; flex-direction: column; gap: 8px; font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); }
 .form-fields label.check-label { flex-direction: row; align-items: center; gap: 8px; }
