@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, FileSearch, History, RefreshCw, ShieldAlert, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileSearch, History, RefreshCw, SlidersHorizontal } from 'lucide-react';
 import type { ApplyPlan, ApplyStage, CodexInstance, FieldChange, Model } from '@/contracts/types';
-import { type AppliedSummary, type ApplyStatus, type DesktopClient, type InspectResult, toCoreError } from '@/desktop/client';
+import { isCoreError, type AppliedSummary, type ApplyStatus, type DesktopClient, type InspectResult, toCoreError } from '@/desktop/client';
 
 import { Dialog } from '@/components/Dialog';
 import { showToast } from '@/components/Toast';
@@ -136,8 +136,13 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
     finally { setBusy(''); }
   }
 
+  /** 生成计划本身（不弹窗、不提示），重生成时也走它。 */
+  const planOf = (kind: 'apply' | 'restore') => kind === 'apply'
+    ? client.planApply({ instanceId, draftRevision: '' })
+    : client.planRestore(instanceId);
+
   const makePlan = (kind: 'apply' | 'restore') => run('plan', async () => {
-    const plan = kind === 'apply' ? await client.planApply({ instanceId, draftRevision: '' }) : await client.planRestore(instanceId);
+    const plan = await planOf(kind);
     setDraft({ kind, plan }); setStatus(null);
     showToast(kind === 'apply' ? t('codex.diffPreviewed') : t('codex.restorePreviewed'), 'info');
   });
@@ -183,13 +188,32 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
     return t('codex.restoredAndRestarted', { suffix });
   }
 
+  const execute = (kind: 'apply' | 'restore', plan: ApplyPlan) => {
+    const request = { planId: plan.id, planHash: plan.planHash, idempotencyKey: newIdempotencyKey() };
+    return kind === 'apply' ? client.executeApply(request) : client.executeRestore(request);
+  };
+
+  /**
+   * 提交计划。
+   *
+   * 计划带的是「生成时那份配置的哈希」：**Codex 自己也会写 config.toml**（启动时补
+   * `[projects.*]`、改自己的设置），所以「先生成计划 → 再重启 Codex → 再提交」必然被判成
+   * 配置已变更。让用户去理解这套 CAS 是没道理的——重新生成一次计划再提交即可：
+   * 应用与还原都只碰本工具自己的受管字段，重放是安全的。
+   */
   const commit = () => run('commit', async () => {
     if (!draft) return;
-    const request = { planId: draft.plan.id, planHash: draft.plan.planHash, idempotencyKey: newIdempotencyKey() };
-    const result = draft.kind === 'apply' ? await client.executeApply(request) : await client.executeRestore(request);
+    const kind = draft.kind;
+    const result = await execute(kind, draft.plan).catch(async (thrown) => {
+      if (!isCoreError(thrown) || thrown.code !== 'CONFIG_CHANGED') throw thrown;
+      const fresh = await planOf(kind);
+      setDraft({ kind, plan: fresh });
+      showToast(t('codex.replanned'), 'info');
+      return execute(kind, fresh);
+    });
     const next = await client.applyStatus(result.operationId);
     setStatus(next);
-    if (draft.kind === 'restore') {
+    if (kind === 'restore') {
       // 还原之后也必须重启 Codex：它只在启动时读配置，不重启就还是旧的那一套
       // （用户以为还原没生效，其实配置已经撤销了）。
       setDraft(null);
@@ -199,6 +223,8 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
       showToast(restoreNotice(kept, restarted), restartTone(restarted));
       return;
     }
+    // 提交成功就关掉差异弹窗：它现在是模态，留着会挡住事务状态那张卡。
+    setDraft(null);
     onApplied?.();
     // 配置写完了，但 Codex 只在启动时读它：直接重启，省掉「再点一次重启」这一步。
     // 重启失败不影响已经提交的配置，所以这里只降级成提示。
@@ -321,46 +347,48 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
       {showPreview && <pre className={styles.preview} aria-label={t('codex.redactedPreview')}>{inspect.redactedPreview}</pre>}
     </section>}
 
-    {draft && <section className={styles.card}>
-      <div className={styles.header}>
-        <div>{draft.kind === 'apply' ? <SlidersHorizontal size={18} /> : <History size={18} />}
-          <h2>{draft.kind === 'apply' ? t('codex.diffTitleApply') : t('codex.diffTitleRestore')}</h2></div>
-        <span className="badge">{t('codex.changeCount', { count: draft.plan.changes.length })}</span>
+    {/* 差异与确认是**模态**：以前它渲染在页面最下面，点了上面的按钮之后不往下滚根本看不到
+        确认入口（真机上就是这么卡住的：用户点完「还原」又去点了「重启 Codex」，配置一直没动）。
+        弹窗底栏固定在滚动区之外，长差异在正文里滚动。 */}
+    {draft && <Dialog width="wide" busy={busy === 'commit'}
+      title={draft.kind === 'apply' ? t('codex.diffTitleApply') : t('codex.diffTitleRestore')}
+      description={t('codex.changeCount', { count: draft.plan.changes.length })}
+      onClose={() => { setDraft(null); setError(''); }}
+      footer={<footer className="form-footer">
+        <span>{busy === 'commit' ? t('codex.commitNotCancellable') : t('codex.casNote')}</span>
+        <div className="actions">
+          <button onClick={() => { setDraft(null); setError(''); }} disabled={busy === 'commit'}>{t('action.cancel')}</button>
+          <button className="primary" autoFocus onClick={() => void commit()} disabled={busy === 'commit'}>
+            {busy === 'commit' ? t('codex.committing') : commitLabel}
+          </button>
+        </div>
+      </footer>}>
+      <div className="form-fields">
+        <p className="field-hint">{t('codex.targetFile')}<span className="text-mono break-anywhere">{draft.plan.configPath}</span></p>
+        {draft.plan.changes.length === 0
+          ? <p className="field-hint">{t('codex.noFieldDiff')}</p>
+          : diff.map(group => <div key={group.key} className={styles.group}>
+            <h3>{t(`group.${group.key}`)}<span className="badge">{group.changes.length}</span></h3>
+            <table className={styles.changes}>
+              <thead><tr><th>{t('codex.changeField')}</th><th>{t('codex.changeBefore')}</th><th>{t('codex.changeAfter')}</th><th>{t('codex.changeReason')}</th></tr></thead>
+              <tbody>{group.changes.map(change => <tr key={change.keyPath}>
+                <td className="text-mono">{change.keyPath}</td>
+                <td><code className="text-muted break-anywhere">{change.before ?? t('codex.notSet')}</code></td>
+                <td><code className="break-anywhere">{change.after ?? t('codex.willBeDeleted')}</code></td>
+                <td className="text-muted">{reasonLabel(change.reasonKey)}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>)}
+        {draft.plan.warnings.length > 0 && <div className={styles.warnings}>
+          <AlertTriangle size={15} />{t('codex.compileWarnings')}<ul>{draft.plan.warnings.map(raw => {
+            const { label, detail } = warningParts(raw);
+            return <li key={raw}><strong>{label}</strong>{t('common.labelSeparator')}{detail}</li>;
+          })}</ul>
+        </div>}
+        <p className="field-hint">{t('codex.applyRestartsHost')}</p>
+        {error && <div role="alert" className="error-message">{error}</div>}
       </div>
-      <p className={styles.subtle}>{t('codex.targetFile')}<span className="text-mono break-anywhere">{draft.plan.configPath}</span></p>
-      {draft.plan.changes.length === 0
-        ? <p className={styles.subtle} style={{ marginTop: 16 }}>{t('codex.noFieldDiff')}</p>
-        : diff.map(group => <div key={group.key} className={styles.group}>
-          <h3>{t(`group.${group.key}`)}<span className="badge">{group.changes.length}</span></h3>
-          <table className={styles.changes}>
-            <thead><tr><th>{t('codex.changeField')}</th><th>{t('codex.changeBefore')}</th><th>{t('codex.changeAfter')}</th><th>{t('codex.changeReason')}</th></tr></thead>
-            <tbody>{group.changes.map(change => <tr key={change.keyPath}>
-              <td className="text-mono">{change.keyPath}</td>
-              <td><code className="text-muted break-anywhere">{change.before ?? t('codex.notSet')}</code></td>
-              <td><code className="break-anywhere">{change.after ?? t('codex.willBeDeleted')}</code></td>
-              <td className="text-muted">{reasonLabel(change.reasonKey)}</td>
-            </tr>)}</tbody>
-          </table>
-        </div>)}
-      {draft.plan.warnings.length > 0 && <div className={styles.warnings}>
-        <AlertTriangle size={15} />{t('codex.compileWarnings')}<ul>{draft.plan.warnings.map(raw => {
-          const { label, detail } = warningParts(raw);
-          return <li key={raw}><strong>{label}</strong>{t('common.labelSeparator')}{detail}</li>;
-        })}</ul>
-      </div>}
-      <div className={styles.note}><ShieldAlert size={17} /><p>{t('codex.casNote')} {t('codex.applyRestartsHost')}</p></div>
-      <div className={styles.actions} style={{ marginTop: 20 }}>
-        <button className="primary" onClick={() => void commit()} disabled={busy === 'commit'}>
-          {busy === 'commit' ? t('codex.committing') : commitLabel}
-        </button>
-        <button
-          onClick={() => { setDraft(null); setError(''); }}
-          disabled={busy === 'commit'}
-          title={busy === 'commit' ? t('codex.commitNotCancellable') : undefined}
-        >{t('action.cancel')}</button>
-        {busy === 'commit' && <span className="text-muted">{t('codex.commitNotCancellable')}</span>}
-      </div>
-    </section>}
+    </Dialog>}
 
     {status && <section className={styles.card}>
       <div className={styles.header}><div><CheckCircle2 size={18} /><h2>{t('codex.txState')}</h2></div>
@@ -394,8 +422,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
 
     {/* 放在页面顶层：实例卡里的按钮在没有事务时也要能打开它。 */}
       {restartConfirm && <Dialog title={t('action.restartHost')} description={t('codex.restartHostBody')}
-        busy={busy === 'restart'} onClose={() => setRestartConfirm(false)}>
-        <div className="form-fields"><div className="form-footer">
+        busy={busy === 'restart'} onClose={() => setRestartConfirm(false)} footer={<footer className="form-footer">
           <span>{t('codex.restartHostNote')}</span>
           <div className="actions">
             <button onClick={() => setRestartConfirm(false)} disabled={busy === 'restart'}>{t('action.cancel')}</button>
@@ -403,7 +430,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
               {busy === 'restart' ? t('codex.restarting') : t('action.restartHost')}
             </button>
           </div>
-        </div></div>
-      </Dialog>}
+        </footer>}
+        />}
   </div>;
 }

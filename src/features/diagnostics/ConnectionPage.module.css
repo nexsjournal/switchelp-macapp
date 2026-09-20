@@ -15,7 +15,7 @@
 .runActions { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: 12px; }
 
 .result { display: grid; grid-template-columns: 1.25fr 1fr; gap: 24px; align-items: start; }
-.warn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--radius-pill); background: var(--status-warning-bg); color: var(--status-warning); font-size: 11px; }
+.warn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--radius-pill); background: var(--status-warning-bg); color: var(--status-warning); font-size: var(--font-size-caption); }
 
 .timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .timeline li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px 0; border-top: 1px solid var(--border-subtle); }
@@ -24,7 +24,7 @@
 .timeline li.passed .marker { background: var(--status-success); box-shadow: 0 0 0 3px var(--status-success-bg); }
 .timeline li.failed .marker { background: var(--status-danger); }
 .timeline strong { font-size: 13px; font-weight: 500; }
-.state { margin-left: 8px; font-size: 11px; color: var(--text-muted); }
+.state { margin-left: 8px; font-size: var(--font-size-caption); color: var(--text-muted); }
 .timeline p { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); }
 
 .ok { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--status-success); font-size: 13px; }

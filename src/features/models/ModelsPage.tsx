@@ -251,7 +251,11 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
 
     {probe && <Dialog title={t('models.probeTitle', { name: probe.model.displayName })} busy={busy === 'probe'}
       description={t('models.probeBody')}
-      onClose={() => setProbe(null)}>
+      onClose={() => setProbe(null)}
+      footer={<footer className="form-footer">
+        <span />
+        <div className="actions"><button onClick={() => setProbe(null)} autoFocus>{t('common.close')}</button></div>
+      </footer>}>
       <div className="form-fields">
         <ul className={styles.stages}>{probe.stages.map(stage => <li key={stage.stageKey} className={styles[stage.status] ?? ''}>
           <strong>{t(`stage.${stage.stageKey}`)}</strong>
@@ -259,14 +263,10 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
           <span className="text-muted">{t(stage.messageKey)}</span>
           {stage.elapsedMs != null && <span className="text-mono text-muted">{stage.elapsedMs} ms</span>}
         </li>)}</ul>
-        <div className="actions" style={{ justifyContent: 'flex-end' }}>
-          <button onClick={() => setProbe(null)} autoFocus>{t('common.close')}</button>
-        </div>
       </div>
     </Dialog>}
 
-    {confirm && <Dialog title={confirm.title} description={confirm.body} onClose={() => setConfirm(null)} busy={busy !== ''}>
-      <div className="form-fields"><div className="form-footer">
+    {confirm && <Dialog title={confirm.title} description={confirm.body} onClose={() => setConfirm(null)} busy={busy !== ''} footer={<footer className="form-footer">
         <span>{t('common.irreversible')}</span>
         <div className="actions">
           <button onClick={() => setConfirm(null)} disabled={busy !== ''}>{t('action.cancel')}</button>
@@ -274,8 +274,8 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
             const action = confirm; setConfirm(null); await run('bulk', action.run);
           }}>{confirm.label}</button>
         </div>
-      </div></div>
-    </Dialog>}
+      </footer>}
+      />}
   </>;
 
   // 内嵌时不再自带页面级间距；表格那张卡本身就够当外框了。

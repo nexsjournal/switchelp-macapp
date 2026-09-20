@@ -6,9 +6,10 @@
 .brandIcon { width: 36px; height: 36px; flex-shrink: 0; display: grid; place-items: center; background: var(--text-primary); color: var(--bg-canvas); border-radius: 10px; }
 /* 文本块允许收缩，才能在窄侧栏里省略号截断，而不是把 logo 挤扁。 */
 .brand > div:last-child { min-width: 0; }
-.brand strong { display: block; font-size: 19px; line-height: 22px; letter-spacing: -.7px; }
+/* 品牌文字回到字阶上的「区域标题」一档：19px 不在字阶里。 */
+.brand strong { display: block; font-size: var(--font-size-section-title); line-height: 22px; letter-spacing: -.7px; }
 /* 行高显式给值：继承正文的 22 会让 11px 的副标题上方多出一大截行距，两行看着离得远。 */
-.brand span { display: block; font-size: 11px; line-height: 14px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand span { display: block; font-size: var(--font-size-caption); line-height: 14px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sidebar nav { display: grid; gap: 8px; }
 .sidebar nav button { justify-content: flex-start; border: 1px solid transparent; height: 44px; padding: 0 16px; background: transparent; color: var(--text-secondary); border-radius: var(--radius-nav); }
 .sidebar nav button:hover { background: var(--bg-hover); color: var(--text-primary); }
@@ -16,8 +17,8 @@
 .sidebar nav button.active { background: var(--accent-subtle); color: var(--accent); border-color: var(--accent-border); }
 .sidebarBottom { border-top: 1px solid var(--border-subtle); padding: 20px 8px 12px; margin-top: auto; display: flex; gap: 12px; align-items: center; color: var(--text-secondary); }
 .sidebarBottom strong { font-size: 12px; font-weight: 500; display: block; }
-.sidebarBottom span { font-size: 10px; color: var(--text-muted); }
-.version { color: var(--text-muted); display: flex; justify-content: space-between; font-size: 10px; padding: 0 8px; }
+.sidebarBottom span { font-size: var(--font-size-caption); color: var(--text-muted); }
+.version { color: var(--text-muted); display: flex; justify-content: space-between; font-size: var(--font-size-caption); padding: 0 8px; }
 .workspace { min-width: 0; flex: 1; display: flex; flex-direction: column; }
 .topbar { height: 52px; flex-shrink: 0; border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; padding: 0 32px; color: var(--text-muted); font-size: 12px; }
 .topbar > span:first-child { display: flex; align-items: center; gap: 10px; }
@@ -28,7 +29,7 @@
 .stat { padding: 20px 24px; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); }
 .stat > span { color: var(--text-secondary); font-size: 12px; }
 .stat strong { display: block; font-size: 30px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 40px; margin-top: 8px; }
-.stat small { display: block; color: var(--text-muted); font-size: 11px; margin-top: 4px; }
+.stat small { display: block; color: var(--text-muted); font-size: var(--font-size-caption); margin-top: 4px; }
 /* 顶对齐、各自贴合内容：两张卡内容量不同，拉伸会在短的一侧留出大片空白。 */
 .overviewGrid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 24px; margin-bottom: 24px; align-items: start; }
 .card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
@@ -42,11 +43,11 @@
 .providerSummary { width: 100%; padding: 12px; height: auto; text-align: left; justify-content: flex-start; margin-top: 12px; background: var(--bg-input); }
 .providerSummary > div:nth-child(2) { flex: 1; overflow: hidden; }
 .providerSummary strong, .providerItem strong { display: block; font-weight: 500; }
-.providerSummary span { display: block; color: var(--text-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; }
+.providerSummary span { display: block; color: var(--text-muted); font-size: var(--font-size-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; }
 .monogram { display: grid; place-items: center; background: var(--bg-selected); border: 1px solid var(--border-subtle); border-radius: 9px; width: 36px; height: 36px; flex-shrink: 0; font-size: 16px; font-weight: 600; }
 .steps { list-style: none; padding: 0; margin: 0; }
 .steps li { display: flex; gap: 12px; margin-bottom: 20px; }
-.steps li > span { width: 24px; height: 24px; border: 1px solid var(--border-subtle); color: var(--text-secondary); border-radius: 50%; text-align: center; line-height: 22px; font-size: 11px; flex-shrink: 0; }
+.steps li > span { width: 24px; height: 24px; border: 1px solid var(--border-subtle); color: var(--text-secondary); border-radius: 50%; text-align: center; line-height: 22px; font-size: var(--font-size-caption); flex-shrink: 0; }
 .steps strong { font-size: 13px; font-weight: 500; }
 .steps p { font-size: 12px; margin: 2px 0 0; color: var(--text-muted); }
 .note { display: flex; align-items: flex-start; gap: 10px; color: var(--text-muted); padding: 14px; border-radius: 8px; background: var(--bg-input); font-size: 12px; line-height: 20px; }
@@ -55,18 +56,20 @@
 .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 36px 20px; text-align: center; color: var(--text-muted); }
 .empty h3 { font-size: 14px; font-weight: 500; color: var(--text-primary); margin: 16px 0 4px; }
 .empty p { font-size: 12px; margin: 4px 0 16px; max-width: 330px; }
-.tableWrap { overflow-x: auto; }
+/* 表头与行里的点击区用负外边距撑到 32px：不给滚动区留白的话，那几像素会被裁掉，
+   点击区就少了边（审计会把它们报成 clipped）。 */
+.tableWrap { overflow-x: auto; padding: 7px; margin: -7px; }
 .tableWrap table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
 /* 操作列按内容收窄：自动布局会把剩余宽度按比例摊给所有列，
    结果操作列比任何数据列都宽，数据反被挤窄。 */
 .tableWrap th:last-child, .tableWrap td:last-child { width: 1%; white-space: nowrap; }
-.tableWrap th { color: var(--text-muted); font-size: 11px; font-weight: 500; padding: 0 12px 14px; white-space: nowrap; }
+.tableWrap th { color: var(--text-muted); font-size: var(--font-size-caption); font-weight: 500; padding: 0 12px 14px; white-space: nowrap; }
 .tableWrap td { border-top: 1px solid var(--border-subtle); padding: 16px 12px; }
 .tableWrap td:first-child { min-width: 150px; max-width: 300px; }
 .tableWrap td strong { display: block; font-weight: 500; margin-bottom: 2px; }
 /* 按结构选择：CSS Module 会把 .text-muted 这类全局工具类一起哈希，写它永远不匹配。 */
-.tableWrap td > span { display: block; font-size: 11px; color: var(--text-muted); }
-.tableWrap td:first-child > span, .tableWrap td:nth-child(3) > span { display: block; font-size: 11px; }
+.tableWrap td > span { display: block; font-size: var(--font-size-caption); color: var(--text-muted); }
+.tableWrap td:first-child > span, .tableWrap td:nth-child(3) > span { display: block; font-size: var(--font-size-caption); }
 .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-bottom: 20px; color: var(--text-muted); font-size: 12px; }
 .search { display: flex; align-items: center; position: relative; width: min(420px, 75%); }
 .search svg { position: absolute; left: 12px; pointer-events: none; }
@@ -88,9 +91,9 @@
 .providerHead { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .providerName { flex: 1; min-width: 0; }
 .providerName strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
-.providerName span { display: block; color: var(--text-muted); font-size: 11px; margin-top: 4px; }
+.providerName span { display: block; color: var(--text-muted); font-size: var(--font-size-caption); margin-top: 4px; }
 .providerStatus { display: flex; align-items: center; gap: 8px; }
-.statusLabel { color: var(--text-secondary); font-size: 11px; white-space: nowrap; }
+.statusLabel { color: var(--text-secondary); font-size: var(--font-size-caption); white-space: nowrap; }
 .statusDot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--border-control); }
 .statusDot.success { background: var(--status-success); }
 .statusDot.warning { background: var(--status-warning); }
@@ -102,9 +105,9 @@
 .keyList { list-style: none; padding: 0; margin: 0 0 20px; }
 .keyList li { border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .keyList strong { display: block; font-size: 13px; font-weight: 500; }
-.keyList span { font-size: 11px; }
+.keyList span { font-size: var(--font-size-caption); }
 .keyList button { height: 32px; font-size: 12px; padding: 0 10px; }
-.statusbar { padding: 0 24px; height: 36px; border-top: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
+.statusbar { padding: 0 24px; height: 36px; border-top: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; font-size: var(--font-size-caption); color: var(--text-muted); }
 .statusbar > span { display: flex; align-items: center; gap: 8px; }
 .dot { height: 6px; width: 6px; border-radius: 50%; background: var(--text-muted); }
 .separator { margin: 0 4px; color: var(--border-control); }

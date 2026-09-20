@@ -10,11 +10,12 @@
 .cardActions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
 .muted { color: var(--text-muted); font-size: 13px; line-height: 20px; margin: 0; display: flex; align-items: center; gap: 8px; }
 .note { display: flex; gap: 8px; align-items: flex-start; margin: 16px 0 0; padding: 12px 14px; border-radius: 8px; background: var(--bg-input);
-  color: var(--text-muted); font-size: 11px; line-height: 18px; }
+  color: var(--text-muted); font-size: var(--font-size-caption); line-height: 18px; }
 .note > svg { flex-shrink: 0; margin-top: 2px; }
 
 .route { margin: 0 0 16px; }
-.route strong { display: block; font-size: 20px; font-weight: 500; letter-spacing: -0.4px; }
+/* 当前生效的模型名是「数值强调」一档（20px 不在字阶里）。 */
+.route strong { display: block; font-size: var(--font-size-metric); line-height: var(--line-height-metric); font-weight: 500; letter-spacing: -0.4px; }
 .route span { display: block; font-size: 12px; margin-top: 4px; }
 .rows { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 10px 12px; margin: 0; font-size: 13px; }
 .rows dt { color: var(--text-muted); }
@@ -26,7 +27,7 @@
 /* 用 div 限定文字块：`.status span` 会连行首的状态点一起选中，
    把 .dot 自己的 margin-top: 6px（对齐首行文字用）覆盖成 3px。 */
 .status div > span { display: block; font-size: 12px; color: var(--text-secondary); margin-top: 3px; }
-.status div > span span { display: block; font-size: 11px; margin-top: 2px; }
+.status div > span span { display: block; font-size: var(--font-size-caption); margin-top: 2px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 6px; background: var(--border-control); }
 .dot.ok { background: var(--status-success); }
 .dot.warn { background: var(--status-warning); }
@@ -40,9 +41,9 @@
 .monogram { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; background: var(--bg-selected);
   border: 1px solid var(--border-subtle); font-size: 16px; font-weight: 600; }
 .providerName strong { display: block; font-size: 13px; font-weight: 500; }
-.providerName span { display: block; font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+.providerName span { display: block; font-size: var(--font-size-caption); color: var(--text-muted); margin-top: 3px; }
 .providerStatus { font-size: 12px; color: var(--text-secondary); }
-.providerStatus small { display: block; font-size: 11px; margin-top: 2px; }
+.providerStatus small { display: block; font-size: var(--font-size-caption); margin-top: 2px; }
 
 .pending { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .pending li { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 0; font-size: 12px; }

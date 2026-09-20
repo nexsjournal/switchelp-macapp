@@ -7,7 +7,7 @@
 .rows { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 14px 16px; margin: 0; font-size: 13px; }
 .rows dt { color: var(--text-muted); }
 .rows dd { margin: 0; }
-.rows dd > span { display: block; font-size: 11px; line-height: 18px; margin-top: 2px; }
+.rows dd > span { display: block; font-size: var(--font-size-caption); line-height: 18px; margin-top: 2px; }
 .online { color: var(--status-success); }
 .offline { color: var(--status-warning); }
 
@@ -15,7 +15,7 @@
 .instances li { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
   padding: 14px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-input); }
 .instances strong { display: block; font-size: 13px; font-weight: 500; }
-.instances span { display: block; font-size: 11px; margin-top: 3px; }
+.instances span { display: block; font-size: var(--font-size-caption); margin-top: 3px; }
 .tags { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
@@ -32,7 +32,7 @@
 .backups li { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
   padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-input); }
 .backups strong { display: block; font-size: 12px; font-weight: 500; }
-.backups span { display: block; font-size: 11px; margin-top: 3px; }
+.backups span { display: block; font-size: var(--font-size-caption); margin-top: 3px; }
 .summary { width: 100%; margin-top: 14px; padding: 14px; border-radius: 8px; background: var(--bg-input); border: 1px solid var(--border-subtle);
   color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; line-height: 20px; resize: vertical; }
 

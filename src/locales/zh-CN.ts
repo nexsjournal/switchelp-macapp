@@ -125,6 +125,7 @@ export const zhCN: Record<string, string> = {
   'codex.recheck': "重新检测",
   'codex.redactedPreview': "脱敏配置预览",
   'codex.reloaded': "Codex 已重新加载",
+  'codex.replanned': "Codex 自己改过配置文件（例如启动时补上了项目记录），已重新生成计划并继续。",
   'codex.restartHostBody': "会退出并重新打开 Codex（ChatGPT 桌面端）。未保存的对话可能丢失。",
   'codex.restartHostFailed': "Codex 已退出，但没有重新起来。请手动打开 Codex。",
   'codex.restartHostForced': "Codex 已重启，但它是被强制结束的，未保存的对话可能已丢失。它回来后看看模型菜单。",

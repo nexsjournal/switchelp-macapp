@@ -24,7 +24,7 @@
 .eventRow > svg { transform: translateY(2px); color: var(--text-muted); }
 svg.warning { color: var(--status-warning); }
 svg.error { color: var(--status-danger); }
-.category { color: var(--text-secondary); font-size: 11px; }
+.category { color: var(--text-secondary); font-size: var(--font-size-caption); }
 .pager { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 16px; color: var(--text-muted); font-size: 12px; }
 .pager button { height: var(--control-height-compact); font-size: 12px; }
 

@@ -113,26 +113,51 @@ test('用户确认宿主已重新加载后才进入已核验', async () => {
   expect(await screen.findByText('Codex 已重新加载并核验本次目录。')).toBeInTheDocument();
 });
 
-test('外部修改导致 CAS 冲突时给出重新比较入口，并重新生成计划', async () => {
+/// 计划带的是生成时那份配置的哈希，而 Codex 自己也会写 config.toml（启动时补项目记录），
+/// 所以过期是常态：必须自动重生成再提交，而不是让用户去理解 CAS、更不是让他自己找「重新比较」。
+test('回归：计划过期（Codex 自己改过配置）时自动重生成再提交', async () => {
   const planApply = vi.fn()
     .mockResolvedValueOnce(plan([modelChange]))
-    .mockResolvedValueOnce(plan([modelChange], { id: 'plan_retry' }));
+    .mockResolvedValueOnce(plan([modelChange], { id: 'plan_fresh' }));
+  const executeApply = vi.fn()
+    .mockRejectedValueOnce({ code: 'CONFIG_CHANGED', messageKey: 'error.configChanged',
+      safeDetails: ['配置文件在计划生成后被其他程序修改'], retryable: false, recoveryActions: [] })
+    .mockResolvedValueOnce({ operationId: 'op_1' });
+  const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitConfirmed: true, quitForced: false, launchedConfirmed: true });
+  const user = await openCodexPage({
+    detectInstances: vi.fn().mockResolvedValue([instance]),
+    planApply, executeApply, restartHost,
+    applyStatus: vi.fn().mockResolvedValue({ operationId: 'op_1', open: false, events: [event('verified')] }),
+  });
+
+  await user.click(screen.getByRole('button', { name: '应用到 Codex' }));
+  await user.click(screen.getByRole('button', { name: '应用并重新加载' }));
+
+  expect(planApply).toHaveBeenCalledTimes(2);
+  expect(executeApply).toHaveBeenLastCalledWith(expect.objectContaining({ planId: 'plan_fresh' }));
+  expect(restartHost).toHaveBeenCalled();
+  expect(await within(notifications()).findByText(/Codex 自己改过配置文件/)).toBeInTheDocument();
+});
+
+test('重生成之后仍然失败：把原因留在差异弹窗里，不谎称已提交', async () => {
+  const planApply = vi.fn()
+    .mockResolvedValueOnce(plan([modelChange]))
+    .mockResolvedValueOnce(plan([modelChange], { id: 'plan_fresh' }));
   const user = await openCodexPage({
     detectInstances: vi.fn().mockResolvedValue([instance]),
     planApply,
     executeApply: vi.fn().mockRejectedValue({ code: 'CONFIG_CHANGED', messageKey: 'error.configChanged',
-      safeDetails: ['配置文件在计划生成后被其他程序修改'], retryable: false, recoveryActions: [{ action: 'recompare', messageKey: 'action.recompare' }] }),
+      safeDetails: ['配置文件在计划生成后被其他程序修改'], retryable: false, recoveryActions: [] }),
     applyStatus: vi.fn().mockResolvedValue({ operationId: 'op_1', open: false, events: [event('conflict')] }),
   });
 
   await user.click(screen.getByRole('button', { name: '应用到 Codex' }));
   await user.click(screen.getByRole('button', { name: '应用并重新加载' }));
 
-  expect(await screen.findByRole('alert')).toHaveTextContent('配置文件在计划生成后被其他程序修改');
-  // 失败的计划不得被当成已提交状态展示。
-  expect(screen.queryByText('Codex 已重新加载并核验本次目录。')).not.toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: '重新比较' }));
+  // 自动重生成一次（共两次计划），第二次仍被拒 → 原因留在弹窗里，弹窗不关。
   expect(planApply).toHaveBeenCalledTimes(2);
+  expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('配置文件在计划生成后被其他程序修改');
+  expect(screen.queryByText('Codex 已重新加载并核验本次目录。')).not.toBeInTheDocument();
 });
 
 test('差异按原因分组展示，不把内部 reasonKey 泄露到界面', async () => {

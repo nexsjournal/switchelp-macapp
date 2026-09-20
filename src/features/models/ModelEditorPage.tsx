@@ -197,14 +197,13 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
       </footer>
     </form>
 
-    {discard && <Dialog title={t('editor.discardTitle')} dirty={false} description={t('editor.discardBody')} onClose={() => setDiscard(false)}>
-      <div className="form-fields"><div className="form-footer">
+    {discard && <Dialog title={t('editor.discardTitle')} dirty={false} description={t('editor.discardBody')} onClose={() => setDiscard(false)} footer={<footer className="form-footer">
         <span>{t('editor.discardIrreversible')}</span>
         <div className="actions">
           <button onClick={() => setDiscard(false)} autoFocus>{t('editor.keepEditing')}</button>
           <button className="danger" onClick={() => { setDiscard(false); onCancel(); }}>{t('editor.discardTitle')}</button>
         </div>
-      </div></div>
-    </Dialog>}
+      </footer>}
+      />}
   </div>;
 }
