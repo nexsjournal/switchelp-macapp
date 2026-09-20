@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
-import { AlertTriangle } from 'lucide-react';
-import type { ApplyPlan, FieldChange } from '@/contracts/types';
+import { AlertTriangle, Replace } from 'lucide-react';
+import type { ApplyPlan, FieldChange, Model } from '@/contracts/types';
 import { Dialog } from '@/components/Dialog';
 import styles from './ApplyConfirmDialog.module.css';
 
@@ -71,17 +71,32 @@ function warningOf(raw: string): { label: string; detail: string } {
  * 为什么是模态：以前这块渲染在页面操作行**之下**，用户点完按钮不往下滚就看不到确认入口，
  * 于是以为操作没生效（真机上就发生过：点完「还原」又去点了「重启 Codex」）。
  */
-export function ApplyConfirmDialog({ plan, kind, busy, error, commitLabel, onConfirm, onClose }: {
+export function ApplyConfirmDialog({ plan, kind, busy, error, commitLabel, models, onConfirm, onClose }: {
   plan: ApplyPlan;
   kind: 'apply' | 'restore';
   busy: boolean;
   error?: string;
   commitLabel: string;
+  /** 用来把别名翻成人看的名字。拿不到就退回别名本身——别名也比什么都不说强。 */
+  models?: Model[];
   onConfirm: () => void;
   onClose: () => void;
 }) {
   const diff = useMemo(() => groups(plan.changes), [plan]);
   const conflicts = plan.warnings.filter(raw => raw.includes('已被外部修改'));
+  /**
+   * 这次发布**替换**掉 Codex 的模型菜单，而不是往里追加。
+   *
+   * 这是本工具至今最容易被误解的一条行为：`model_catalog_json` 指向的目录里只有本工具
+   * 发布的别名，Codex 自带的模型会从选择器里整批消失，直到用户「还原为原生 Codex」。
+   * 真机实测 `model/list` 只剩 1 条。以前没有任何界面或文档说过这件事，用户会以为
+   * 「加了个模型」结果发现原来能用的都不见了。所以放在确认之前，而且不进折叠区。
+   */
+  const published = useMemo(
+    () => plan.catalogAliases.map(alias => models?.find(model => model.catalogAlias === alias)?.displayName ?? alias),
+    [plan.catalogAliases, models],
+  );
+  const replacesCatalog = kind === 'apply' && published.length > 0;
 
   return <Dialog width="wide" busy={busy}
     title={kind === 'apply' ? t('codex.diffTitleApply') : t('codex.diffTitleRestore')}
@@ -98,6 +113,15 @@ export function ApplyConfirmDialog({ plan, kind, busy, error, commitLabel, onCon
     </footer>}>
     <div className="form-fields">
       <p className="field-hint">{t('codex.targetFile')}<span className="text-mono break-anywhere">{plan.configPath}</span></p>
+      {replacesCatalog && <div className={styles.replaces} role="note">
+        <Replace size={14} aria-hidden="true" />
+        <div>
+          <strong>{t('codex.catalogReplacesTitle')}</strong>
+          <p>{t('codex.catalogReplacesBody')}</p>
+          <p className="text-muted">{t('codex.catalogReplacesList', { count: published.length })}</p>
+          <ul>{published.map(name => <li key={name}>{name}</li>)}</ul>
+        </div>
+      </div>}
       {plan.changes.length === 0
         ? <p className="field-hint">{t('codex.noFieldDiff')}</p>
         : diff.map(group => <div key={group.key} className={styles.group}>
@@ -118,7 +142,7 @@ export function ApplyConfirmDialog({ plan, kind, busy, error, commitLabel, onCon
           </table>
         </div>)}
       {plan.warnings.length > 0 && <div className={styles.warnings}>
-        <AlertTriangle size={15} aria-hidden="true" />
+        <AlertTriangle size={14} aria-hidden="true" />
         <div>
           <strong>{conflicts.length ? t('codex.conflictWarnings') : t('codex.compileWarnings')}</strong>
           <ul>{plan.warnings.map(raw => {
