@@ -31,7 +31,7 @@ async function openEmptyCodexPage() {
 
 test('提交成功只显示等待 Codex 重新加载，绝不自行宣称已加载', async () => {
   const confirmReload = vi.fn();
-  const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitRequested: true, launched: true });
+  const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitConfirmed: true, quitForced: false, launchedConfirmed: true });
   const user = await openCodexPage({
     detectInstances: vi.fn().mockResolvedValue([instance]),
     planApply: vi.fn().mockResolvedValue(plan([modelChange, providerChange])),
@@ -52,7 +52,7 @@ test('提交成功只显示等待 Codex 重新加载，绝不自行宣称已加�
   // 配置写完就自动重启宿主一次，用户不必再点「重启 Codex」；
   // 但文案仍然只是「已提交 + 已重启」，不说它已经加载了新目录。
   expect(restartHost).toHaveBeenCalledWith(instance.id);
-  expect(screen.getByRole('status')).toHaveTextContent(/配置已提交，并已重启 Codex/);
+  expect(screen.getByRole('status')).toHaveTextContent(/配置已提交，Codex 已重启/);
 });
 
 test('用户确认宿主已重新加载后才进入已核验', async () => {
@@ -131,9 +131,9 @@ test('编译警告显示可读文案，不把内部 messageKey 摆给用户', as
 
 
 
-test('重启宿主：先确认，再调用一次，并把结果说成「已请求」而不是「已生效」', async () => {
+test('重启宿主：先确认，再调用一次，并按确认到的结果说话', async () => {
   const user = userEvent.setup();
-  const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitRequested: true, launched: true });
+  const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitConfirmed: true, quitForced: false, launchedConfirmed: true });
   render(<App client={testClient({ detectInstances: vi.fn().mockResolvedValue([instance]), restartHost })} />);
   await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'Codex 配置' }));
   await screen.findByText('Codex 实例');
@@ -146,7 +146,39 @@ test('重启宿主：先确认，再调用一次，并把结果说成「已请�
 
   await user.click(within(dialog).getByRole('button', { name: '重启 Codex' }));
   expect(restartHost).toHaveBeenCalledWith(instance.id);
-  expect(await screen.findByRole('status')).toHaveTextContent(/已请求重启/);
+  expect(await screen.findByRole('status')).toHaveTextContent(/^Codex 已重启/);
+});
+
+test('旧进程没退出去时必须说「没能重启」，绝不报成功', async () => {
+  // 回归：早先只要启动命令发出去了就报成功，而 open 对已在运行的 App 只是激活旧进程——
+  // 配置没被重读，界面却说重启好了，用户于是去一个没更新的菜单里找模型。
+  const user = userEvent.setup();
+  const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitConfirmed: false, quitForced: false, launchedConfirmed: false });
+  render(<App client={testClient({ detectInstances: vi.fn().mockResolvedValue([instance]), restartHost })} />);
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'Codex 配置' }));
+  await screen.findByText('Codex 实例');
+
+  await user.click(screen.getByRole('button', { name: '重启 Codex' }));
+  await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '重启 Codex' }));
+
+  const status = await screen.findByRole('status');
+  expect(status).toHaveTextContent(/Codex 仍在运行，没能重启/);
+  expect(status).not.toHaveTextContent(/已重启/);
+});
+
+test('退出了但没起来时，说清楚要手动打开', async () => {
+  const user = userEvent.setup();
+  const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitConfirmed: true, quitForced: false, launchedConfirmed: false });
+  render(<App client={testClient({ detectInstances: vi.fn().mockResolvedValue([instance]), restartHost })} />);
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'Codex 配置' }));
+  await screen.findByText('Codex 实例');
+
+  await user.click(screen.getByRole('button', { name: '重启 Codex' }));
+  await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '重启 Codex' }));
+
+  const status = await screen.findByRole('status');
+  expect(status).toHaveTextContent(/已退出，但没有重新起来/);
+  expect(status).not.toHaveTextContent(/已重启/);
 });
 
 test('实例检测失败要能看到原因，而不是只显示空态', async () => {

@@ -78,17 +78,20 @@
   --border-subtle: #dadae0;
   --border-control: #777783;
 
-  /* 强调色：亮色下用更深的同类色，保证白字对比度 */
-  --accent: #0284c7;
+  /*
+   * 强调色：亮色下用更深的同类色。白字主按钮、accent 链接、accent-subtle 上的
+   * 小标签都必须过 AA（4.5:1）；#0284c7 只有 4.10，统一压到 #0369a1（约 5.6:1）。
+   */
+  --accent: #0369a1;
   --accent-strong: #0369a1;
   --accent-fg: #ffffff;
   --accent-subtle: #e3f2fd;
   --accent-border: #9dc9e8;
 
-  --action-primary-bg: #0284c7;
+  --action-primary-bg: #0369a1;
   --action-primary-fg: #ffffff;
 
-  --focus-ring: #0284c7;
+  --focus-ring: #0369a1;
 
   --status-success: #166534;
   --status-warning: #854d0e;
@@ -195,7 +198,14 @@
   /* ---- 字阶 ---- */
   --font-ui: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable', 'Segoe UI',
     'PingFang SC', 'Microsoft YaHei UI', sans-serif;
-  --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  /*
+   * 等宽栈必须自己带上中文字体。字体回退是**逐字符**做的：这份栈里全是拉丁等宽字体，
+   * 中文（提示文案、模型 ID 里的中文注释）没有一家覆盖，就会掉到最后的通用 `monospace`——
+   * 而 macOS 上那个通用名解析出来的是宋体一类，于是同一行里英文是等宽、中文变宋体。
+   * 把系统中文黑体排在通用名前面，中文就落回界面其它地方同一套字形。
+   */
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono',
+    'PingFang SC', 'Microsoft YaHei UI', monospace;
 
   --font-size-page-title: 28px;
   --line-height-page-title: 36px;

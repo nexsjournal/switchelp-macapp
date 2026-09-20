@@ -41,8 +41,9 @@ const looseModel = model('m_2', 'p_b', '目录外的模型', { inCatalog: false,
 function renderPage(overrides: Partial<Parameters<typeof testClient>[0]> = {}, models: Model[] = [catalogModel, looseModel]) {
   const client = testClient(overrides);
   const onChanged = vi.fn();
-  render(<ModelsPage client={client} providers={[providerA, providerB]} models={models} onChanged={onChanged} />);
-  return { client, onChanged };
+  const onEditModel = vi.fn();
+  render(<ModelsPage client={client} providers={[providerA, providerB]} models={models} onChanged={onChanged} onEditModel={onEditModel} />);
+  return { client, onChanged, onEditModel };
 }
 
 describe('模型列表', () => {
@@ -134,5 +135,20 @@ describe('模型列表', () => {
 
     await user.click(screen.getByRole('button', { name: '测试 目录中的模型' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('还没有可用的 Key，无法测试');
+  });
+});
+
+describe('编辑入口', () => {
+  it('编辑与添加都上报给宿主打开编辑器，本页不再内置编辑器', async () => {
+    const user = userEvent.setup();
+    const { onEditModel } = renderPage();
+
+    await user.click(screen.getByRole('button', { name: '编辑 目录中的模型' }));
+    expect(onEditModel).toHaveBeenCalledWith(catalogModel);
+
+    await user.click(screen.getByRole('button', { name: '添加模型' }));
+    expect(onEditModel).toHaveBeenCalledWith('new');
+    // 页面自始至终没有渲染过编辑器标题。
+    expect(screen.queryByRole('heading', { level: 1, name: '新增模型' })).not.toBeInTheDocument();
   });
 });

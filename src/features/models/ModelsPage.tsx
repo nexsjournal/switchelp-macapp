@@ -5,8 +5,7 @@ import { type DesktopClient, toCoreError } from '@/desktop/client';
 import { Dialog } from '@/components/Dialog';
 import { EmptyState } from '@/components/EmptyState';
 import { RowMenu } from '@/components/RowMenu';
-import { ModelEditorPage } from './ModelEditorPage';
-import { modelDraft } from './policy';
+import { hostStateKeys, modelDraft } from './policy';
 import styles from './ModelsPage.module.css';
 
 import { currentLocale, t } from '@/i18n';
@@ -21,36 +20,30 @@ const availabilityKeys: Record<Availability, string> = {
   not_in_catalog: 'models.notInCatalog',
 };
 
-const hostKeys: Record<Model['hostState'], string> = {
-  not_in_catalog: 'models.hostNotInCatalog',
-  pending_apply: 'host.pendingApply',
-  awaiting_reload: 'models.hostAwaitingReload',
-  loaded: 'host.loaded',
-  load_unconfirmed: 'host.loadUnconfirmed',
-};
-
 /**
  * 模型目录页（设计 P04）。
  *
  * 行操作按规范分成主操作、次操作与菜单：三个按钮并排会把操作列撑到比数据列还宽。
  * 「测试」只做只读探测，不会产生供应商费用。
+ *
+ * 编辑不再在本页内换页：打开编辑器这件事上交给宿主（App 统一托管编辑器状态），
+ * 这样侧栏导航在编辑器打开期间才能一致地处理脏表单，而不是把填写内容静默丢掉。
  */
-export function ModelsPage({ client, providers, models, onChanged, onViewDiff, providerScope, embedded }: {
+export function ModelsPage({ client, providers, models, onChanged, providerScope, embedded, onEditModel }: {
   client: DesktopClient; providers: Provider[]; models: Model[];
   onChanged: () => Promise<void> | void;
-  /** 编辑器里的「保存并查看应用差异」需要跳到 Codex 配置页，这里只上报意图。 */
-  onViewDiff?: () => void;
   /** 限定到某个供应商：供应商页把这一段嵌进它的详情里，不再提供跨供应商的筛选。 */
   providerScope?: string;
   /** 嵌进别的卡片时不再自带卡片外框，避免卡片套卡片。 */
   embedded?: boolean;
+  /** 「编辑」与「添加模型」都上报给宿主打开整页编辑器。 */
+  onEditModel: (target: Model | 'new') => void;
 }) {
   const [query, setQuery] = useState('');
   const [providerFilter, setProviderFilter] = useState(providerScope ?? 'all');
   const [availability, setAvailability] = useState<Availability>('all');
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'name', desc: false });
   const [selected, setSelected] = useState<string[]>([]);
-  const [editor, setEditor] = useState<Model | 'new' | null>(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -156,13 +149,6 @@ export function ModelsPage({ client, providers, models, onChanged, onViewDiff, p
     </th>
   );
 
-  if (editor) {
-    return <ModelEditorPage client={client} providers={providers} model={editor === 'new' ? undefined : editor}
-      onCancel={() => { setEditor(null); setError(''); }}
-      onViewDiff={onViewDiff}
-      onSaved={async () => { setEditor(null); await finish(t('models.draftSaved')); }} />;
-  }
-
   const body = <>
     <div className={embedded ? styles.toolbarEmbedded : styles.toolbar}>
       <div className={styles.search}><Search size={17} />
@@ -179,7 +165,7 @@ export function ModelsPage({ client, providers, models, onChanged, onViewDiff, p
           {(Object.keys(availabilityKeys) as Availability[]).map(key => <option key={key} value={key}>{t(availabilityKeys[key])}</option>)}
         </select></label>
       </div>
-      {!embedded && <button className="primary" onClick={() => setEditor('new')} disabled={!providers.length}><Plus size={17} />{t('action.addModel')}</button>}
+      {!embedded && <button className="primary" onClick={() => onEditModel('new')} disabled={!providers.length}><Plus size={17} />{t('action.addModel')}</button>}
     </div>
 
     {error && <div className="error-message" role="alert">{error}</div>}
@@ -199,15 +185,17 @@ export function ModelsPage({ client, providers, models, onChanged, onViewDiff, p
       ? <section className={styles.card}><EmptyState icon={Boxes}
           title={models.length ? t('models.noMatch') : t('empty.noModelTitle')}
           description={models.length ? t('models.noMatchBody') : t('models.emptyBody')}
-          action={!models.length && <button className="primary" onClick={() => setEditor('new')} disabled={!providers.length}><Plus size={16} />{t('action.addModel')}</button>} /></section>
+          action={!models.length && <button className="primary" onClick={() => onEditModel('new')} disabled={!providers.length}><Plus size={16} />{t('action.addModel')}</button>} /></section>
       : <section className={embedded ? styles.plain : styles.card}>
         <div className={styles.tableWrap}>
           <table>
             <thead><tr>
               <th scope="col" className={styles.checkCell}>
-                <input type="checkbox" aria-label={t('models.selectAll')}
-                  checked={selected.length > 0 && selected.length === selectableIds.length}
-                  onChange={toggleAll} />
+                <span className={styles.checkHit}>
+                  <input type="checkbox" aria-label={t('models.selectAll')}
+                    checked={selected.length > 0 && selected.length === selectableIds.length}
+                    onChange={toggleAll} />
+                </span>
               </th>
               {sortHeader('name', t('models.columnModel'))}
               {!providerScope && sortHeader('provider', t('editor.provider'))}
@@ -217,15 +205,17 @@ export function ModelsPage({ client, providers, models, onChanged, onViewDiff, p
             </tr></thead>
             <tbody>{visible.map(model => <tr key={model.id} className={selected.includes(model.id) ? styles.selectedRow : undefined}>
               <td className={styles.checkCell}>
-                <input type="checkbox" aria-label={t('models.select', { name: model.displayName })}
-                  checked={selected.includes(model.id)} onChange={() => toggleOne(model.id)} />
+                <span className={styles.checkHit}>
+                  <input type="checkbox" aria-label={t('models.select', { name: model.displayName })}
+                    checked={selected.includes(model.id)} onChange={() => toggleOne(model.id)} />
+                </span>
               </td>
-              <td><strong>{model.displayName}</strong><span className="text-mono text-muted break-anywhere">{model.upstreamId}</span></td>
+              <td><strong>{model.displayName}</strong><span className={`${styles.line} text-mono break-anywhere`}>{model.upstreamId}</span></td>
               {!providerScope && <td>{providerName(model.providerId)}</td>}
-              <td className="text-mono">{model.policy.contextLimit?.toLocaleString() ?? t('common.undeclared')}<span className="text-muted">{model.policy.outputLimit?.toLocaleString() ?? t('common.undeclared')}</span></td>
-              <td><span className={`badge ${model.hostState === 'pending_apply' ? 'warning' : ''}`}>{t(hostKeys[model.hostState])}</span></td>
+              <td className="text-mono">{model.policy.contextLimit?.toLocaleString() ?? t('common.undeclared')}<span className={styles.line}>{model.policy.outputLimit?.toLocaleString() ?? t('common.undeclared')}</span></td>
+              <td><span className={`badge ${model.hostState === 'pending_apply' ? 'warning' : ''}`}>{t(hostStateKeys[model.hostState])}</span></td>
               <td><div className={styles.rowActions}>
-                <button onClick={() => setEditor(model)} aria-label={t('models.editAria', { name: model.displayName })}>{t('common.edit')}</button>
+                <button onClick={() => onEditModel(model)} aria-label={t('models.editAria', { name: model.displayName })}>{t('common.edit')}</button>
                 <button onClick={() => void probeModel(model)} disabled={busy === 'probe'} aria-label={t('models.testAria', { name: model.displayName })}>{t('common.test')}</button>
                 <RowMenu label={t('models.moreActions', { name: model.displayName })} items={[
                   { key: 'copy', label: t('action.copyModelId'), onSelect: () => void navigator.clipboard?.writeText(model.upstreamId).then(() => setNotice(t('models.copied', { id: model.upstreamId })), () => setError(t('common.copyFailed'))) },

@@ -332,8 +332,12 @@ fn stable_instance_id(identity: &str) -> String {
 
 /// 仅在配置文本中查找可识别的第三方管理标记，不解析其他应用的凭据。
 pub fn detect_foreign_managers(config_text: &str) -> Vec<String> {
-    const MARKERS: [(&str, &str); 4] = [
+    // `opencodex` 是 CodexSplit 改名前的名字，它的托管块在真实配置里就写作
+    // `# >>> opencodex managed >>>`。少了这一条，另一个工具把本工具写进去的
+    // `model_provider` / `model_catalog_json` 圈进它自己的托管块时，界面什么都不提示。
+    const MARKERS: [(&str, &str); 5] = [
         ("codexsplit", "CodexSplit"),
+        ("opencodex", "CodexSplit"),
         ("cc-switch", "CC Switch"),
         ("ccswitch", "CC Switch"),
         ("xingsuan", "星算助手"),
@@ -567,6 +571,16 @@ mod tests {
 
         let text = "[mcp_servers.x]\ncommand = \"cc-switch\"\n";
         assert_eq!(detect_foreign_managers(text), vec!["CC Switch".to_owned()]);
+
+        // 改名前的写法：托管块标记里只有 `opencodex`，不含 `codexsplit`。
+        // 这条曾经漏掉，于是配置被另一个工具圈走时界面一片安静。
+        let text = "# >>> opencodex managed >>>\nmodel_provider = \"gptswitch\"\n# <<< opencodex managed >>>\n";
+        assert_eq!(detect_foreign_managers(text), vec!["CodexSplit".to_owned()]);
+
+        // 两种写法同时出现只报一次。
+        let text =
+            "# >>> opencodex managed >>>\n[model_providers.codexsplit]\nname = \"CodexSplit\"\n";
+        assert_eq!(detect_foreign_managers(text), vec!["CodexSplit".to_owned()]);
 
         assert!(detect_foreign_managers("[mcp_servers.docs]\ncommand = \"npx\"\n").is_empty());
     }

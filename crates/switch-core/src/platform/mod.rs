@@ -61,36 +61,52 @@ pub struct CommandSpec {
 /// 重启宿主要执行的命令：先退出，再打开。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestartPlan {
-    /// 退出是「请求退出」：平台不支持时为空。
+    /// 优雅退出：请求应用自己退出。平台不支持时为空。
+    ///
+    /// **这条路可能被系统权限拦下**：macOS 下 `osascript` 向另一个应用发事件需要
+    /// 「自动化」授权，而授权是按（发起方, 目标）成对授予的，一个刚装上的应用默认没有。
+    /// 被拒时 `osascript` 不会失败得很显眼，应用照样开着——所以必须有退路。
     pub quit: Option<CommandSpec>,
+    /// 兜底退出：直接给进程发信号。不需要任何系统授权，因为信号只作用于自己名下的进程。
+    ///
+    /// 代价是应用来不及保存界面状态（未保存的对话可能丢失），所以只有在
+    /// 优雅退出超时之后才用它，并且要把「用了兜底」报告给用户。
+    pub quit_force: Option<CommandSpec>,
     pub launch: CommandSpec,
 }
 
 /// 生成重启宿主的命令。
 ///
 /// 为什么需要它：Codex 只在**启动时**读 `config.toml`，写完配置不重启，模型就不会出现在
-/// 它的模型菜单里。这里只构造命令，执行由外壳负责——退出是异步的，因此调用方**不得**
-/// 据此声称宿主已经加载了新配置。
+/// 它的模型菜单里。这里只构造命令，执行由 `restart_host` 负责——退出是异步的，
+/// 因此调用方**不得**据此声称宿主已经加载了新配置。
 pub fn restart_plan(platform: Platform, app_path: &str) -> RestartPlan {
+    let process = host_process_name(platform, app_path);
     match platform {
-        // `quit app` 接受 .app 的 POSIX 路径；`open -a` 走 Launch Services。
+        // 先请应用自己退出（走 Launch Services 的路径解析），超时再发信号。
         Platform::Macos => RestartPlan {
             quit: Some(CommandSpec {
                 program: "osascript".to_owned(),
                 args: vec!["-e".to_owned(), format!("quit app \"{app_path}\"")],
+            }),
+            quit_force: Some(CommandSpec {
+                program: "killall".to_owned(),
+                args: vec!["-TERM".to_owned(), process],
             }),
             launch: CommandSpec {
                 program: "open".to_owned(),
                 args: vec!["-a".to_owned(), app_path.to_owned()],
             },
         },
-        // taskkill 按映像名结束；启动直接执行那个可执行文件，不经 `cmd /C start`——
-        // 后者会把路径交给 cmd 再解析一遍，路径里带 & 或引号时就成了注入点。
+        // taskkill 本身就是强制的，没有「优雅」这一档；启动直接执行那个可执行文件，
+        // 不经 `cmd /C start`——后者会把路径交给 cmd 再解析一遍，路径里带 & 或引号时
+        // 就成了注入点。
         Platform::Windows => RestartPlan {
             quit: Some(CommandSpec {
                 program: "taskkill".to_owned(),
                 args: vec!["/IM".to_owned(), exe_name(app_path), "/F".to_owned()],
             }),
+            quit_force: None,
             launch: CommandSpec {
                 program: app_path.to_owned(),
                 args: Vec::new(),
@@ -98,7 +114,11 @@ pub fn restart_plan(platform: Platform, app_path: &str) -> RestartPlan {
         },
         // 本仓库不发布 Linux 包，只保证编译与逻辑正确。
         Platform::Linux => RestartPlan {
-            quit: None,
+            quit: Some(CommandSpec {
+                program: "pkill".to_owned(),
+                args: vec!["-TERM".to_owned(), "-x".to_owned(), process],
+            }),
+            quit_force: None,
             launch: CommandSpec {
                 program: "xdg-open".to_owned(),
                 args: vec![app_path.to_owned()],
@@ -115,6 +135,224 @@ fn exe_name(app_path: &str) -> String {
         .filter(|name| !name.is_empty())
         .unwrap_or("ChatGPT.exe")
         .to_owned()
+}
+
+/// 用于进程探测（`pgrep -x`）的宿主进程名。
+///
+/// 为什么不看命令的退出码：实测 `osascript -e 'quit app "<不存在的路径>"'` 和
+/// `open -a "<不存在的路径>"` **都返回 0**。退出码不携带任何信息，唯一可靠的信号是
+/// 进程在不在。
+pub fn host_process_name(platform: Platform, app_path: &str) -> String {
+    let name = exe_name(app_path);
+    match platform {
+        // `ChatGPT.app` → `ChatGPT`：`pgrep -x` 匹配的是可执行名，不带扩展名。
+        Platform::Macos => name.strip_suffix(".app").unwrap_or(&name).to_owned(),
+        // `ChatGPT.exe` → `ChatGPT`。
+        Platform::Windows => name
+            .strip_suffix(".exe")
+            .or_else(|| name.strip_suffix(".EXE"))
+            .unwrap_or(&name)
+            .to_owned(),
+        Platform::Linux => name,
+    }
+}
+
+/// 进程探测与进程启动。外壳实现，核心只做判断——这样重试、等待与超时逻辑可以
+/// 在测试里用假实现跑完，不必真的去开关用户的 Codex。
+pub trait ProcessProbe {
+    /// 这个进程名当前是否有实例在运行。
+    fn is_running(&self, name: &str) -> bool;
+    /// 起一个进程就走，不等它结束。返回是否成功启动。
+    fn spawn_detached(&self, spec: &CommandSpec) -> bool;
+    /// 等待若干毫秒。测试里立刻返回，不真的睡。
+    fn sleep_ms(&self, ms: u64);
+}
+
+/// 重启各阶段的等待预算。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RestartTiming {
+    /// 等优雅退出。正常情况下一秒内就退了；给足时间是因为退出太慢只是慢，不是错。
+    pub graceful_quit_timeout_ms: u64,
+    /// 优雅退出超时后，发信号再等这么久。
+    pub force_quit_timeout_ms: u64,
+    /// 等新进程起来。冷启动一个桌面应用比退出慢。
+    pub launch_timeout_ms: u64,
+    pub poll_interval_ms: u64,
+}
+
+impl Default for RestartTiming {
+    fn default() -> Self {
+        Self {
+            graceful_quit_timeout_ms: 6_000,
+            force_quit_timeout_ms: 5_000,
+            launch_timeout_ms: 25_000,
+            poll_interval_ms: 250,
+        }
+    }
+}
+
+/// 重启的实际结果。字段名以「确认」为准：只有观察到进程状态才置为 true。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RestartOutcome {
+    /// 确认旧进程已经退出（或本来就没在运行）。
+    pub quit_confirmed: bool,
+    /// 优雅退出没成，最后是发信号结束的。界面要据此提醒未保存内容可能丢失。
+    pub quit_forced: bool,
+    /// 确认新进程已经起来。
+    pub launched_confirmed: bool,
+}
+
+/// 让宿主退出再起来，并且**确认**每一步真的发生了。
+///
+/// 为什么必须确认：写配置不重启，Codex 只在启动时读 `config.toml`，模型就不会出现在
+/// 它的菜单里。而"重启"最容易出的错是——旧进程还没退干净就执行启动命令，于是启动命令
+/// 只是把旧进程拉到前台：配置没重读，但一切看起来都成功了。固定 sleep 挡不住这件事，
+/// 因为退出耗时不是常数。
+///
+/// 为什么先优雅后强杀，而不是像参考项目那样直接 `killall -9`：本工具的设计原则是
+/// **不默认中断正在生成的任务**（见 `docs/design/05-patterns-and-accessibility.md`）。
+/// 先请应用自己退出，正常情况无损；只有它不退（或系统权限把请求拦下了）才升级到发信号，
+/// 并把「用了兜底」如实报告给用户。
+pub fn restart_host(
+    probe: &dyn ProcessProbe,
+    plan: &RestartPlan,
+    process_name: &str,
+    timing: RestartTiming,
+) -> RestartOutcome {
+    let mut quit_confirmed = !probe.is_running(process_name);
+    let mut quit_forced = false;
+
+    // 1. 优雅退出，并等它真的退出。轮询的是进程，不是命令的退出码。
+    if !quit_confirmed {
+        if let Some(spec) = &plan.quit {
+            probe.spawn_detached(spec);
+            quit_confirmed = wait_until(
+                probe,
+                timing.graceful_quit_timeout_ms,
+                timing.poll_interval_ms,
+                || !probe.is_running(process_name),
+            );
+        }
+    }
+
+    // 2. 还没退就发信号。macOS 上「优雅退出没成」最常见的成因不是应用不肯退，
+    //    而是系统没有授予我们向它发送 Apple 事件的权限——授权缺失是环境问题，
+    //    不该让「重启」这个功能整体失效。
+    if !quit_confirmed {
+        if let Some(spec) = &plan.quit_force {
+            probe.spawn_detached(spec);
+            let gone = wait_until(
+                probe,
+                timing.force_quit_timeout_ms,
+                timing.poll_interval_ms,
+                || !probe.is_running(process_name),
+            );
+            if gone {
+                quit_confirmed = true;
+                quit_forced = true;
+            }
+        }
+    }
+
+    // 3. 旧进程还在就不要再启动：此时启动命令只会激活旧进程，而配置并没有被重读。
+    //    如实返回，让界面说「Codex 仍在运行，未能重启」。
+    if !quit_confirmed {
+        return RestartOutcome {
+            quit_confirmed: false,
+            quit_forced: false,
+            launched_confirmed: false,
+        };
+    }
+
+    // 4. 启动，并等它真的起来。
+    let launched = probe.spawn_detached(&plan.launch);
+    let launched_confirmed = launched
+        && wait_until(
+            probe,
+            timing.launch_timeout_ms,
+            timing.poll_interval_ms,
+            || probe.is_running(process_name),
+        );
+
+    RestartOutcome {
+        quit_confirmed,
+        quit_forced,
+        launched_confirmed,
+    }
+}
+
+/// 轮询到条件成立或超时。返回条件是否成立。
+fn wait_until(
+    probe: &dyn ProcessProbe,
+    timeout_ms: u64,
+    interval_ms: u64,
+    mut condition: impl FnMut() -> bool,
+) -> bool {
+    if condition() {
+        return true;
+    }
+    let interval = interval_ms.max(1);
+    let mut waited = 0;
+    while waited < timeout_ms {
+        probe.sleep_ms(interval);
+        waited += interval;
+        if condition() {
+            return true;
+        }
+    }
+    false
+}
+
+/// 真的去看进程、真的起进程。与 `codex/detect.rs` 的 `RealFs` 同一套路数：
+/// 接口与实现都在核心，外壳只负责挑一个实现传进来。
+///
+/// 用 `pgrep -x` 而不是系统 API：它判定的正是我们关心的那件事——这个可执行名
+/// 有没有活着的实例，而且 macOS 与 Linux 行为一致。
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SystemProcessProbe;
+
+impl ProcessProbe for SystemProcessProbe {
+    fn is_running(&self, name: &str) -> bool {
+        if name.trim().is_empty() {
+            return false;
+        }
+        #[cfg(target_os = "windows")]
+        let mut command = {
+            let mut command = std::process::Command::new("tasklist");
+            command.args(["/FI", &format!("IMAGENAME eq {name}.exe"), "/NH"]);
+            command
+        };
+        #[cfg(not(target_os = "windows"))]
+        let mut command = {
+            let mut command = std::process::Command::new("pgrep");
+            command.arg("-x").arg(name);
+            command
+        };
+        // 只看退出码，不解析输出：有匹配就有进程。
+        command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
+    fn spawn_detached(&self, spec: &CommandSpec) -> bool {
+        // 起一个进程就走：不等它结束（`open` 会立刻返回），也不接管道——
+        // 继承的管道会让子进程随我们的生命周期被收割。
+        std::process::Command::new(&spec.program)
+            .args(&spec.args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .is_ok()
+    }
+
+    fn sleep_ms(&self, ms: u64) {
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
 }
 
 /// 各平台的窗口策略。
@@ -339,6 +577,10 @@ mod tests {
         assert_eq!(quit.args[1], "quit app \"/Applications/ChatGPT.app\"");
         assert_eq!(plan.launch.program, "open");
         assert_eq!(plan.launch.args, vec!["-a", "/Applications/ChatGPT.app"]);
+        // 兜底命令不需要系统授权（信号只作用于自己名下的进程），进程名从 .app 推出。
+        let force = plan.quit_force.expect("macOS 应有兜底退出");
+        assert_eq!(force.program, "killall");
+        assert_eq!(force.args, vec!["-TERM", "ChatGPT"]);
     }
 
     #[test]
@@ -374,5 +616,162 @@ mod tests {
                 assert!(plan.launch.args.is_empty());
             }
         }
+    }
+
+    #[test]
+    fn process_name_is_the_executable_name_not_the_bundle() {
+        // `pgrep -x` 匹配可执行名：`.app` 与 `.exe` 都不是它的一部分。
+        assert_eq!(
+            host_process_name(Platform::Macos, "/Applications/ChatGPT.app"),
+            "ChatGPT"
+        );
+        assert_eq!(
+            host_process_name(Platform::Windows, "C:\\Program Files\\ChatGPT\\ChatGPT.exe"),
+            "ChatGPT"
+        );
+        assert_eq!(
+            host_process_name(Platform::Linux, "/usr/bin/chatgpt"),
+            "chatgpt"
+        );
+    }
+
+    /// 每次条件检查后触发，用来在「第 N 次轮询」时改变进程状态。
+    type PollHook = Box<dyn FnMut(&mut bool)>;
+
+    /// 假探测：进程状态由测试脚本决定，不碰真实进程，也不真的睡。
+    struct FakeProbe {
+        running: std::cell::RefCell<bool>,
+        on_poll: std::cell::RefCell<PollHook>,
+        spawned: std::cell::RefCell<Vec<String>>,
+        spawn_result: bool,
+        sleeps: std::cell::Cell<u32>,
+    }
+
+    impl FakeProbe {
+        fn new(running: bool, on_poll: impl FnMut(&mut bool) + 'static) -> Self {
+            Self {
+                running: std::cell::RefCell::new(running),
+                on_poll: std::cell::RefCell::new(Box::new(on_poll)),
+                spawned: std::cell::RefCell::new(Vec::new()),
+                spawn_result: true,
+                sleeps: std::cell::Cell::new(0),
+            }
+        }
+        fn spawned(&self) -> Vec<String> {
+            self.spawned.borrow().clone()
+        }
+    }
+
+    impl ProcessProbe for FakeProbe {
+        fn is_running(&self, _name: &str) -> bool {
+            let mut running = self.running.borrow_mut();
+            (self.on_poll.borrow_mut())(&mut running);
+            *running
+        }
+        fn spawn_detached(&self, spec: &CommandSpec) -> bool {
+            self.spawned.borrow_mut().push(spec.program.clone());
+            self.spawn_result
+        }
+        fn sleep_ms(&self, _ms: u64) {
+            self.sleeps.set(self.sleeps.get() + 1);
+        }
+    }
+
+    fn timing() -> RestartTiming {
+        RestartTiming {
+            graceful_quit_timeout_ms: 1_000,
+            force_quit_timeout_ms: 1_000,
+            launch_timeout_ms: 1_000,
+            poll_interval_ms: 250,
+        }
+    }
+
+    #[test]
+    fn restart_confirms_both_the_exit_and_the_relaunch() {
+        // 先在第 2 次轮询时退出，再在第 4 次轮询时起来。
+        let probe = FakeProbe::new(true, {
+            let mut polls = 0;
+            move |running| {
+                polls += 1;
+                *running = match polls {
+                    1 => true,      // 开始时还在
+                    2 | 3 => false, // 请求退出后逐渐退出
+                    _ => true,      // 启动后回来了
+                };
+            }
+        });
+        let plan = restart_plan(Platform::Macos, "/Applications/ChatGPT.app");
+        let outcome = restart_host(&probe, &plan, "ChatGPT", timing());
+
+        assert!(outcome.quit_confirmed, "确认了退出");
+        assert!(!outcome.quit_forced, "优雅退出就够了，不该动兜底");
+        assert!(outcome.launched_confirmed, "确认了重新起来");
+        assert_eq!(probe.spawned(), vec!["osascript", "open"], "先退出再启动");
+    }
+
+    #[test]
+    fn restart_does_not_launch_while_the_old_process_is_still_running() {
+        // 旧进程一直没退出。此时启动命令只会把旧进程拉到前台，配置并不会被重读，
+        // 所以**不该**执行它——这正是「点了重启没反应但界面说成功」的成因。
+        let probe = FakeProbe::new(true, |_running| {});
+        let plan = restart_plan(Platform::Macos, "/Applications/ChatGPT.app");
+        let outcome = restart_host(&probe, &plan, "ChatGPT", timing());
+
+        assert!(!outcome.quit_confirmed);
+        assert!(!outcome.launched_confirmed);
+        assert_eq!(
+            probe.spawned(),
+            vec!["osascript", "killall"],
+            "优雅退出和兜底都试过，但都没有执行启动命令"
+        );
+    }
+
+    #[test]
+    fn restart_reports_failure_when_the_relaunch_never_appears() {
+        // 退出了，但启动后进程一直没回来。
+        let probe = FakeProbe::new(true, {
+            let mut polls = 0;
+            move |running| {
+                polls += 1;
+                *running = polls == 1;
+            }
+        });
+        let plan = restart_plan(Platform::Macos, "/Applications/ChatGPT.app");
+        let outcome = restart_host(&probe, &plan, "ChatGPT", timing());
+
+        assert!(outcome.quit_confirmed, "退出是确认到的");
+        assert!(!outcome.launched_confirmed, "起没起来要如实说没起来");
+        assert_eq!(probe.spawned(), vec!["osascript", "open"]);
+    }
+
+    #[test]
+    fn restart_skips_the_quit_when_the_host_is_not_running() {
+        let probe = FakeProbe::new(false, |_running| {});
+        let plan = restart_plan(Platform::Macos, "/Applications/ChatGPT.app");
+        let outcome = restart_host(&probe, &plan, "ChatGPT", timing());
+
+        assert!(outcome.quit_confirmed, "本来就没运行，等于已经退出");
+        assert!(!outcome.quit_forced);
+        assert_eq!(probe.spawned(), vec!["open"], "只启动，不请求退出");
+    }
+
+    #[test]
+    fn restart_escalates_to_a_signal_when_graceful_quit_is_ignored() {
+        // macOS 上「优雅退出没成」多半不是应用不肯退，而是系统没给我们发事件的权利。
+        // 授权缺失是环境问题，不该让重启整体失效——所以超时要升级到发信号。
+        let probe = FakeProbe::new(true, {
+            let mut polls = 0;
+            move |running| {
+                polls += 1;
+                // 只在前 8 次轮询里活着：刚好撑过优雅退出的 4 次，被信号结束。
+                *running = polls <= 8;
+            }
+        });
+        let plan = restart_plan(Platform::Macos, "/Applications/ChatGPT.app");
+        let outcome = restart_host(&probe, &plan, "ChatGPT", timing());
+
+        assert!(outcome.quit_confirmed, "兜底之后终于退出了");
+        assert!(outcome.quit_forced, "必须如实报告用了兜底");
+        assert_eq!(probe.spawned(), vec!["osascript", "killall", "open"]);
     }
 }

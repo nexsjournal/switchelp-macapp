@@ -1,5 +1,24 @@
 .overlay { position: fixed; inset: 0; background: var(--overlay); z-index: var(--z-dialog); }
-.dialog { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(720px, calc(100vw - 48px)); max-height: 88vh; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-dialog); box-shadow: var(--shadow-popover); z-index: var(--z-dialog); }
-.header { display: flex; justify-content: space-between; align-items: flex-start; padding: 24px; gap: 24px; border-bottom: 1px solid var(--border-subtle); }
+/*
+ * 弹窗自身不滚动：它是一条纵向弹性列，滚动的只有 `.body`。
+ * 页脚因此在滚动区之外——滚动内容不会从它下面穿过，它不会盖住最后一个字段，
+ * 也不会跟着内容滚走。
+ */
+.dialog { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(720px, calc(100vw - 48px)); max-height: var(--dialog-max-height); display: flex; flex-direction: column; overflow: hidden; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-dialog); box-shadow: var(--shadow-popover); z-index: var(--z-dialog); }
+/* 宽度三档取自规范（480/640/800）。`normal` 的 720 是历史值，保留以免既有弹窗跳宽。 */
+.narrow { width: min(var(--dialog-width-confirm), calc(100vw - 48px)); }
+.wide { width: min(var(--dialog-width-diff), calc(100vw - 48px)); }
+.header { display: flex; justify-content: space-between; align-items: flex-start; padding: 24px; gap: 24px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
+/* 标题块：图标与标题同一行，说明另起一行。`min-width: 0` 让长标题能省略而不是撑破头部。 */
+.heading { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
+.heading > :global(.text-section-title) { margin: 0; }
+.leadingIcon { display: inline-flex; color: var(--text-secondary); flex-shrink: 0; }
+.heading .description { flex-basis: 100%; }
+.headerActions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .description { color: var(--text-secondary); margin: 8px 0 0; font-size: 13px; }
 .discard { padding: 24px; }
+/* `min-height: 0` 不能省：否则这个弹性项不肯收缩到内容高度以下，正文就永远不滚动。 */
+.body { overflow: auto; flex: 1; min-height: 0; }
+/* 结论条钉在滚动区与底栏之间：它是这次动作的结果，不是内容的一部分。 */
+.banner { flex-shrink: 0; padding: 0 24px 16px; }
+.footer { flex-shrink: 0; }

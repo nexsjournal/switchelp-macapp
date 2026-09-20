@@ -2,20 +2,25 @@
 /*
  * 嵌进供应商详情时的工具栏：那里的容器窄得多（右边一栏要放地址、Key、模型、连接检查）。
  * 搜索独占一行，筛选换到下一行，避免和主按钮挤在同一行里互相压。
+ * `margin-bottom` 不能省：不嵌时工具栏与表格之间靠 `.page` 的网格间距分开，
+ * 嵌进详情后没有那一层，少了它筛选下拉会直接贴住表头。
  */
-.toolbarEmbedded { display: grid; gap: 12px; }
+.toolbarEmbedded { display: grid; gap: 12px; margin-bottom: 16px; }
 .toolbarEmbedded .search { width: 100%; min-width: 0; }
 .toolbarEmbedded .filters { justify-content: flex-start; }
 
-.toolbar { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.toolbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .search { display: flex; align-items: center; position: relative; flex: 1; min-width: 240px; }
 .search svg { position: absolute; left: 12px; pointer-events: none; }
 /* 必须压过 global.css 的 input 基础规则：两者同为 (0,1,1)，
    仅靠声明顺序不可靠（Vite 注入顺序会变），这里显式提高权重。 */
 .search input:not([type='checkbox']) { padding-left: 38px; }
-.filters { display: flex; align-items: flex-end; gap: 12px; color: var(--text-muted); }
-.filters > svg { transform: translateY(-10px); }
-.filters label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.filters { display: flex; align-items: center; gap: 12px; color: var(--text-muted); }
+/*
+ * 标签与下拉同一行。「目录」竖排时自己占一行，左边的漏斗图标被留在一段没有内容的高度上，
+ * 看上去谁都不属于；横排之后图标、标签、下拉落在同一条基线上。
+ */
+.filters label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
 
 /* 嵌进别的卡片时用：不要外框，只要不塌陷。 */
 .plain { min-width: 0; }
@@ -25,18 +30,29 @@
 .tableWrap th { color: var(--text-muted); font-size: 11px; font-weight: 500; padding: 0 12px 14px; white-space: nowrap; }
 .tableWrap td { border-top: 1px solid var(--border-subtle); padding: 14px 12px; vertical-align: middle; }
 .tableWrap td strong { display: block; font-weight: 500; margin-bottom: 2px; }
-/* 不能写 .text-muted：CSS Module 会把全局工具类一起哈希，规则永远不匹配，
-   结果两个数值挤在同一行（131,0728,192）。改为按结构选择。 */
-.tableWrap td > span { display: block; font-size: 11px; color: var(--text-muted); }
+/*
+ * 单元格里的第二行（上游 ID、最大输出）。不能写 .text-muted 工具类：CSS Module 会把
+ * 全局类名一起哈希，规则永远不匹配，两个数值会挤在同一行（131,0728,192）。
+ * 也**不能**写成 `.tableWrap td > span`：勾选框的点击层也是一个 span，
+ * 会被这条规则改成 display: block（方框不再居中，表头与行的勾选框差 14px）
+ * 并套上 11px 字号。给第二行一个自己的类，规则就只命中它该命中的东西。
+ */
+.tableWrap .line { display: block; font-size: 11px; color: var(--text-muted); }
 /* 操作列按内容收窄：自动布局会把剩余宽度摊给所有列，操作列会宽过数据列。 */
 .tableWrap th:last-child, .tableWrap td:last-child { width: 1%; white-space: nowrap; }
 .checkCell { width: 1%; }
-.checkCell input { width: 15px; height: 15px; }
+/*
+ * 复选框只有 18px：外面套一个 32px 的点击层，负边距不撑大行高。
+ * 左右各 -7px 让方框正好落在单元格的内容线上（居中 18px 于 32px＝内缩 7px，
+ * 与 -7px 抵消）；表头与数据行用的是同一个类，因此两边的方框必然同一条竖线。
+ */
+.checkHit { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin: -7px; }
 .selectedRow { background: var(--accent-subtle); }
-.sortButton { height: 22px; padding: 0; font-size: 11px; color: var(--text-muted); background: transparent; border-color: transparent; }
+/* 表头排序按钮也是控件：32 高，负边距吃回，表头密度不变。 */
+.sortButton { height: var(--control-height-compact); margin: -5px 0; padding: 0; font-size: 11px; color: var(--text-muted); background: transparent; border-color: transparent; }
 .sortButton:hover:not(:disabled) { background: transparent; color: var(--text-primary); }
 .rowActions { display: flex; align-items: center; gap: 6px; }
-.rowActions > button { height: 30px; padding: 0 10px; font-size: 12px; }
+.rowActions > button { height: var(--control-height-compact); padding: 0 10px; font-size: 12px; }
 .count { margin: 14px 0 0; color: var(--text-muted); font-size: 11px; }
 
 .bulkBar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 12px 16px; border: 1px solid var(--accent-border); border-radius: 8px; background: var(--bg-elevated); font-size: 12px; }

@@ -1,5 +1,6 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { vi } from 'vitest';
 import { ModelEditorPage } from './ModelEditorPage';
 import { provider, testClient } from '../../../tests/helpers/client';
 
@@ -13,80 +14,96 @@ const model = {
   capabilityRevision: 1, version: 4, createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z',
 };
 
-test('是独立页面：有面包屑、生效预览与页尾双按钮', async () => {
-  render(<ModelEditorPage client={testClient()} providers={[provider]} model={model} onSaved={() => {}} onCancel={() => {}} />);
+const renderEditor = (overrides = {}, props = {}) => render(<ModelEditorPage client={testClient(overrides)} providers={[provider]}
+  model={model} onSaved={() => {}} onCancel={() => {}} {...props} />);
+
+test('是独立页面：分组标题、滚动区里的字段，页尾只有取消与保存', () => {
+  renderEditor();
 
   expect(screen.getByRole('heading', { level: 1, name: '代码模型' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /模型/ })).toBeInTheDocument();
-  const preview = screen.getByRole('complementary', { name: '生效预览' });
-  // 多个字段都落在 Codex 目录，所以这里断言“至少出现一次”。
-  expect(within(preview).getAllByText('Codex 目录').length).toBeGreaterThan(0);
-  expect(within(preview).getAllByText('网关请求').length).toBeGreaterThan(0);
-  expect(screen.getByRole('button', { name: '保存草稿' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '保存并查看应用差异' })).toBeInTheDocument();
+  // 一页只留一个主按钮：不再有「保存草稿」和「保存并查看应用差异」两条几乎一样的路。
+  expect(screen.getByRole('button', { name: '保存' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '保存草稿' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '保存并查看应用差异' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '取消' })).toBeInTheDocument();
+  // 生效预览整块撤掉：同样的信息挂在每个字段的「?」上，不再单开一栏让人对照着读。
+  expect(screen.queryByRole('complementary', { name: '生效预览' })).not.toBeInTheDocument();
+  expect(screen.getByText(/保存后到「Codex 配置」页生成差异并应用/)).toBeInTheDocument();
 });
 
-test('生效预览说明每项参数最终落在哪里，而不是重复标签', () => {
-  render(<ModelEditorPage client={testClient()} providers={[provider]} model={model} onSaved={() => {}} onCancel={() => {}} />);
+test('输入类型与模型能力是勾选单元格：文本锁定，PDF 与视频不可启用', () => {
+  renderEditor();
 
-  const preview = screen.getByRole('complementary', { name: '生效预览' });
-  expect(within(preview).getByText(/决定 Codex 何时压缩历史/)).toBeInTheDocument();
-  expect(within(preview).getByText(/任何一层不支持就不会出现在原生能力里/)).toBeInTheDocument();
+  expect(screen.getByRole('checkbox', { name: '文本' })).toBeDisabled();
+  expect(screen.getByRole('checkbox', { name: '文本' })).toBeChecked();
+  expect(screen.getByRole('checkbox', { name: 'PDF' })).toBeDisabled();
+  expect(screen.getByRole('checkbox', { name: '视频' })).toBeDisabled();
+  expect(screen.getByRole('checkbox', { name: '图片' })).toBeEnabled();
+  // 三态下拉没有了：勾＝支持、不勾＝不支持，没点过的项保存时原样保留。
+  expect(screen.queryByRole('combobox', { name: '文本' })).not.toBeInTheDocument();
+  expect(screen.getByRole('checkbox', { name: '函数工具' })).toBeChecked();
+  expect(screen.getByRole('checkbox', { name: '并行工具' })).not.toBeChecked();
 });
 
-test('保存并查看应用差异会先保存再上报跳转意图', async () => {
+test('勾上图片、取消函数工具后按版本号提交', async () => {
   const user = userEvent.setup();
   const saveModel = vi.fn().mockResolvedValue(model);
-  const onSaved = vi.fn().mockResolvedValue(undefined);
-  const onViewDiff = vi.fn();
-  render(<ModelEditorPage client={testClient({ saveModel })} providers={[provider]} model={model}
-    onSaved={onSaved} onCancel={() => {}} onViewDiff={onViewDiff} />);
+  renderEditor({ saveModel });
 
-  await user.click(screen.getByRole('button', { name: '保存并查看应用差异' }));
+  await user.click(screen.getByRole('checkbox', { name: '图片' }));
+  await user.click(screen.getByRole('checkbox', { name: '函数工具' }));
+  await user.click(screen.getByRole('button', { name: '保存' }));
 
-  expect(saveModel).toHaveBeenCalledWith(expect.objectContaining({ id: 'm_1', upstreamId: 'vendor/model-x' }), 4);
-  expect(onSaved).toHaveBeenCalled();
-  expect(onViewDiff).toHaveBeenCalled();
+  expect(saveModel).toHaveBeenCalledTimes(1);
+  const draft = saveModel.mock.calls[0]![0]!;
+  expect(saveModel.mock.calls[0]![1]).toBe(4);
+  expect(draft.policy.inputs.find((entry: { kind: string }) => entry.kind === 'image')?.upstream).toBe('supported');
+  expect(draft.policy.tools.functionTools).toBe('unsupported');
 });
 
-test('只保存草稿时不上报跳转', async () => {
+test('没动过思考那一节时，已保存的「开关式」声明原样保留', async () => {
   const user = userEvent.setup();
-  const onViewDiff = vi.fn();
-  render(<ModelEditorPage client={testClient({ saveModel: vi.fn().mockResolvedValue(model) })} providers={[provider]} model={model}
-    onSaved={() => {}} onCancel={() => {}} onViewDiff={onViewDiff} />);
+  const saveModel = vi.fn().mockResolvedValue(model);
+  const toggleModel = { ...model, policy: { ...model.policy,
+    reasoning: { support: 'supported' as const, control: 'toggle' as const, allowedValues: [], defaultValue: null, budgetTokens: null, mappingId: null } } };
+  render(<ModelEditorPage client={testClient({ saveModel })} providers={[provider]} model={toggleModel}
+    onSaved={() => {}} onCancel={() => {}} />);
 
-  await user.click(screen.getByRole('button', { name: '保存草稿' }));
-  expect(onViewDiff).not.toHaveBeenCalled();
+  // 档位 chip 只表达档位式；这一节没被碰过，就得原样留着，不能因为打开一次页面就改写。
+  expect(screen.getByText(/已保存的声明是「开启 \/ 关闭」式思考/)).toBeInTheDocument();
+  await user.type(screen.getByLabelText('显示名称'), '改个名');
+  await user.click(screen.getByRole('button', { name: '保存' }));
+
+  expect(saveModel.mock.calls[0]![0]!.policy.reasoning.control).toBe('toggle');
 });
 
-
-test('校验没过时点“保存并查看差异”，不会污染下一次“保存草稿”', async () => {
+test('推理档位：加号添加、点一下设为默认，保存后进策略', async () => {
   const user = userEvent.setup();
-  const onViewDiff = vi.fn();
-  render(<ModelEditorPage client={testClient({ saveModel: vi.fn().mockResolvedValue(model) })} providers={[provider]} model={model}
-    onSaved={() => {}} onCancel={() => {}} onViewDiff={onViewDiff} />);
+  const saveModel = vi.fn().mockResolvedValue(model);
+  renderEditor({ saveModel });
 
-  // 清空必填的显示名称，再点“保存并查看应用差异”：浏览器会拦下提交。
-  await user.clear(screen.getByLabelText('显示名称'));
-  await user.click(screen.getByRole('button', { name: '保存并查看应用差异' }));
-  expect(onViewDiff).not.toHaveBeenCalled();
+  // 已保存的档位是 low / high，默认 low；再加一个 minimal 并把它设为默认。
+  for (const level of ['minimal', 'high']) {
+    await user.click(screen.getByRole('button', { name: '添加档位' }));
+    await user.type(screen.getByLabelText('添加档位'), `${level}{Enter}`);
+  }
+  await user.click(screen.getByRole('button', { name: 'minimal' }));
+  await user.click(screen.getByRole('button', { name: '保存' }));
 
-  // 补全后点“保存草稿”：提交意图来自当前按钮，不应该被上一次的点击带偏。
-  await user.type(screen.getByLabelText('显示名称'), '补上的名字');
-  await user.click(screen.getByRole('button', { name: '保存草稿' }));
-  expect(onViewDiff).not.toHaveBeenCalled();
-
-  // 反过来：真的点“保存并查看应用差异”时仍然要跳转。
-  await user.click(screen.getByRole('button', { name: '保存并查看应用差异' }));
-  expect(onViewDiff).toHaveBeenCalledTimes(1);
+  const reasoning = saveModel.mock.calls[0]![0]!.policy.reasoning;
+  // 重复的档位不会加第二遍。
+  expect(reasoning.allowedValues).toEqual(['low', 'high', 'minimal']);
+  expect(reasoning.defaultValue).toBe('minimal');
+  expect(reasoning.mappingId).toBe('reasoning.effort.v1');
 });
 
 test('有未保存修改时取消要确认，避免一次点击丢掉填写', async () => {
   const user = userEvent.setup();
   const onCancel = vi.fn();
-  render(<ModelEditorPage client={testClient()} providers={[provider]} model={model} onSaved={() => {}} onCancel={onCancel} />);
+  renderEditor({}, { onCancel });
 
-  await user.type(screen.getByLabelText(/显示名称/), '改一下');
+  await user.type(screen.getByLabelText('显示名称'), '改一下');
   await user.click(screen.getByRole('button', { name: '取消' }));
 
   expect(onCancel).not.toHaveBeenCalled();
@@ -98,7 +115,7 @@ test('有未保存修改时取消要确认，避免一次点击丢掉填写', as
 test('没有修改时取消直接返回', async () => {
   const user = userEvent.setup();
   const onCancel = vi.fn();
-  render(<ModelEditorPage client={testClient()} providers={[provider]} model={model} onSaved={() => {}} onCancel={onCancel} />);
+  renderEditor({}, { onCancel });
 
   await user.click(screen.getByRole('button', { name: '取消' }));
   expect(onCancel).toHaveBeenCalled();

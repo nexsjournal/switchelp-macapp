@@ -1,0 +1,14 @@
+/*
+ * 开关：轨道 36×20（规范），圆点 14。
+ * 开态用强调色填充而不是状态色：它表示「这个开关被打开了」，不是「一切正常」——
+ * 状态色只承载状态语义（docs/design/01-foundations.md）。
+ */
+.switch { position: relative; flex-shrink: 0; width: 36px; height: 20px; padding: 0; border-radius: var(--radius-pill);
+  border: 1px solid var(--border-control); background: var(--bg-input); transition: background var(--motion-hover), border-color var(--motion-hover); }
+.switch.small { width: 32px; height: 18px; }
+.switch.on { background: var(--accent); border-color: transparent; }
+.knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--text-secondary); transition: transform var(--motion-hover), background var(--motion-hover); }
+.switch.small .knob { width: 12px; height: 12px; }
+.switch.on .knob { background: var(--accent-fg); transform: translateX(16px); }
+.switch.small.on .knob { transform: translateX(14px); }
