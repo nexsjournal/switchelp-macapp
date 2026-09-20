@@ -288,8 +288,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
       onSaved={providerSaved} onKeysChanged={keysChanged} onChanged={refresh}
       onClose={() => setProviderEditor(null)} />}
     {pendingNav && <Dialog title={t('editor.discardTitle')} description={t('editor.discardBody')} dirty={false}
-      onClose={() => setPendingNav(null)}>
-      <div className="form-fields"><div className="form-footer">
+      onClose={() => setPendingNav(null)} footer={<footer className="form-footer">
         <span>{t('editor.discardIrreversible')}</span>
         <div className="actions">
           <button onClick={() => setPendingNav(null)} autoFocus>{t('editor.keepEditing')}</button>
@@ -301,14 +300,12 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
             setPage(target); setQuery('');
           }}>{t('editor.leaveDiscard')}</button>
         </div>
-      </div></div>
-    </Dialog>}
+      </footer>} />}
     {/* 唯一的提示宿主：不论从哪个页面、哪个弹窗推的提示，都出现在同一个位置。 */}
     <ToastHost />
 
-    {confirm && <Dialog title={confirm.title} description={confirm.body} onClose={() => setConfirm(null)} busy={confirmBusy}>
-      <div className="form-fields">
-        <div className="form-footer">
+    {confirm && <Dialog title={confirm.title} description={confirm.body} onClose={() => setConfirm(null)} busy={confirmBusy}
+      footer={<footer className="form-footer">
           <span>{t('common.irreversible')}</span>
           <div className="actions">
             <button onClick={() => setConfirm(null)} disabled={confirmBusy}>{t('action.cancel')}</button>
@@ -323,8 +320,6 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
               finally { setConfirmBusy(false); }
             }}>{confirmBusy ? t('common.busy') : confirm.confirmLabel}</button>
           </div>
-        </div>
-      </div>
-    </Dialog>}
+      </footer>} />}
   </div>;
 }

@@ -405,29 +405,27 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
 
     {modelConfirm && <Dialog title={t('models.deleteModel')} busy={working}
       description={t('providers.deleteModelBody', { name: modelConfirm.model.displayName, upstream: modelConfirm.model.upstreamId })}
-      onClose={() => setModelConfirm(null)}>
-      <div className="form-fields"><div className="form-footer">
+      onClose={() => setModelConfirm(null)} footer={<footer className="form-footer">
         <span>{t('common.irreversible')}</span>
         <div className="actions">
           <button type="button" onClick={() => setModelConfirm(null)} disabled={working}>{t('action.cancel')}</button>
           <button type="button" className="danger" autoFocus disabled={working}
             onClick={() => void deleteModel(modelConfirm.model)}>{t('models.deleteModel')}</button>
         </div>
-      </div></div>
-    </Dialog>}
+      </footer>}
+      />}
 
     {deleting && target && <Dialog title={t('providers.deleteProvider')} busy={working}
       description={t('providers.deleteProviderBody', {
         name: target.name, keys: keys.length, models: providerModels.length,
-      })} onClose={() => setDeleting(false)}>
-      <div className="form-fields"><div className="form-footer">
+      })} onClose={() => setDeleting(false)} footer={<footer className="form-footer">
         <span>{t('common.irreversible')}</span>
         <div className="actions">
           <button type="button" onClick={() => setDeleting(false)} disabled={working}>{t('action.cancel')}</button>
           <button type="button" className="danger" autoFocus disabled={working}
             onClick={() => void deleteProvider()}>{t('providers.deleteProvider')}</button>
         </div>
-      </div></div>
-    </Dialog>}
+      </footer>}
+      />}
   </>;
 }

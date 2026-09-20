@@ -73,15 +73,21 @@
   }
 
   // ---- 2. 被祖先裁掉：祖先 overflow 不是 visible，且元素越出祖先边界 ----
+  //
+  // 只报**不可达**的裁切：祖先如果是可滚动的（auto / scroll），越出去的内容滚一下就能看到，
+  // 那是滚动区在正常工作（弹窗正文、表格横向滚动都靠它）。真正的问题是把内容锁在
+  // `overflow: hidden` 后面——那才是看不见也够不着。
+  const scrollable = (value) => value === 'auto' || value === 'scroll';
   for (const el of root.querySelectorAll('*')) {
     if (skip(el) || !visible(el)) continue;
     let p = el.parentElement;
     while (p && p !== root) {
       const s = getComputedStyle(p);
-      if (s.overflow !== 'visible' && s.overflowX !== 'visible') {
+      if (s.overflow !== 'visible' || s.overflowX !== 'visible') {
         const b = box(el), pb = box(p);
         const cut = Math.max(pb.top - b.top, b.bottom - pb.bottom);
-        if (cut > 2) clipped.push({ el: name(el), by: name(p), cut: Math.round(cut) });
+        const reachable = (cut > 0 && scrollable(s.overflowY)) || (cut <= 0 && scrollable(s.overflowX));
+        if (cut > 2 && !reachable) clipped.push({ el: name(el), by: name(p), cut: Math.round(cut) });
         break;
       }
       p = p.parentElement;
@@ -90,8 +96,11 @@
 
   // ---- 3. 相邻兄弟：真重叠 或 紧贴到 0 间距 ----
   const TABLE_ROWS = ['TR', 'THEAD', 'TBODY', 'TFOOT'];
+  // 绝对/固定定位的元素不参与重叠判定（见 SKILL.md 的噪音清单）：它们本来就是浮层，
+  // 与兄弟的矩形相交是浮层的定义（字段内叠加的显隐按钮、菜单、Toast 都属此类）。
+  const floating = (el) => ['absolute', 'fixed'].includes(getComputedStyle(el).position);
   for (const parent of root.querySelectorAll('*')) {
-    const kids = [...parent.children].filter(k => !skip(k) && visible(k));
+    const kids = [...parent.children].filter(k => !skip(k) && visible(k) && !floating(k));
     for (let i = 1; i < kids.length; i++) {
       const a = box(kids[i - 1]), b = box(kids[i]);
       const v = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
@@ -99,7 +108,13 @@
       if (v > 2 && h > 2) overlap.push({ a: name(kids[i - 1]), b: name(kids[i]), v: Math.round(v), h: Math.round(h) });
       else if (Math.abs(a.bottom - b.top) < 0.5 && h > 2 && a.height > 4 && b.height > 4
         && !TABLE_ROWS.includes(kids[i].tagName)) {
-        touching.push({ a: name(kids[i - 1]), b: name(kids[i]) });
+        // 「紧贴」要看**内容**是否也贴住了：相邻盒子之间只要有内边距或一条分隔线，
+        // 视觉上就是分开的（滚动区与固定底栏、<details> 的 summary 与展开体都靠这个）。
+        // 只报既没有内边距、也没有边框的那种贴死。
+        const sa = getComputedStyle(kids[i - 1]), sb = getComputedStyle(kids[i]);
+        const padded = parseFloat(sb.paddingTop) >= 8 || parseFloat(sa.paddingBottom) >= 8;
+        const bordered = parseFloat(sb.borderTopWidth) > 0 || parseFloat(sa.borderBottomWidth) > 0;
+        if (!padded && !bordered) touching.push({ a: name(kids[i - 1]), b: name(kids[i]) });
       }
     }
   }
@@ -133,6 +148,14 @@
     }
 
     if (el.matches('button, a, input, select, textarea, [role="button"], [role="menuitem"], [role="tab"], [role="switch"]')) {
+      // Switch 规范就是 36×20（docs/design/03-components.md），不受 32 方形约束。
+      if (el.getAttribute('role') === 'switch') continue;
+      // 勾选框图形本身是 18，点击区由外层（label / 点击层）撑到 32：
+      // 外层够大就不算不合格（规范要求的是「点击区」而不是图形尺寸）。
+      if (el.tagName === 'INPUT') {
+        const wrap = el.parentElement;
+        if (wrap && box(wrap).width >= 32 && box(wrap).height >= 32) continue;
+      }
       const b = box(el);
       // 规范：图标点击区 ≥32×32，紧凑控件高 32。低于此值列入。
       if (b.width < 32 || b.height < 32) {

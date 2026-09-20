@@ -210,8 +210,7 @@ export function SettingsPage({ client, gateway, onNavigate }: {
 
     {restore && <Dialog title={t('settings.restoreAction')} busy={busy === 'restore'}
       description={t('settings.restoreBody', { path: restore.sourcePath, time: restore.createdAt })}
-      onClose={() => setRestore(null)}>
-      <div className="form-fields"><div className="form-footer">
+      onClose={() => setRestore(null)} footer={<footer className="form-footer">
         <span>{t('settings.restoreNote')}</span>
         <div className="actions">
           <button onClick={() => setRestore(null)} disabled={busy === 'restore'}>{t('action.cancel')}</button>
@@ -219,7 +218,7 @@ export function SettingsPage({ client, gateway, onNavigate }: {
             {busy === 'restore' ? t('settings.restoring') : t('settings.restoreAction')}
           </button>
         </div>
-      </div></div>
-    </Dialog>}
+      </footer>}
+      />}
   </div>;
 }

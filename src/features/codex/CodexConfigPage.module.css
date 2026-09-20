@@ -21,7 +21,7 @@
 .group > h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
 /* 固定列宽：路径类值很长，自动布局会把“原因”挤到折行。 */
 .changes { width: 100%; border-collapse: collapse; table-layout: fixed; text-align: left; font-size: 13px; }
-.changes th { color: var(--text-muted); font-size: 11px; font-weight: 500; padding: 0 12px 12px; white-space: nowrap; }
+.changes th { color: var(--text-muted); font-size: var(--font-size-caption); font-weight: 500; padding: 0 12px 12px; white-space: nowrap; }
 .changes th:nth-child(1) { width: 24%; }
 .changes th:nth-child(2) { width: 26%; }
 .changes th:nth-child(3) { width: 30%; }
@@ -37,7 +37,7 @@
 .awaiting strong { display: block; font-size: 14px; margin-bottom: 4px; }
 .awaiting span { color: var(--text-secondary); font-size: 12px; }
 .stages { display: flex; gap: 8px; flex-wrap: wrap; list-style: none; padding: 0; margin: 20px 0 0; }
-.stages li { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); border: 1px solid var(--border-subtle); border-radius: var(--radius-pill); padding: 3px 10px; }
+.stages li { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-caption); color: var(--text-muted); border: 1px solid var(--border-subtle); border-radius: var(--radius-pill); padding: 3px 10px; }
 .stages li.done { color: var(--text-primary); border-color: var(--border-control); }
 .stages li.current { color: var(--status-info); background: var(--status-info-bg); border-color: transparent; }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -45,6 +45,6 @@
 /* 三项版本状态：已保存 / 已发布 / 已观测。第三项没有数据来源时必须显示未观测。 */
 .versions { list-style: none; margin: 20px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
 .versions li { padding: 12px 14px; border-radius: 8px; background: var(--bg-input); border: 1px solid var(--border-subtle); }
-.versions span { display: block; font-size: 11px; color: var(--text-muted); }
+.versions span { display: block; font-size: var(--font-size-caption); color: var(--text-muted); }
 .versions strong { display: block; font-size: 13px; font-weight: 500; margin-top: 4px; overflow-wrap: anywhere; }
-.versions small { display: block; font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 16px; }
+.versions small { display: block; font-size: var(--font-size-caption); color: var(--text-muted); margin-top: 4px; line-height: 16px; }

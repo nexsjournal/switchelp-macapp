@@ -25,9 +25,11 @@
 /* 嵌进别的卡片时用：不要外框，只要不塌陷。 */
 .plain { min-width: 0; }
 .card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
-.tableWrap { overflow-x: auto; }
+/* 表头与行里的点击区用负外边距撑到 32px：不给滚动区留白的话，那几像素会被裁掉，
+   点击区就少了边（审计会把它们报成 clipped）。 */
+.tableWrap { overflow-x: auto; padding: 7px; margin: -7px; }
 .tableWrap table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
-.tableWrap th { color: var(--text-muted); font-size: 11px; font-weight: 500; padding: 0 12px 14px; white-space: nowrap; }
+.tableWrap th { color: var(--text-muted); font-size: var(--font-size-caption); font-weight: 500; padding: 0 12px 14px; white-space: nowrap; }
 .tableWrap td { border-top: 1px solid var(--border-subtle); padding: 14px 12px; vertical-align: middle; }
 .tableWrap td strong { display: block; font-weight: 500; margin-bottom: 2px; }
 /*
@@ -37,7 +39,7 @@
  * 会被这条规则改成 display: block（方框不再居中，表头与行的勾选框差 14px）
  * 并套上 11px 字号。给第二行一个自己的类，规则就只命中它该命中的东西。
  */
-.tableWrap .line { display: block; font-size: 11px; color: var(--text-muted); }
+.tableWrap .line { display: block; font-size: var(--font-size-caption); color: var(--text-muted); }
 /* 操作列按内容收窄：自动布局会把剩余宽度摊给所有列，操作列会宽过数据列。 */
 .tableWrap th:last-child, .tableWrap td:last-child { width: 1%; white-space: nowrap; }
 .checkCell { width: 1%; }
@@ -49,11 +51,11 @@
 .checkHit { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin: -7px; }
 .selectedRow { background: var(--accent-subtle); }
 /* 表头排序按钮也是控件：32 高，负边距吃回，表头密度不变。 */
-.sortButton { height: var(--control-height-compact); margin: -5px 0; padding: 0; font-size: 11px; color: var(--text-muted); background: transparent; border-color: transparent; }
+.sortButton { height: var(--control-height-compact); margin: -5px 0; padding: 0; font-size: var(--font-size-caption); color: var(--text-muted); background: transparent; border-color: transparent; }
 .sortButton:hover:not(:disabled) { background: transparent; color: var(--text-primary); }
 .rowActions { display: flex; align-items: center; gap: 6px; }
 .rowActions > button { height: var(--control-height-compact); padding: 0 10px; font-size: 12px; }
-.count { margin: 14px 0 0; color: var(--text-muted); font-size: 11px; }
+.count { margin: 14px 0 0; color: var(--text-muted); font-size: var(--font-size-caption); }
 
 .bulkBar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 12px 16px; border: 1px solid var(--accent-border); border-radius: 8px; background: var(--bg-elevated); font-size: 12px; }
 .bulkBar strong { font-variant-numeric: tabular-nums; }

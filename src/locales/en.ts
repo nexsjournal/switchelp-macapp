@@ -123,6 +123,7 @@ export const en: Record<string, string> = {
   'codex.recheck': "Detect again",
   'codex.redactedPreview': "Redacted config preview",
   'codex.reloaded': "Codex has reloaded",
+  'codex.replanned': "Codex changed its own config file (it adds project entries on startup), so the plan was regenerated and applied.",
   'codex.restartHostBody': "Codex (the ChatGPT desktop app) will quit and reopen. Unsaved conversations may be lost.",
   'codex.restartHostFailed': "Codex quit but did not come back. Please open Codex manually.",
   'codex.restartHostForced': "Codex restarted, but it had to be force-quit, so unsaved conversations may be lost. Check its model menu once it is back.",
