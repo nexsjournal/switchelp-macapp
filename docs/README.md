@@ -56,7 +56,7 @@
 
 | 文档位置 | 文档所述 | 现状 |
 | --- | --- | --- |
-| `design/04-pages-and-flows.md` P03 | 供应商预设、状态筛选、详情页签（连接 / Key / 模型）、自定义 headers / 代理与超时 | 未实现：预设是返回空数组的桩，列表只有文本搜索，详情是单卡片堆叠，`Provider` 没有 header / 代理 / 超时字段 |
+| `design/04-pages-and-flows.md` P03 | 供应商预设、状态筛选、详情页签（连接 / Key / 模型）、自定义 headers / 代理与超时 | 未实现：**预设已连同那个恒返回空数组的桩一起删除**（预设是产品内容决策，不做假实现，见 [批次 E 偏差](audits/2026-09-20-batch-E-deviations.md)）；详情是单卡片堆叠，`Provider` 没有 header / 代理 / 超时字段。**多 Key、模型级协议、供应商搜索已实现**（同批次 E） |
 | `design/04-pages-and-flows.md` P04 | 目录排序含「最近测试」；筛选按「可用 / 未测试」 | 实现是「按上下文限制排序」与「是否纳入目录」 |
 | `design/04-pages-and-flows.md` P05 | 输入能力的三条路径（native / converted / tool_read）与「查看原因」 | 只有 supported / unsupported / unknown 三档，`effectivePath` 恒为 blocked |
 | `design/04-pages-and-flows.md` P05 | 错误就地显示并汇总顶部 N 项 | 只有一个通用错误串 |

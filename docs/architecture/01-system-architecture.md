@@ -57,7 +57,7 @@ flowchart LR
 
 | 模块 | 责任 | 禁止承担 |
 | --- | --- | --- |
-| ProviderService | URL、供应商预设、元数据版本 | 直接改 Codex 配置 |
+| ProviderService | URL、元数据版本、多 Key（含备注名与停用） | 直接改 Codex 配置 |
 | CredentialService | Key 保存/替换/解析、掩码、撤销 | 返回完整旧 Key 给 UI |
 | ModelService | 精确 ID、能力证据、目录选择 | 从名称猜功能并自动启用 |
 | CatalogCompiler | 将已选择模型编译到版本化宿主目录 | 探测上游或保存凭据 |
