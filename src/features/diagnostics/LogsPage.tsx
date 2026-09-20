@@ -224,7 +224,12 @@ export function LogsPage({ client }: { client: DesktopClient }) {
       {savedPath && <div className={styles.saved} role="status"><Download size={15} />{t('common.savedTo')}<span className="text-mono break-anywhere">{savedPath}</span></div>}
     </section>
 
-    {detail && <Dialog title={t('logs.eventDetail')} description={`${detail.categoryKey} · ${t(levelKeys[detail.level])}`} onClose={() => setDetail(null)}>
+    {detail && <Dialog title={t('logs.eventDetail')} description={`${detail.categoryKey} · ${t(levelKeys[detail.level])}`}
+      onClose={() => setDetail(null)}
+      footer={<footer className="form-footer">
+        <span />
+        <div className="actions"><button onClick={() => setDetail(null)} autoFocus>{t('common.close')}</button></div>
+      </footer>}>
       <div className="form-fields">
         <dl className={styles.detail}>
           <dt>{t('logs.time')}</dt><dd className="text-mono">{detail.timestamp}</dd>
@@ -245,16 +250,12 @@ export function LogsPage({ client }: { client: DesktopClient }) {
             <span className="text-mono text-muted">{event.timestamp}</span>
             <span className="break-anywhere">{event.resultKey}</span>
           </li>)}</ul>}
-        <div className="actions" style={{ justifyContent: 'flex-end' }}>
-          <button onClick={() => setDetail(null)} autoFocus>{t('common.close')}</button>
-        </div>
       </div>
     </Dialog>}
 
     {confirmClear && <Dialog title={t('logs.clear')} busy={busy === 'clear'}
       description={t('logs.clearBody', { count: events.length })}
-      onClose={() => setConfirmClear(false)}>
-      <div className="form-fields"><div className="form-footer">
+      onClose={() => setConfirmClear(false)} footer={<footer className="form-footer">
         <span>{t('logs.clearIrreversible')}</span>
         <div className="actions">
           <button onClick={() => setConfirmClear(false)} disabled={busy === 'clear'}>{t('action.cancel')}</button>
@@ -262,7 +263,7 @@ export function LogsPage({ client }: { client: DesktopClient }) {
             {busy === 'clear' ? t('logs.clearing') : t('logs.clear')}
           </button>
         </div>
-      </div></div>
-    </Dialog>}
+      </footer>}
+      />}
   </div>;
 }

@@ -9,7 +9,7 @@
 .steps li.current { border-color: var(--accent-border); background: var(--accent-subtle); color: var(--accent); }
 .steps li.done { color: var(--text-secondary); }
 .index { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
-  border: 1px solid var(--border-control); font-size: 11px; flex-shrink: 0; }
+  border: 1px solid var(--border-control); font-size: var(--font-size-caption); flex-shrink: 0; }
 .steps li.current .index { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
 .steps li.done .index { border-color: var(--status-success); color: var(--status-success); }
 
@@ -37,7 +37,7 @@
 .instanceChoice input[type='radio'] { width: auto; flex-shrink: 0; margin-top: 3px; }
 .instanceChoice > div { flex: 1; min-width: 0; }
 .instanceChoice strong { display: block; font-size: 13px; font-weight: 500; }
-.instanceChoice > div > span { display: block; font-size: 11px; margin-top: 3px; }
+.instanceChoice > div > span { display: block; font-size: var(--font-size-caption); margin-top: 3px; }
 .tags { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 
 .conflict { display: flex; gap: 10px; margin-top: 16px; padding: 14px; border-radius: 8px; background: var(--status-warning-bg); color: var(--status-warning); }
@@ -48,19 +48,19 @@
 .checklist li { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 12px; align-items: center;
   padding: 14px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-input); }
 .checklist li.ok { border-color: var(--status-success-bg); }
-.mark { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border-control); font-size: 11px; color: var(--text-muted); }
+.mark { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border-control); font-size: var(--font-size-caption); color: var(--text-muted); }
 .checklist li.ok .mark { border-color: var(--status-success); color: var(--status-success); }
 .checklist strong { display: block; font-size: 13px; font-weight: 500; }
 /* 只作用于说明行（标题下面那句）。写成 `.checklist span` 会把 .mark 一起选中：
    它的 display 被改成 block、又被加上 margin-top，于是编号圆点里的数字不在圆心。
    编号圆点自己用 place-items: center 居中。 */
-.checklist strong + span { display: block; font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+.checklist strong + span { display: block; font-size: var(--font-size-caption); color: var(--text-muted); margin-top: 3px; }
 
 .testRow { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle); }
 .testRow strong { display: block; font-size: 13px; font-weight: 500; }
 .testRow span { display: block; font-size: 12px; margin-top: 3px; }
 .verified { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--radius-pill);
-  background: var(--status-success-bg); color: var(--status-success); font-size: 11px; }
+  background: var(--status-success-bg); color: var(--status-success); font-size: var(--font-size-caption); }
 .stages { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; }
 .stages li { display: grid; grid-template-columns: 96px 48px minmax(0, 1fr); gap: 10px; align-items: baseline;
   padding: 10px 12px; border-radius: 8px; background: var(--bg-input); font-size: 12px; }
