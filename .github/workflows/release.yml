@@ -275,22 +275,48 @@ jobs:
           merge-multiple: true
 
       - name: 列出即将发布的产物
+        id: collect
         run: |
-          # 没有产物是**正常情况**，不是失败：未配置 Apple 签名 secrets 时 macOS 任务跳过，
-          # Windows 默认不出。以前这里直接 `ls artifacts`，于是「打标签 → 发布」在没配签名的
-          # 仓库里必然红一次；而发布本身（创建 Release、留出附件位）仍然要做。
+          # 零产物是**预期状态之一**（macOS 未配签名时跳过、Windows 默认不出），不是失败：
+          # 包由本机签名后手动附上。但**不能**让它变成一个公开可见的空 Release——
+          # 那对下载者就是一句没兑现的承诺。所以这里只判断「有没有」，由下一步决定草稿与否。
           mkdir -p artifacts
           ls -la artifacts
           if [ -z "$(ls -A artifacts)" ]; then
-            echo "::notice::这次没有 CI 产物（macOS 未配签名时跳过、Windows 默认不出）。Release 照常创建，macOS 包由本机签名后手动附上。"
+            echo "has_artifacts=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::这次没有 CI 产物。Release 会以**草稿**形式创建：本机签名后的包附上来再手动发布，下载者不会看到一个空页面。"
+          else
+            echo "has_artifacts=true" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: softprops/action-gh-release@v2
         with:
           # 手动触发时可以指定要附加产物的标签；打标签时用触发它的那个标签。
           tag_name: ${{ inputs.tag || github.ref_name }}
-          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          # 零产物一律先成草稿：草稿对公众不可见，附上本机签名包后再发布。
+          # 以前无条件按手动输入的 draft 走，于是「打标签」会直接建出一个没有任何附件的
+          # 公开 Release —— 页面看起来已经发布了，点进去什么都没有。
+          draft: ${{ steps.collect.outputs.has_artifacts == 'false' || (github.event_name == 'workflow_dispatch' && inputs.draft) }}
           generate_release_notes: true
           # 没有产物时不报错：见上，零产物是预期状态之一。
           fail_on_unmatched_files: false
           files: artifacts/*
+          # 首次打开说明写在这一页，因为下载的人先落到这里——README 里的同名说明他可能根本不会翻。
+          # 不写死版本号：正文随标签走，免得下次发版忘了改。
+          body: |
+            ## 首次打开（macOS）
+
+            包已用 Developer ID 签名，但**尚未公证**，所以 macOS 会拦一次。两条路，先试第一条：
+
+            1. **系统设置 → 隐私与安全性** → 下滚到「安全性」一栏 → 点被拦应用旁边的**仍要打开** → 输入密码确认。
+               Apple 现在的官方文档已不再提「右键 → 打开」那个旧办法，右键没反应是正常的。
+            2. 或者打开一次终端，执行完再正常双击：
+
+               ```bash
+               xattr -dr com.apple.quarantine /Applications/Switchelp.app
+               ```
+
+            下载后可自行核对 SHA-256（`shasum -a 256 <文件>`）；GitHub 也会在附件旁标注 digest。
+
+            **Windows 与 Intel Mac**：自动构建目前不产出它们。原因与替代做法见
+            [README 的下载与安装一节](https://github.com/nexsjournal/switchelp-macapp#download-and-install)。

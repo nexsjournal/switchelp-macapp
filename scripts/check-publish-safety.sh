@@ -3,7 +3,7 @@
 # 发布前隐私扫描。只使用**通用规则**，脚本自身不含任何个人标识——
 # 任何属于你的私有特征（供应商域名、内部主机名等）都放在仓库之外的清单里：
 #
-#   printf '%s\n' 'api.your-provider.example' 'internal-host' > ~/.gptswitch-private-patterns
+#   printf '%s\n' 'api.your-provider.example' 'internal-host' > ~/.switchelp-private-patterns
 #   scripts/check-publish-safety.sh
 #
 # 退出码非零表示发现了需要先处理的内容。CI 也会跑这个脚本（.github/workflows/ci.yml）。
@@ -118,7 +118,17 @@ else
 fi
 
 section '⑦ 私有特征清单（仓库外维护）'
-patterns="${SWITCHELP_PRIVATE_PATTERNS:-${GPTSWITCH_PRIVATE_PATTERNS:-$HOME/.switchelp-private-patterns}}"
+# 两个历史文件名都认：产品曾名 GPTSwitch，README 一度写的是旧的 `~/.gptswitch-private-patterns`，
+# 而脚本读的是新的。只认一个的话，照旧文档建文件的人会**静默地**得不到任何扫描——这一类漏检
+# 比报错更危险，所以这里把两个都当默认值，环境变量仍然优先。
+patterns="${SWITCHELP_PRIVATE_PATTERNS:-${GPTSWITCH_PRIVATE_PATTERNS:-}}"
+if [ -z "$patterns" ]; then
+  for candidate in "$HOME/.switchelp-private-patterns" "$HOME/.gptswitch-private-patterns"; do
+    if [ -s "$candidate" ]; then patterns="$candidate"; break; fi
+  done
+  # 两个都不存在时，提示里只推新名字。
+  patterns="${patterns:-$HOME/.switchelp-private-patterns}"
+fi
 if [ -s "$patterns" ]; then
   # 从文件读取模式：清单本身不进仓库，因此这里的匹配不会把特征写进脚本。
   if hits=$(git grep -nIF -f "$patterns" -- . 2>/dev/null); then

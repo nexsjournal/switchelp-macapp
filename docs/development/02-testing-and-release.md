@@ -103,3 +103,18 @@ Token 边界、推理集合、URL、精确模型 ID、null/unknown、能力交�
 稳定版必须满足：核心用例通过、双平台真实供应商至少两家、同名模型路由正确、Key 安全存储、配置故障恢复、工具语义/流式取消、无阻断安全问题、签名与更新校验、许可证资料齐全。
 
 发布产物：安装包、checksums、签名/公证记录、SBOM、版本说明、兼容矩阵、已知限制、恢复说明。发现错路由、秘密泄漏或配置破坏立即阻止升级并撤回版本；提供签名的上个稳定包和 DB 兼容恢复路线，不能让用户手删配置自救。
+
+## 两层端到端验证：谁能进 CI，谁只能人工
+
+`scripts/g0/` 下的三个探针都要一个**真实的 Codex 可执行文件**
+（`/Applications/ChatGPT.app/Contents/Resources/codex`，可用 `GPTSWITCH_CODEX_BINARY` 覆盖）。
+GitHub runner 上没有它，也装不上（它是 ChatGPT 桌面端的一部分）。所以端到端验证分两层：
+
+| 层 | 跑什么 | 在哪跑 | 拦得住什么 |
+| --- | --- | --- | --- |
+| 自动 | `cargo run -p switch-core --example g0_apply_pipeline`（CI 的 `pipeline` job） | 每次提交 | 计划 → CAS → 原子写入这条链路上的回归：产出物缺失、配置里没写目录、事务没停在 `awaitingReload` |
+| 自动 | `node --check` + 依赖自检（CI 的 `probes` job） | 每次提交 | 探针脚本自己烂掉（语法错、引用了已删除的模块） |
+| **人工** | `node scripts/g0/probe-catalog.mjs`、`probe-apply-pipeline.mjs`、`probe-full-loop.mjs` | 发布前，本机 | 宿主是否真的接受自建目录、helper 是否真的被调用、真实 SSE 是否按 Responses 契约还原 |
+
+**发布前必须人工跑一遍第三层**，并把输出贴进对应版本的发布说明或 `docs/appendix/evidence-manifest.json`。
+这一层没有 CI 兜底是环境限制，不是「暂时没做」——写在这里就是为了让它不会被忘掉。
