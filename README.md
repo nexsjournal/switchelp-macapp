@@ -16,7 +16,9 @@ Codex  →  ~/.codex/config.toml (the fields this tool manages)
        →  auth helper reads the local token → routes by alias to the provider → upstream
 ```
 
-- The **model menu** comes from a compiled catalog file (`model_catalog_json`), not from a list this tool draws itself.
+- The **model menu** comes from a compiled catalog file (`model_catalog_json`), not from a list this tool draws
+  itself. Note that `model_catalog_json` **replaces** the host's model list rather than extending it: while the tool
+  is applied, the built-in models are not in the picker until you restore native mode.
 - **Upstream keys never reach `config.toml`**: they only go into the system credential store, and the host only ever
   receives a local gateway token.
 - Writing Codex config always goes **plan → digest check (CAS) → atomic replace**. A successful commit stops at
@@ -29,26 +31,49 @@ Codex  →  ~/.codex/config.toml (the fields this tool manages)
 
 ## Download and install
 
-Grab a build from [Releases](https://github.com/nexsjournal/switchelp-macapp/releases):
+Grab a build from [Releases](https://github.com/nexsjournal/switchelp-macapp/releases).
 
-| Platform | File | First launch |
-| --- | --- | --- |
-| macOS (Apple Silicon) | `Switchelp_0.1.3_aarch64.dmg` | Signed with a Developer ID but **not notarized**: use **right-click → Open**, or run `xattr -dr com.apple.quarantine /Applications/Switchelp.app` once |
-| macOS (Apple Silicon) | `Switchelp-0.1.3-arm64.zip` | Same as above; unzip and drag `Switchelp.app` into `/Applications` |
-| Windows (x64) | `Switchelp_0.1.3_x64-setup.exe` (NSIS installer)<br>`Switchelp_0.1.3_x64_en-US.msi` | Unsigned, so SmartScreen reports "Unknown publisher" — choose "Run anyway" |
+**0.2.0 — the current release — publishes macOS Apple Silicon only.** Windows and Intel Mac bundles are not
+attached to it; see the notes below the table for why and what to do instead.
+
+| Platform | File | SHA-256 | First launch |
+| --- | --- | --- | --- |
+| macOS (Apple Silicon) | `Switchelp_0.2.0_aarch64.dmg` | `5b36e3624cbab6f70d3be11fdee5f56665bdd210d949310ab95cf2dbf7e445ac` | Signed with a Developer ID but **not notarized** — see below |
+| macOS (Apple Silicon) | `Switchelp-0.2.0-arm64.zip` | `0fbc0337048214a2dbde853c91066c367c7dd923c147606067c0c72806046143` | Same as above; unzip and drag `Switchelp.app` into `/Applications` |
+
+**Why macOS warns, and how to get past it**: signing and notarization are two separate gates and this project only
+has the first one. macOS will refuse the first launch. Two ways through, easiest first:
+
+1. **System Settings → Privacy & Security**, scroll to the **Security** section, click **Open Anyway** next to the
+   blocked app, then confirm with your password. This is the path Apple documents today — its support page no longer
+   mentions the older right-click → Open shortcut, so don't be surprised if that does nothing.
+2. Terminal, once, then open the app normally:
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Switchelp.app
+   ```
+
+Notarization needs credentials from the account owner; the steps are in
+[signing, notarization and release](docs/development/03-signing-and-release.md). Once configured, the app opens with a
+double-click and CI produces notarized builds automatically.
 
 The 0.1.0 artifacts still carry the old `GPTSwitch` name: they were built before the product and the repository
 were renamed. The bundle identifier stays `app.gptswitch.desktop` on purpose, so app data and stored credentials
 from earlier versions keep working.
 
-**Why macOS warns**: signing and notarization are two separate gates, and this project only has the first one.
-Notarization needs credentials from the account owner; the steps are in
-[signing, notarization and release](docs/development/03-signing-and-release.md). Once configured, the app opens with a
-double-click and CI produces notarized builds automatically.
+**Windows status**: no 0.2.0 artifact is published. The build job exists (`build-windows` in
+[`release.yml`](.github/workflows/release.yml)) but only runs on a manual `workflow_dispatch` with `with_windows`
+enabled — a tag push never builds it.
 
-**Windows status**: the app opens, but **third-party models are not usable on Windows yet** — the credential helper's
-`.cmd` implementation is still an explicitly unfinished stub, which fails diagnosably rather than pretending to work.
-See the [evidence index](docs/appendix/01-source-index.md).
+Even once built, **the app refuses to apply configuration on Windows**, and says so in the UI instead of writing
+anything: the credential helper has no Windows implementation yet, and without it Codex could not authenticate
+against the local gateway, so every request would fail. The previous behaviour — writing the config anyway and
+reporting success — was worse than useless: it broke a working Codex and blamed the upstream. See the
+[evidence index](docs/appendix/01-source-index.md).
+
+**Intel Mac status**: the release matrix does cover `x86_64-apple-darwin`, but the `build-macos` job only runs when
+the Apple signing secrets are configured in CI, and the 0.2.0 artifacts were signed locally on Apple Silicon. Build
+from source (`pnpm exec tauri build`) if you need an Intel bundle.
 
 ## Build and verify
 
@@ -70,7 +95,7 @@ Run the privacy scan before publishing or pushing. Its rules are generic and the
 identifiers; keep your own private patterns outside the repository and they get scanned too:
 
 ```bash
-printf '%s\n' 'api.your-provider.example' > ~/.gptswitch-private-patterns
+printf '%s\n' 'api.your-provider.example' > ~/.switchelp-private-patterns
 scripts/check-publish-safety.sh
 ```
 
@@ -85,13 +110,19 @@ scripts/check-publish-safety.sh
 
 ## Current status
 
-The mechanism works end to end, but it has **not been verified against a real third-party provider yet**:
+The mechanism works end to end and has been **verified against a real third-party provider on macOS**:
 
-- Verified: a real Codex app-server lists custom models and routes them to the local gateway; the `chat` protocol
-  adapter, output-limit enforcement, reasoning-level mapping and modality rejection are all backed by the request
-  parameters a real upstream received; dropping the upstream cancels the request.
-- Not verified: the Desktop **GUI** model picker (the evidence so far comes from the app-server layer), response
-  quality from a real provider, real Windows hardware, and actual screen-reader behaviour.
+- Verified: a real upstream answered a completion routed through the local gateway; a real Codex `model/list`
+  returns the managed models; the Desktop app-server starts a session on a managed model (`logs_2.sqlite` records
+  `thread/start` with `client_name="Codex Desktop"` and the aliased model id); applying config commits and the host
+  restarts; the `chat` protocol adapter, output-limit enforcement, reasoning-level mapping and modality rejection
+  are all backed by the request parameters a real upstream received; dropping the upstream cancels the request.
+- **Known behaviour worth reading before you apply**: `model_catalog_json` **replaces** the host's model list. While
+  the tool is applied, the built-in models are gone from Codex's picker and only come back through
+  "restore native mode". Confirmed by `model/list` returning exactly one entry. Tracked, with the planned warning in
+  the apply dialog, in the [2026-09-20 audit](docs/audits/2026-09-20-audit-synthesis.md).
+- Not verified: real Windows hardware, actual screen-reader behaviour, and the **visual** appearance of the Desktop
+  GUI picker — the evidence above comes from the app-server and log layers, not from looking at the menu.
 
 Design and research documents live in [`docs/`](docs/README.md); they are currently written in Chinese only.
 
