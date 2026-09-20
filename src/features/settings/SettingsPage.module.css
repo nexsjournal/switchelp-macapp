@@ -1,39 +1,45 @@
-.page { display: grid; gap: 20px; }
+.page { display: grid; gap: 24px; }
 .card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
 /* 这里的标题就是卡片第一个子元素，只需要上提修正量。 */
 .card > h2:first-child { margin-top: calc(-1 * var(--card-title-optical-trim)); }
-.card h2 { margin: 0 0 16px; font-size: 16px; font-weight: 600; line-height: var(--line-height-card-title); display: flex; align-items: center; gap: 10px; }
+.card h2 { margin: 0 0 16px; font-size: var(--font-size-card-title); font-weight: 600; line-height: var(--line-height-card-title); display: flex; align-items: center; gap: 8px; }
 .card h2 > svg { color: var(--text-muted); }
-.rows { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 14px 16px; margin: 0; font-size: 13px; }
+.rows { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 16px 16px; margin: 0; font-size: var(--font-size-label); line-height: var(--line-height-label); }
 .rows dt { color: var(--text-muted); }
 .rows dd { margin: 0; }
-.rows dd > span { display: block; font-size: var(--font-size-caption); line-height: 18px; margin-top: 2px; }
+/*
+ * 说明区里的链接（仓库地址）也要有够大的点击目标。它是一行文本，实测高度只有 15px——
+ * 鼠标能点，但规范要求紧凑控件的命中区不少于 32。用 inline-flex + min-height 撑开，
+ * 视觉上仍然只是文字。
+ */
+.rows dd > a { display: inline-flex; align-items: center; min-height: var(--control-height-compact); }
+.rows dd > span { display: block; font-size: var(--font-size-caption); line-height: var(--line-height-caption); margin-top: 2px; }
 .online { color: var(--status-success); }
 .offline { color: var(--status-warning); }
 
 .instances { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .instances li { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-  padding: 14px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-input); }
-.instances strong { display: block; font-size: 13px; font-weight: 500; }
-.instances span { display: block; font-size: var(--font-size-caption); margin-top: 3px; }
+  padding: 16px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-input); }
+.instances strong { display: block; font-size: var(--font-size-label); line-height: var(--line-height-label); font-weight: 500; }
+.instances span { display: block; font-size: var(--font-size-caption); line-height: var(--line-height-caption); margin-top: 4px; }
 .tags { display: flex; gap: 8px; flex-wrap: wrap; }
 
-.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
-.note { margin: 14px 0 0; color: var(--text-muted); font-size: 12px; line-height: 18px; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.note { margin: 16px 0 0; color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 .dangerZone { border-color: var(--status-danger-bg); }
 .dangerZone h2 > svg { color: var(--status-danger); }
 
-.subHeading { margin: 22px 0 12px; font-size: 13px; font-weight: 600; }
-.notice { border: 1px solid var(--border-subtle); background: var(--bg-elevated); border-radius: 8px; padding: 12px 16px; font-size: 13px; }
-.linkButton { display: inline-flex; align-items: center; height: var(--control-height); padding: 0 14px; border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--accent); font-size: 13px; }
+.subHeading { margin: 24px 0 12px; font-size: var(--font-size-label); line-height: var(--line-height-label); font-weight: 600; }
+.notice { border: 1px solid var(--border-subtle); background: var(--bg-elevated); border-radius: 8px; padding: 12px 16px; font-size: var(--font-size-label); line-height: var(--line-height-label); }
+.linkButton { display: inline-flex; align-items: center; height: var(--control-height); padding: 0 16px; border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--accent); font-size: var(--font-size-label); line-height: var(--line-height-label); }
 .linkButton:hover { background: var(--bg-hover); text-decoration: none; }
 .backups { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.backups li { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
-  padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-input); }
-.backups strong { display: block; font-size: 12px; font-weight: 500; }
-.backups span { display: block; font-size: var(--font-size-caption); margin-top: 3px; }
-.summary { width: 100%; margin-top: 14px; padding: 14px; border-radius: 8px; background: var(--bg-input); border: 1px solid var(--border-subtle);
-  color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; line-height: 20px; resize: vertical; }
+.backups li { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 12px 16px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-input); }
+.backups strong { display: block; font-size: var(--font-size-caption); line-height: var(--line-height-caption); font-weight: 500; }
+.backups span { display: block; font-size: var(--font-size-caption); line-height: var(--line-height-caption); margin-top: 4px; }
+.summary { width: 100%; margin-top: 16px; padding: 16px; border-radius: 8px; background: var(--bg-input); border: 1px solid var(--border-subtle);
+  color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-code); resize: vertical; }
 
 /* 只读标识：放在字段名旁边，避免用户以为这里可以填。 */

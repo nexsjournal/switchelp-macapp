@@ -4,57 +4,57 @@
 /* 标题块贴行顶：同一行里的按钮更高时，居中会把标题带下去（修正量见 tokens.css）。 */
 .card > .cardHeader:first-child { margin-top: calc(-1 * var(--card-title-optical-trim)); }
 .card > .cardHeader:first-child > :first-child { align-self: flex-start; }
-.cardHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
-.cardHeader h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: var(--line-height-card-title); display: flex; align-items: center; gap: 10px; }
+.cardHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.cardHeader h2 { margin: 0; font-size: var(--font-size-card-title); font-weight: 600; line-height: var(--line-height-card-title); display: flex; align-items: center; gap: 8px; }
 .cardHeader > svg { color: var(--text-muted); }
-.cardActions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
-.muted { color: var(--text-muted); font-size: 13px; line-height: 20px; margin: 0; display: flex; align-items: center; gap: 8px; }
-.note { display: flex; gap: 8px; align-items: flex-start; margin: 16px 0 0; padding: 12px 14px; border-radius: 8px; background: var(--bg-input);
-  color: var(--text-muted); font-size: var(--font-size-caption); line-height: 18px; }
+.cardActions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 24px; }
+.muted { color: var(--text-muted); font-size: var(--font-size-label); line-height: var(--line-height-label); margin: 0; display: flex; align-items: center; gap: 8px; }
+.note { display: flex; gap: 8px; align-items: flex-start; margin: 16px 0 0; padding: 12px 16px; border-radius: 8px; background: var(--bg-input);
+  color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 .note > svg { flex-shrink: 0; margin-top: 2px; }
 
 .route { margin: 0 0 16px; }
 /* 当前生效的模型名是「数值强调」一档（20px 不在字阶里）。 */
 .route strong { display: block; font-size: var(--font-size-metric); line-height: var(--line-height-metric); font-weight: 500; letter-spacing: -0.4px; }
-.route span { display: block; font-size: 12px; margin-top: 4px; }
-.rows { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 10px 12px; margin: 0; font-size: 13px; }
+.route span { display: block; font-size: var(--font-size-caption); line-height: var(--line-height-caption); margin-top: 4px; }
+.rows { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px 12px; margin: 0; font-size: var(--font-size-label); line-height: var(--line-height-label); }
 .rows dt { color: var(--text-muted); }
 .rows dd { margin: 0; }
 
-.status { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.status { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
 .status li { display: flex; gap: 12px; align-items: flex-start; }
-.status strong { display: block; font-size: 13px; font-weight: 500; }
+.status strong { display: block; font-size: var(--font-size-label); line-height: var(--line-height-label); font-weight: 500; }
 /* 用 div 限定文字块：`.status span` 会连行首的状态点一起选中，
-   把 .dot 自己的 margin-top: 6px（对齐首行文字用）覆盖成 3px。 */
-.status div > span { display: block; font-size: 12px; color: var(--text-secondary); margin-top: 3px; }
-.status div > span span { display: block; font-size: var(--font-size-caption); margin-top: 2px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 6px; background: var(--border-control); }
+   把 .dot 自己的 margin-top: 8px（对齐首行文字用）覆盖成 4px。 */
+.status div > span { display: block; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); margin-top: 4px; }
+.status div > span span { display: block; font-size: var(--font-size-caption); line-height: var(--line-height-caption); margin-top: 2px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 8px; background: var(--border-control); }
 .dot.ok { background: var(--status-success); }
 .dot.warn { background: var(--status-warning); }
 .dot.muted { background: var(--border-control); }
-.gatewayError { margin: 14px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--status-danger-bg); color: var(--status-danger); font-size: 12px; }
+.gatewayError { margin: 16px 0 0; padding: 8px 12px; border-radius: 8px; background: var(--status-danger-bg); color: var(--status-danger); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 
 .providers { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .providers li { display: grid; grid-template-columns: 36px minmax(0, 1fr) 10px minmax(0, 1fr) auto; gap: 12px; align-items: center;
   padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-input); }
 .providers .dot { margin-top: 0; }
 .monogram { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; background: var(--bg-selected);
-  border: 1px solid var(--border-subtle); font-size: 16px; font-weight: 600; }
-.providerName strong { display: block; font-size: 13px; font-weight: 500; }
-.providerName span { display: block; font-size: var(--font-size-caption); color: var(--text-muted); margin-top: 3px; }
-.providerStatus { font-size: 12px; color: var(--text-secondary); }
-.providerStatus small { display: block; font-size: var(--font-size-caption); margin-top: 2px; }
+  border: 1px solid var(--border-subtle); font-size: var(--font-size-card-title); line-height: var(--line-height-card-title); font-weight: 600; }
+.providerName strong { display: block; font-size: var(--font-size-label); line-height: var(--line-height-label); font-weight: 500; }
+.providerName span { display: block; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); margin-top: 4px; }
+.providerStatus { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
+.providerStatus small { display: block; font-size: var(--font-size-caption); line-height: var(--line-height-caption); margin-top: 2px; }
 
-.pending { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.pending li { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 0; font-size: 12px; }
+.pending { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.pending li { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 .pendingName { font-weight: 500; }
 
 .applyBar { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-  padding: 14px 18px; border: 1px solid var(--accent-border); border-radius: 10px; background: var(--bg-elevated); font-size: 13px; }
+  padding: 16px 16px; border: 1px solid var(--accent-border); border-radius: 10px; background: var(--bg-elevated); font-size: var(--font-size-label); line-height: var(--line-height-label); }
 .applyBar > span { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }
 
-.empty { display: flex; flex-direction: column; align-items: center; padding: 52px 24px; text-align: center; color: var(--text-muted);
+.empty { display: flex; flex-direction: column; align-items: center; padding: 48px 24px; text-align: center; color: var(--text-muted);
   border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); }
-.empty h3 { font-size: 16px; font-weight: 500; color: var(--text-primary); margin: 18px 0 6px; }
-.empty p { font-size: 13px; margin: 0 0 20px; max-width: 420px; line-height: 20px; }
+.empty h3 { font-size: var(--font-size-card-title); line-height: var(--line-height-card-title); font-weight: 500; color: var(--text-primary); margin: 16px 0 8px; }
+.empty p { font-size: var(--font-size-label); margin: 0 0 24px; max-width: 420px; line-height: var(--line-height-label); }
 @media (max-width: 1180px) { .grid { grid-template-columns: minmax(0, 1fr); } }

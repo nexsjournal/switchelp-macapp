@@ -4,18 +4,25 @@
  * 页脚因此在滚动区之外——滚动内容不会从它下面穿过，它不会盖住最后一个字段，
  * 也不会跟着内容滚走。
  */
-.dialog { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(720px, calc(100vw - 48px)); max-height: var(--dialog-max-height); display: flex; flex-direction: column; overflow: hidden; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-dialog); box-shadow: var(--shadow-popover); z-index: var(--z-dialog); }
-/* 宽度三档取自规范（480/640/800）。`normal` 的 720 是历史值，保留以免既有弹窗跳宽。 */
+.dialog { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(var(--dialog-width-normal), calc(100vw - 48px)); max-height: var(--dialog-max-height); display: flex; flex-direction: column; overflow: hidden; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-dialog); box-shadow: var(--shadow-popover); z-index: var(--z-dialog); }
+/*
+ * 宽度三档取自规范（docs/design/01-foundations.md：480 确认、640 普通、800 差异）。
+ *
+ * 默认落到「普通」640：以前这里写死 720，而 `.normal` 这个类**根本不存在**——
+ * 显式写 `width="normal"` 的弹窗取到 undefined 静默落到 720，不写 width 的（大多数确认框）
+ * 也落到 720。于是规范里的三档实际只有两档，而且没有一档是 640。
+ */
 .narrow { width: min(var(--dialog-width-confirm), calc(100vw - 48px)); }
+.normal { width: min(var(--dialog-width-normal), calc(100vw - 48px)); }
 .wide { width: min(var(--dialog-width-diff), calc(100vw - 48px)); }
 .header { display: flex; justify-content: space-between; align-items: flex-start; padding: 24px; gap: 24px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
 /* 标题块：图标与标题同一行，说明另起一行。`min-width: 0` 让长标题能省略而不是撑破头部。 */
-.heading { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
+.heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .heading > :global(.text-section-title) { margin: 0; }
 .leadingIcon { display: inline-flex; color: var(--text-secondary); flex-shrink: 0; }
 .heading .description { flex-basis: 100%; }
 .headerActions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.description { color: var(--text-secondary); margin: 8px 0 0; font-size: 13px; }
+.description { color: var(--text-secondary); margin: 8px 0 0; font-size: var(--font-size-label); line-height: var(--line-height-label); }
 .discard { padding: 24px; }
 /* `min-height: 0` 不能省：否则这个弹性项不肯收缩到内容高度以下，正文就永远不滚动。 */
 .body { overflow: auto; flex: 1; min-height: 0; }

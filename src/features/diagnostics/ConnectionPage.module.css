@@ -1,21 +1,21 @@
 .page { display: grid; gap: 24px; }
 .card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
-.header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
-.header > div { display: flex; align-items: center; gap: 10px; }
-.header h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: var(--line-height-card-title); }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.header > div { display: flex; align-items: center; gap: 8px; }
+.header h2 { margin: 0; font-size: var(--font-size-card-title); font-weight: 600; line-height: var(--line-height-card-title); }
 /* 标题块贴行顶：同一行里的按钮更高时，居中会把标题带下去（修正量见 tokens.css）。 */
 .card > .header:first-child { margin-top: calc(-1 * var(--card-title-optical-trim)); }
 .card > .header:first-child > div:first-child { align-self: flex-start; }
 .header > div > svg { color: var(--text-muted); }
-.pickers { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin-bottom: 20px; }
-.pickers label { display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+.pickers { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.pickers label { display: flex; flex-direction: column; gap: 8px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
 .pickers input[readonly] { background: var(--bg-input); color: var(--text-muted); }
 
-.run { display: flex; flex-direction: column; gap: 12px; padding-top: 18px; border-top: 1px solid var(--border-subtle); }
-.runActions { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: 12px; }
+.run { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; border-top: 1px solid var(--border-subtle); }
+.runActions { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 
 .result { display: grid; grid-template-columns: 1.25fr 1fr; gap: 24px; align-items: start; }
-.warn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--radius-pill); background: var(--status-warning-bg); color: var(--status-warning); font-size: var(--font-size-caption); }
+.warn { display: inline-flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: var(--radius-pill); background: var(--status-warning-bg); color: var(--status-warning); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 
 .timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .timeline li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px 0; border-top: 1px solid var(--border-subtle); }
@@ -23,15 +23,15 @@
 .marker { width: 10px; height: 10px; margin-top: 4px; border-radius: 50%; background: var(--border-control); }
 .timeline li.passed .marker { background: var(--status-success); box-shadow: 0 0 0 3px var(--status-success-bg); }
 .timeline li.failed .marker { background: var(--status-danger); }
-.timeline strong { font-size: 13px; font-weight: 500; }
-.state { margin-left: 8px; font-size: var(--font-size-caption); color: var(--text-muted); }
-.timeline p { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); }
+.timeline strong { font-size: var(--font-size-label); line-height: var(--line-height-label); font-weight: 500; }
+.state { margin-left: 8px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.timeline p { margin: 4px 0 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 
-.ok { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--status-success); font-size: 13px; }
+.ok { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--status-success); font-size: var(--font-size-label); line-height: var(--line-height-label); }
 .advice { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
-.advice > li { padding: 14px; border-radius: 8px; background: var(--status-warning-bg); }
-.advice > li > strong { display: block; font-size: 13px; color: var(--status-warning); margin-bottom: 6px; }
-.advice ul { margin: 0; padding-left: 18px; font-size: 12px; line-height: 20px; color: var(--text-secondary); }
-.summaryActions { margin-top: 18px; }
-.summary { width: 100%; margin-top: 12px; padding: 14px; border-radius: 8px; background: var(--bg-input); border: 1px solid var(--border-subtle);
-  color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; line-height: 20px; resize: vertical; }
+.advice > li { padding: 16px; border-radius: 8px; background: var(--status-warning-bg); }
+.advice > li > strong { display: block; font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--status-warning); margin-bottom: 8px; }
+.advice ul { margin: 0; padding-left: 16px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
+.summaryActions { margin-top: 16px; }
+.summary { width: 100%; margin-top: 12px; padding: 16px; border-radius: 8px; background: var(--bg-input); border: 1px solid var(--border-subtle);
+  color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-code); resize: vertical; }
