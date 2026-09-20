@@ -60,12 +60,12 @@
 | `design/04-pages-and-flows.md` P04 | 目录排序含「最近测试」；筛选按「可用 / 未测试」 | 实现是「按上下文限制排序」与「是否纳入目录」 |
 | `design/04-pages-and-flows.md` P05 | 输入能力的三条路径（native / converted / tool_read）与「查看原因」 | 只有 supported / unsupported / unknown 三档，`effectivePath` 恒为 blocked |
 | `design/04-pages-and-flows.md` P05 | 错误就地显示并汇总顶部 N 项 | 只有一个通用错误串 |
-| `design/04-pages-and-flows.md` P06 | 「Codex 已观测版本」、「重启 Codex」操作、主区显示默认模型与最近备份 | 未实现：观测版本恒显示「尚未观测」，没有重启入口，备份在设置页 |
+| `design/04-pages-and-flows.md` P06 | 「Codex 已观测版本」、主区显示默认模型与最近备份 | 观测版本仍恒显示「尚未观测」（本工具不读 Codex 的运行时状态），主区不显示默认模型与最近备份（备份在设置页）。**「重启 Codex」已实现**：应用后自动重启，结论来自进程观察（未退出 / 被强制结束 / 退出未起来分三种说法） |
 | `design/04-pages-and-flows.md` P07 | 探测阶段含 SSE、工具调用、工具续接、图片 / 推理 / 长度检查；可选协议与修订 | 只有 connect / credential / model / generate 四阶段，协议是只读展示 |
 | `design/04-pages-and-flows.md` P08 | 导出打开本地保存对话框；日志按供应商筛选 | 直接写入应用数据目录并返回路径；筛选维度只有级别 / 类别 / 时间 / 全文 |
 | `design/04-pages-and-flows.md` P09 | 「后台运行」分组与登录启动 | 未实现 |
 | `design/04-pages-and-flows.md` P09 | 本机网关分组里列监听地址与令牌指纹 | 有意不展示：这两个是内部实现细节（同类工具也不展示），设置页只保留状态、已发布目录、请求数与暂停开关 |
-| `design/03-components.md` | Switch / Tabs / Tooltip / Drawer / Toast / DiffViewer / ProgressSteps | 未实现：只有 AppLogo / Dialog / EmptyState / RowMenu，Badge 是全局类，提示走内联 notice |
+| `design/03-components.md` | Tabs / Tooltip / Drawer / Toast / DiffViewer / ProgressSteps | 未实现：现有 AppLogo / Dialog / EmptyState / RowMenu / Switch / CheckCell / FieldHelp，Badge 是全局类，提示走内联 notice |
 | `architecture/01-system-architecture.md` | Axum + Reqwest + rustls；Radix 覆盖 Dialog/Popover/Select；由 Rust 类型生成 TS 类型 | 实际是手写 TCP/HTTP1.1 + ureq；只有 Dialog 用 Radix，Select 是原生；契约类型手工同步 |
 | `architecture/01-system-architecture.md` | 端口被占用时给出改端口计划 | 固定 18765，占用即网关不启动 |
 | `architecture/02-configuration-lifecycle.md` | 外部配置改动监听 + debounce | 未实现（只能手动重新生成差异） |
