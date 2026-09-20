@@ -80,6 +80,60 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+  pipeline:
+    name: 应用管线（真实产物）
+    # 跑的是 g0_apply_pipeline 这个 example：它用真正的「计划 → CAS → 原子写入」链路
+    # 产出一份 config.toml 与模型目录，并断言事务停在 awaitingReload。
+    #
+    # 为什么是它而不是 scripts/g0 下那几个探针：那几个都要一个**真实的 Codex 可执行文件**
+    # （/Applications/ChatGPT.app/Contents/Resources/codex），runner 上没有，也不可安装。
+    # 那一半只能人工跑，见 docs/development/02-testing-and-release.md 的「两层端到端验证」。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      - name: 端到端跑一遍应用管线
+        run: cargo run -q -p switch-core --example g0_apply_pipeline -- "$RUNNER_TEMP/g0"
+      - name: 断言产出物是完整的
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/g0"
+          test -s "$root/codex-home/config.toml"
+          test -s "$root/bin/gptswitch-auth-helper"
+          grep -q 'model_catalog_json' "$root/codex-home/config.toml"
+          grep -q 'model_providers.gptswitch.auth' "$root/codex-home/config.toml"
+          # 目录文件必须与配置里指向的是同一份。
+          catalog=$(grep -o '/[^"]*models.json' "$root/codex-home/config.toml")
+          test -s "$catalog"
+          echo "管线产出物齐全：$(basename "$catalog")"
+
+  probes:
+    name: 探针脚本（语法 + 依赖自检）
+    # 这几个 .mjs 探针只在人工验收时跑，因此最容易在无人察觉的情况下烂掉。
+    # 这里至少保证它们语法正确、且引用的模块还在。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 语法
+        run: for f in scripts/g0/*.mjs; do node --check "$f"; done
+      - name: 依赖自检（引用的模块必须存在）
+        run: |
+          set -euo pipefail
+          for f in scripts/g0/*.mjs; do
+            while read -r mod; do
+              test -f "scripts/g0/$mod" || { echo "$f 引用了不存在的 scripts/g0/$mod"; exit 1; }
+            done < <(grep -oE "from '\./[a-zA-Z0-9_.-]+\.mjs'" "$f" | sed "s/from '\.\///;s/'//")
+          done
+          echo "探针脚本与其依赖都在"
+
   privacy:
     name: 发布前隐私扫描
     runs-on: ubuntu-latest
