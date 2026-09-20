@@ -152,11 +152,18 @@ export function OnboardingPage({ client, providers, models, credentialsByProvide
           </label>
         </li>)}</ul>
 
-        {conflicts.length > 0 && <div className={styles.conflict}>
+        {/* role="note"：这是一段附注式警告，给它一个稳定的语义边界（测试也据此限定范围）。 */}
+        {conflicts.length > 0 && <div className={styles.conflict} role="note">
           <AlertTriangle size={16} />
           <div>
             <strong>{t('onboarding.conflictTitle', { names: conflicts.join(t('common.itemSeparator')) })}</strong>
             <p>{t('onboarding.conflictBody')}</p>
+            {/* 说清「在哪」：提示如果只报一个工具名，用户不知道去哪儿删，也不知道删什么。 */}
+            <p className={styles.conflictWhere}>{t('onboarding.conflictWhere')}</p>
+            <ul className={styles.conflictFiles}>
+              {instances.filter(item => item.conflictingManagers.length > 0)
+                .map(item => <li key={item.id}><code className="break-anywhere">{item.configFile}</code></li>)}
+            </ul>
           </div>
         </div>}
       </>}

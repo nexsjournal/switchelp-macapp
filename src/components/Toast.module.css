@@ -1,0 +1,19 @@
+/*
+ * Toast：右下角悬浮通知条，浮在弹窗之上。
+ *
+ * 规范要求「右下角、最多 3 条、普通 4s」；失败不自动消失，因为用户下一步要靠它决定怎么办。
+ * 位置固定在一个地方——弹窗和使用常规界面时都在同一处，不再随布局漂移。
+ */
+.host { position: fixed; right: 24px; bottom: 24px; z-index: var(--z-toast); display: grid; gap: 10px;
+  width: min(360px, calc(100vw - 48px)); pointer-events: none; }
+.toast { pointer-events: auto; display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover); font-size: var(--font-size-label); line-height: var(--line-height-label); }
+.toast > svg { flex-shrink: 0; margin-top: 2px; }
+.text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.toast button { flex-shrink: 0; width: 24px; height: 24px; }
+
+/* 状态色只染图标与文字，底色用极淡的同色系：它是通知，不是警告牌。 */
+.success { color: var(--status-success); border-color: var(--status-success-bg); background: var(--status-success-bg); }
+.danger { color: var(--status-danger); border-color: var(--status-danger-bg); background: var(--status-danger-bg); }
+.info { color: var(--status-info); border-color: var(--status-info-bg); background: var(--status-info-bg); }

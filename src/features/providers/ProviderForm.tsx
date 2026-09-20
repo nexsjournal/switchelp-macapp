@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
-import { Boxes, Check, Eye, EyeOff, Info, Pencil, PlugZap, Plus, Trash2, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Boxes, Eye, EyeOff, Info, Pencil, PlugZap, Plus, Trash2 } from 'lucide-react';
 import type { Credential, Model, Provider } from '@/contracts/types';
-import { type DesktopClient, type DiscoveredModel, toCoreError } from '@/desktop/client';
+import { type DesktopClient, type DiscoveredModel, isCoreError, toCoreError } from '@/desktop/client';
 import { Dialog } from '@/components/Dialog';
 import { RowMenu } from '@/components/RowMenu';
 import { Switch } from '@/components/Switch';
+import { showToast, dismissTone } from '@/components/Toast';
 import { ModelFormDialog } from '@/features/models/ModelFormDialog';
 import { compactTokens, discoveredModelPolicy, modelDraft } from '@/features/models/policy';
 import { DiscoverModelsDialog } from './DiscoverModelsDialog';
@@ -12,8 +13,8 @@ import styles from './ProviderForm.module.css';
 
 import { t } from '@/i18n';
 
-/** 底部的结果提示条：一条连接结论，成功会自己收起，失败留着让人能看完。 */
-type Banner = { tone: 'success' | 'danger'; text: string };
+/** 一次「可以拿去请求上游」的准备结果。 */
+type Ready = { providerId: string; credentialId: string | null };
 
 /** 模型列表里的一次确认：删除模型先移出目录，那一步不可撤销要说清楚。 */
 type ModelConfirm = { model: Model };
@@ -26,27 +27,31 @@ function isLoopback(endpoint: string): boolean {
 }
 
 /**
- * 供应商的唯一条目：录入、Key、模型、连接检查都在这里。
+ * 供应商的唯一条目：录入、Key、模型、测试连接都在这里。
  *
- * 版面照参考界面收成一条直线：**地址 → API 格式 → API Key → 模型列表**。
- * 上一版把「认证方式 / 协议说明 / 备注 / 凭证池 / 连接检查」全铺在一屏里，
- * 于是接入一个供应商要在两组概念之间来回看。这里的原则是：
+ * 版面照参考界面收成一条直线：**名称 → 地址 → API 格式 → API Key → 模型列表**。
+ * 名称是普通表单字段（以前把它塞进弹窗标题里，没人看得出那是个能点的输入框）。
+ * 多出来的东西（备注、无认证、启用/停用、删除）都收进「更多」菜单。
  *
- * - 高频三件套（地址、格式、Key）永远在首屏，Key 就是**当前**那一个；
- * - 多出来的东西（备注、无认证）收进标题右侧的「更多」，不占版面；
- * - 模型的加入有两条路：从上游一次拿回来（勾选确认），或者手工填一个；
- *   两条路都在模型列表这一段的表头，结果都落在同一张表里；
- * - 供应商没保存时点「获取可用模型」会先把它存下来：地址和 Key 是这次请求的
- *   前提，让人先点一次「保存」再点「获取」纯属白走一步。
+ * 两处容易出错的地方，这里都写成了不变量：
+ *
+ * - **版本号必须取最新的那一份**。核心按版本号拒绝覆盖别人的修改，而「把新 Key 设为当前 Key」
+ *   这类动作本身就会把供应商的版本推高（保存供应商 v1 → 选当前 Key → v2）。如果还攥着创建时
+ *   拿到的 v1 去写，就会被判成冲突，界面上一句「保存失败」什么也说明不了。所以这里从宿主给的
+ *   活列表里取记录，并在真的撞上冲突时重读一次再写。
+ * - **一次动作只推一条提示**，位置由全局 Toast 宿主决定（右下角悬浮），不再在弹窗底部摆横幅。
  */
-export function ProviderForm({ client, provider, models, onSaved, onKeysChanged, onModelsChanged, onClose }: {
+export function ProviderForm({ client, provider, providers, models, onSaved, onKeysChanged, onChanged, onClose }: {
   client: DesktopClient;
   provider?: Provider;
+  /** 宿主持有的活列表：版本号以此为准，弹窗里的快照会过期。 */
+  providers: Provider[];
   /** 全部模型；这里只展示当前供应商的，过滤在组件内做。 */
   models: Model[];
   onSaved: (saved: Provider) => Promise<void> | void;
   onKeysChanged: () => void;
-  onModelsChanged: () => Promise<void> | void;
+  /** 供应商本身发生变化（新建、删除）后让宿主重读列表。 */
+  onChanged: () => Promise<void> | void;
   onClose: () => void;
 }) {
   const [name, setName] = useState(provider?.name ?? '');
@@ -62,20 +67,21 @@ export function ProviderForm({ client, provider, models, onSaved, onKeysChanged,
   const [keys, setKeys] = useState<Credential[]>([]);
   const [activeId, setActiveId] = useState<string | null>(provider?.activeCredentialId ?? null);
 
-  /** 本次弹窗里刚建好的供应商：非空就说明已经能向上游取模型、能往里存模型了。 */
+  /** 本次弹窗里刚建好的供应商：兜底用，一旦宿主列表里有它就让位给更活的那份。 */
   const [created, setCreated] = useState<Provider | null>(null);
-  const target = created ?? provider;
+  const savedId = created?.id ?? provider?.id;
+  const target = providers.find(item => item.id === savedId) ?? created ?? provider;
   const targetId = target?.id;
 
   const [discovered, setDiscovered] = useState<DiscoveredModel[] | null>(null);
   const [modelDialog, setModelDialog] = useState<{ model?: Model } | null>(null);
-  const [confirm, setConfirm] = useState<ModelConfirm | null>(null);
+  const [modelConfirm, setModelConfirm] = useState<ModelConfirm | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [testing, setTesting] = useState('');
-  const [banner, setBanner] = useState<Banner | null>(null);
 
   const [busy, setBusy] = useState('');
   const [dirty, setDirty] = useState(false);
-  const [error, setError] = useState('');
+  const nameInput = useRef<HTMLInputElement>(null);
 
   const activeKey = keys.find(credential => credential.id === activeId) ?? null;
   const providerModels = models
@@ -90,15 +96,38 @@ export function ProviderForm({ client, provider, models, onSaved, onKeysChanged,
     return () => { current = false; };
   }, [client, targetId]);
 
-  // 成功的结论自己收起（规范：普通反馈 4~6 秒）；失败留着，因为下一步要看它决定怎么办。
-  useEffect(() => {
-    if (banner?.tone !== 'success') return;
-    const timer = window.setTimeout(() => setBanner(null), 6000);
-    return () => window.clearTimeout(timer);
-  }, [banner]);
-
   function fail(thrown: unknown, fallback: string) {
-    setError(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || fallback);
+    showToast(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || fallback, 'danger');
+  }
+
+  /**
+   * 写一次供应商（必要时连带写 Key）。
+   *
+   * `version` 必须是当前最新版本，由调用方给出——冲突重试正是靠它。
+   */
+  async function write(version: number, values: { name: string; endpoint: string; typed: string }): Promise<Ready> {
+    const saved = await client.saveProvider({
+      id: target?.id, name: values.name, endpoint: values.endpoint,
+      protocol, authKind, enabled, notes: notes.trim() || null, presetId: target?.presetId,
+    }, version);
+
+    let credentialId = activeId;
+    if (authKind === 'api_key' && values.typed) {
+      if (activeId) {
+        credentialId = (await client.replaceCredential(activeId, values.typed, activeKey?.version ?? 1)).id;
+      } else {
+        const added = await client.addCredential(saved.id, t('key.defaultLabel'), values.typed);
+        await client.selectCredential(saved.id, added.id);
+        credentialId = added.id;
+      }
+      setSecret('');
+    }
+    setCreated(saved);
+    setActiveId(credentialId);
+    await onSaved(saved);
+    onKeysChanged();
+    setKeys(await client.listCredentials(saved.id).catch(() => keys));
+    return { providerId: saved.id, credentialId };
   }
 
   /**
@@ -108,44 +137,43 @@ export function ProviderForm({ client, provider, models, onSaved, onKeysChanged,
    * 还没有时输入新值＝新增并设为当前。空输入不改动已有 Key——
    * 界面上显示的是掩码，把掩码当原值提交是绝对不可以的。
    */
-  async function persist(): Promise<{ providerId: string; credentialId: string | null } | null> {
-    const address = endpoint.trim();
-    if (!address) { setError(t('providers.endpointRequired')); return null; }
-    const typed = secret.trim();
-    if (authKind === 'api_key' && !activeId && !typed) { setError(t('providers.keySecretRequired')); return null; }
-    setBusy('save'); setError('');
+  async function persist(): Promise<Ready | null> {
+    const values = { name: name.trim(), endpoint: endpoint.trim(), typed: secret.trim() };
+    if (!values.name) {
+      showToast(t('providers.nameRequired'), 'danger');
+      nameInput.current?.focus();
+      return null;
+    }
+    if (!values.endpoint) { showToast(t('providers.endpointRequired'), 'danger'); return null; }
+    if (authKind === 'api_key' && !activeId && !values.typed) {
+      showToast(t('providers.keySecretRequired'), 'danger');
+      return null;
+    }
+    setBusy('save');
+    // 上一次失败的原因已经不再适用（人改了输入又点了一次），别让它继续挂在屏幕上。
+    dismissTone('danger');
     try {
-      const saved = await client.saveProvider({
-        id: target?.id, name: name.trim() || t('action.addProvider'), endpoint: address,
-        protocol, authKind, enabled, notes: notes.trim() || null, presetId: target?.presetId,
-      }, target?.version ?? 0);
-
-      let credentialId = activeId;
-      if (authKind === 'api_key' && typed) {
-        if (activeId) {
-          credentialId = (await client.replaceCredential(activeId, typed, activeKey?.version ?? 1)).id;
-        } else {
-          const added = await client.addCredential(saved.id, t('key.defaultLabel'), typed);
-          await client.selectCredential(saved.id, added.id);
-          credentialId = added.id;
-        }
-        setSecret('');
+      return await write(target?.version ?? 0, values);
+    } catch (thrown) {
+      // 版本冲突＝这个供应商在我们手上之后又被写过（最典型的是「设为当前 Key」那一步）。
+      // 重读最新版本再写一次，比让用户自己去「刷新后重试」有用得多。
+      if (isCoreError(thrown) && thrown.code === 'CONFLICT') {
+        try {
+          const fresh = (await client.listProviders()).items.find(item => item.id === savedId);
+          if (fresh) {
+            setCreated(fresh);
+            return await write(fresh.version, values);
+          }
+        } catch { /* 重读或重写失败：往下走，把原始冲突照实说出去 */ }
       }
-      setCreated(saved);
-      setActiveId(credentialId);
-      setDirty(false);
-      await onSaved(saved);
-      onKeysChanged();
-      setKeys(await client.listCredentials(saved.id).catch(() => keys));
-      return { providerId: saved.id, credentialId };
-    } catch (thrown) { fail(thrown, t('providers.saveFailed')); return null; }
-    finally { setBusy(''); }
+      fail(thrown, t('providers.saveFailed'));
+      return null;
+    } finally { setBusy(''); }
   }
 
   /** 「保存」按钮：只落库，不动模型；模型相关的动作各走各的（见下面几个）。 */
   async function save() {
-    const ready = await persist();
-    if (ready) setBanner({ tone: 'success', text: t('providers.saved') });
+    if (await persist()) showToast(t('providers.saved'));
   }
 
   /**
@@ -154,21 +182,20 @@ export function ProviderForm({ client, provider, models, onSaved, onKeysChanged,
    * 已经保存过、这次也没改任何字段时**不写库**：地址没变就没必要再写一遍，
    * 白写一次还会撞上版本冲突。改了字段或还没保存过时才走 `persist`。
    */
-  async function ensureReady(): Promise<{ providerId: string; credentialId: string | null } | null> {
+  async function ensureReady(): Promise<Ready | null> {
     if (target && !dirty) return { providerId: target.id, credentialId: activeId };
     return persist();
   }
 
   /** 获取可用模型：需要地址与当前 Key，所以先确保它已经落库。 */
   async function discover() {
-    setBanner(null);
     const ready = await ensureReady();
     if (!ready) return;
-    if (!ready.credentialId) { setError(t('providers.selectKeyFirstToFetch')); return; }
-    setBusy('discover'); setError('');
+    if (!ready.credentialId) { showToast(t('providers.selectKeyFirstToFetch'), 'danger'); return; }
+    setBusy('discover');
     try {
       const list = await client.discoverModels(ready.providerId, ready.credentialId);
-      if (!list.length) { setBanner({ tone: 'danger', text: t('providers.noUpstreamModels') }); return; }
+      if (!list.length) { showToast(t('providers.noUpstreamModels'), 'danger'); return; }
       setDiscovered(list);
     } catch (thrown) { fail(thrown, t('providers.discoverFailed')); }
     finally { setBusy(''); }
@@ -185,8 +212,18 @@ export function ProviderForm({ client, provider, models, onSaved, onKeysChanged,
       }, 0);
     }
     setDiscovered(null);
-    await onModelsChanged();
-    setBanner({ tone: 'success', text: t('providers.discoverAdded', { count: selected.length }) });
+    await onChanged();
+    showToast(t('providers.discoverAdded', { count: selected.length }));
+  }
+
+  /** 当前 Key 换一个：秘密值不变，只改「新请求用哪一个」。 */
+  async function switchKey(credentialId: string) {
+    if (!targetId) return;
+    try {
+      await client.selectCredential(targetId, credentialId);
+      setActiveId(credentialId);
+      onKeysChanged();
+    } catch (thrown) { fail(thrown, t('providers.switchKeyFailed')); }
   }
 
   /** 手工加模型：落到同一个模型表单，保存后回到这张表里。 */
@@ -198,52 +235,54 @@ export function ProviderForm({ client, provider, models, onSaved, onKeysChanged,
 
   /** 测试连接：只读探测（读模型列表，不发真实生成），不产生费用。 */
   async function testModel(model: Model) {
-    if (!target || !activeId) { setBanner({ tone: 'danger', text: t('providers.selectKeyFirst') }); return; }
-    setTesting(model.id); setBanner(null); setError('');
+    if (!target || !activeId) { showToast(t('providers.selectKeyFirst'), 'danger'); return; }
+    const label = `${target.name} / ${model.displayName}`;
+    setTesting(model.id);
     try {
       const report = await client.startProbe({ providerId: target.id, modelId: model.id, credentialId: activeId }, { includeGenerate: false });
       const failed = report.stages.find(stage => stage.status === 'failed');
-      setBanner(failed
-        ? { tone: 'danger', text: t('providers.testFailed', { label: `${target.name} / ${model.displayName}`, reason: t(failed.messageKey) }) }
-        : { tone: 'success', text: t('providers.testPassed', { label: `${target.name} / ${model.displayName}` }) });
+      if (failed) showToast(t('providers.testFailed', { label, reason: t(failed.messageKey) }), 'danger');
+      else showToast(t('providers.testPassed', { label }));
     } catch (thrown) {
-      setBanner({ tone: 'danger', text: t('providers.testFailed', { label: `${target.name} / ${model.displayName}`, reason: toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('common.failed') }) });
+      showToast(t('providers.testFailed', { label, reason: toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('common.failed') }), 'danger');
     } finally { setTesting(''); }
   }
 
   /** 纳入 / 移出 Codex 目录。它是这个模型会不会出现在 Codex 菜单里的开关。 */
   async function toggleCatalog(model: Model, next: boolean) {
-    setError('');
     try {
       await client.saveModel(modelDraft(model, { inCatalog: next }), model.version);
-      await onModelsChanged();
-      setBanner({ tone: 'success', text: t(next ? 'providers.movedIn' : 'providers.movedOut', { name: model.displayName }) });
+      await onChanged();
+      showToast(t(next ? 'providers.movedIn' : 'providers.movedOut', { name: model.displayName }));
     } catch (thrown) { fail(thrown, t('common.failed')); }
   }
 
   /** 删除模型。已纳入目录的必须先移出，所以这里连着做两步，并先把后果说清楚。 */
   async function deleteModel(model: Model) {
-    setBusy('delete'); setError('');
+    setBusy('delete');
     try {
       let current = model;
       if (current.inCatalog) current = await client.saveModel(modelDraft(current, { inCatalog: false }), current.version);
       await client.deleteModel(current.id, current.version);
-      setConfirm(null);
-      await onModelsChanged();
-      setBanner({ tone: 'success', text: t('models.deleted') });
+      setModelConfirm(null);
+      await onChanged();
+      showToast(t('models.deleted'));
     } catch (thrown) { fail(thrown, t('common.failed')); }
     finally { setBusy(''); }
   }
 
-  /** 当前 Key 换一个：秘密值不变，只改「新请求用哪一个」。 */
-  async function switchKey(credentialId: string) {
+  /** 删除供应商：Key 与模型一起删除并撤销安全条目，所以先确认。 */
+  async function deleteProvider() {
     if (!targetId) return;
-    setError('');
+    setBusy('delete-provider');
     try {
-      await client.selectCredential(targetId, credentialId);
-      setActiveId(credentialId);
-      onKeysChanged();
-    } catch (thrown) { fail(thrown, t('providers.switchKeyFailed')); }
+      await client.deleteProvider(targetId);
+      setDeleting(false);
+      await onChanged();
+      showToast(t('providers.deleted'));
+      onClose();
+    } catch (thrown) { fail(thrown, t('providers.deleteFailed')); }
+    finally { setBusy(''); }
   }
 
   const menuItems = [
@@ -254,30 +293,19 @@ export function ProviderForm({ client, provider, models, onSaved, onKeysChanged,
       disabled: !isLoopback(endpoint),
       onSelect: () => { setAuthKind(current => current === 'api_key' ? 'none' : 'api_key'); setDirty(true); },
     },
+    {
+      // 停用与否以前是标题旁的一个开关：它跟「改名、备注」一样是供应商的属性，
+      // 摆在标题栏会被当成「这个弹窗的开关」。收进菜单，行上的状态仍然照实显示。
+      key: 'enabled', label: enabled ? t('providers.disableProvider') : t('providers.enableProvider'),
+      onSelect: () => { setEnabled(current => !current); setDirty(true); },
+    },
+    ...(target ? [{ key: 'delete', label: t('providers.deleteProvider'), danger: true, onSelect: () => setDeleting(true) }] : []),
   ];
 
   return <>
-    <Dialog
-      leadingIcon={<Boxes size={20} />}
-      title={<>
-        {/* 标题里必须有文字：名称输入框的 value 不算文本内容，少了这一句弹窗就没有名字。
-            这段文字与输入框的值会一起被念出来（「供应商配置 示例供应商 A」），
-            所以它写成一段不跟名称重复的固定说明。 */}
-        <span className="visually-hidden">{t('providers.dialogLabel')}</span>
-        <input className={styles.titleInput} value={name} maxLength={64} aria-label={t('providers.name')}
-          placeholder={t('action.addProvider')} spellCheck={false}
-          onChange={event => { setName(event.target.value); setDirty(true); }} />
-      </>}
-      headerActions={<>
-        <Switch checked={enabled} label={t('providers.enable')} onChange={next => { setEnabled(next); setDirty(true); }} />
-        <RowMenu label={t('providers.moreActions')} items={menuItems} />
-      </>}
+    <Dialog title={target?.name || t('action.addProvider')} leadingIcon={<Boxes size={20} />}
+      headerActions={<RowMenu label={t('providers.moreActions')} items={menuItems} />}
       dirty={dirty} busy={working} onClose={onClose}
-      banner={banner && <div className={banner.tone === 'success' ? `${styles.banner} ${styles.bannerSuccess}` : `${styles.banner} ${styles.bannerDanger}`} role="status">
-        {banner.tone === 'success' ? <Check size={16} aria-hidden="true" /> : <Info size={16} aria-hidden="true" />}
-        <span>{banner.text}</span>
-        <button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setBanner(null)}><X size={16} /></button>
-      </div>}
       footer={<footer className={styles.footer}>
         <span>{t('providers.keyStoredHint')}</span>
         <div className="actions">
@@ -287,6 +315,12 @@ export function ProviderForm({ client, provider, models, onSaved, onKeysChanged,
       </footer>}>
 
       <div className={styles.form}>
+        <label>{t('providers.name')}
+          <input ref={nameInput} value={name} required maxLength={64} aria-label={t('providers.name')}
+            placeholder={t('providers.namePlaceholder')} autoFocus={!target} spellCheck={false}
+            onChange={event => { setName(event.target.value); setDirty(true); }} /></label>
+        <p className="field-hint">{t('providers.nameHint')}</p>
+
         <label>{t('providers.baseUrl')}
           <input type="url" required value={endpoint} spellCheck={false} placeholder="https://api.example.com/v1"
             onChange={event => { setEndpoint(event.target.value); setDirty(true); }} /></label>
@@ -352,15 +386,13 @@ export function ProviderForm({ client, provider, models, onSaved, onKeysChanged,
                   <button type="button" className="icon-button" aria-label={t('models.editAria', { name: model.displayName })}
                     title={t('common.edit')} onClick={() => setModelDialog({ model })}><Pencil size={16} /></button>
                   <button type="button" className="icon-button danger" aria-label={t('providers.deleteModelAria', { name: model.displayName })}
-                    title={t('models.deleteModel')} onClick={() => setConfirm({ model })}><Trash2 size={16} /></button>
+                    title={t('models.deleteModel')} onClick={() => setModelConfirm({ model })}><Trash2 size={16} /></button>
                   <Switch size="small" checked={model.inCatalog} label={t('providers.catalogSwitch', { name: model.displayName })}
                     onChange={next => void toggleCatalog(model, next)} />
                 </div>
               </li>;
             })}</ul>}
         </section>
-
-        {error && <div className="error-message" role="alert">{error}</div>}
       </div>
     </Dialog>
 
@@ -368,18 +400,32 @@ export function ProviderForm({ client, provider, models, onSaved, onKeysChanged,
       onAdd={addDiscovered} onClose={() => setDiscovered(null)} />}
 
     {target && modelDialog && <ModelFormDialog client={client} providerId={target.id} model={modelDialog.model}
-      onSaved={async () => { setModelDialog(null); await onModelsChanged(); setBanner({ tone: 'success', text: t('copy.draftSaved') }); }}
+      onSaved={async () => { setModelDialog(null); await onChanged(); showToast(t('copy.draftSaved')); }}
       onClose={() => setModelDialog(null)} />}
 
-    {confirm && <Dialog title={t('models.deleteModel')} busy={working}
-      description={t('providers.deleteModelBody', { name: confirm.model.displayName, upstream: confirm.model.upstreamId })}
-      onClose={() => setConfirm(null)}>
+    {modelConfirm && <Dialog title={t('models.deleteModel')} busy={working}
+      description={t('providers.deleteModelBody', { name: modelConfirm.model.displayName, upstream: modelConfirm.model.upstreamId })}
+      onClose={() => setModelConfirm(null)}>
       <div className="form-fields"><div className="form-footer">
         <span>{t('common.irreversible')}</span>
         <div className="actions">
-          <button type="button" onClick={() => setConfirm(null)} disabled={working}>{t('action.cancel')}</button>
+          <button type="button" onClick={() => setModelConfirm(null)} disabled={working}>{t('action.cancel')}</button>
           <button type="button" className="danger" autoFocus disabled={working}
-            onClick={() => void deleteModel(confirm.model)}>{t('models.deleteModel')}</button>
+            onClick={() => void deleteModel(modelConfirm.model)}>{t('models.deleteModel')}</button>
+        </div>
+      </div></div>
+    </Dialog>}
+
+    {deleting && target && <Dialog title={t('providers.deleteProvider')} busy={working}
+      description={t('providers.deleteProviderBody', {
+        name: target.name, keys: keys.length, models: providerModels.length,
+      })} onClose={() => setDeleting(false)}>
+      <div className="form-fields"><div className="form-footer">
+        <span>{t('common.irreversible')}</span>
+        <div className="actions">
+          <button type="button" onClick={() => setDeleting(false)} disabled={working}>{t('action.cancel')}</button>
+          <button type="button" className="danger" autoFocus disabled={working}
+            onClick={() => void deleteProvider()}>{t('providers.deleteProvider')}</button>
         </div>
       </div></div>
     </Dialog>}

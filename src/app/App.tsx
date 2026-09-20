@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, Boxes, Check, ChevronRight, LayoutDashboard, ListChecks, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, SlidersHorizontal, Settings as SettingsIcon } from 'lucide-react';
+import { Activity, Boxes, ChevronRight, LayoutDashboard, ListChecks, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, SlidersHorizontal, Settings as SettingsIcon } from 'lucide-react';
 import type { Credential, Model, Provider } from '@/contracts/types';
 import { type AppliedSummary, type DesktopClient, type GatewayReport, type PlatformReport, toCoreError } from '@/desktop/client';
 import { desktopClient } from '@/desktop/transport';
@@ -9,6 +9,7 @@ import { OnboardingPage } from '@/features/onboarding/OnboardingPage';
 import { OverviewPage } from '@/features/overview/OverviewPage';
 import { ModelsPage } from '@/features/models/ModelsPage';
 import { Dialog } from '@/components/Dialog';
+import { ToastHost, showToast } from '@/components/Toast';
 import { EmptyState } from '@/components/EmptyState';
 import { AppLogo } from '@/components/AppLogo';
 import { CodexConfigPage } from '@/features/codex/CodexConfigPage';
@@ -105,7 +106,6 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
   const [loaded, setLoaded] = useState(false);
   const [keyVersion, setKeyVersion] = useState(0);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [providerEditor, setProviderEditor] = useState<Provider | 'new' | null>(null);
   /**
    * 模型编辑器全 App 只有一份状态：模型目录页、供应商卡片、接入向导都从这里打开。
@@ -162,15 +162,16 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
       setModelEditor(null);
       setEditorDirty(false);
     }
-    setPage(next); setQuery(''); setNotice('');
+    setPage(next); setQuery('');
   }
   /** Key 变了：供应商行的状态与详情里的当前 Key 都要跟着变。 */
   function keysChanged() { setKeyVersion(version => version + 1); void refresh(); }
   /**
    * 供应商弹窗保存成功后只刷新数据，**不关弹窗**：它就地变成这家供应商的编辑态，
    * 用户接着加 Key、获取模型，不必保存完再去找回来。
+   * 提示由弹窗自己推（它知道这次保存是新键还是更新），这里不重复报一次。
    */
-  function providerSaved() { setNotice(t('copy.draftSaved')); keysChanged(); }
+  function providerSaved() { keysChanged(); }
   const pending = models.filter(m => m.inCatalog && m.hostState !== 'loaded');
   const search = query.trim().toLocaleLowerCase();
   const visibleProviders = providers.filter(p => `${p.name} ${p.endpoint}`.toLocaleLowerCase().includes(search));
@@ -203,12 +204,13 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
           model={modelEditor === 'new' ? undefined : modelEditor}
           onDirtyChange={setEditorDirty}
           onCancel={() => { setModelEditor(null); setEditorDirty(false); }}
-          onSaved={async () => { setModelEditor(null); setEditorDirty(false); setNotice(t('copy.draftSaved')); await refresh(); }} /> : <>
+          onSaved={async () => { setModelEditor(null); setEditorDirty(false); showToast(t('copy.draftSaved')); await refresh(); }} /> : <>
         {!showOnboarding && <header className={styles.pageHeader}><div><h1 className="text-page-title">{t(`nav.${page}`)}</h1><p>{({ overview: t('page.overviewHint'), providers: t('page.providersHint'), codexConfig: t('page.codexHint'), diagnostics: t('page.diagnosticsHint'), logs: t('page.logsHint'), settings: t('page.settingsHint') })[page]}</p></div>
           <div className="actions"><button className="icon-button" aria-label={t('common.reload')} disabled={loading} onClick={() => void refresh()}><RefreshCw size={17} className={loading ? styles.spin : ''} /></button>
             {page !== 'codexConfig' && page !== 'logs' && page !== 'diagnostics' && page !== 'settings' && <button className="primary" disabled={loading} onClick={() => setProviderEditor('new')}><Plus size={17} />{t('action.addProvider')}</button>}</div></header>}
+        {/* 页面状态（加载失败）留在页面里：它要一直看得见，直到状态本身改变。
+            动作结果（已保存、已应用…）走全局 Toast，弹窗与常规界面共用同一个位置。 */}
         {error && <div className="error-message" role="alert">{error}</div>}
-        {notice && <div className={styles.notice} role="status"><Check size={16} />{notice}</div>}
         {!loaded && !error ? <div className={styles.empty} role="status" aria-live="polite">{t('shell.loading')}</div> : <>
           {showOnboarding && <OnboardingPage client={client} providers={providers} models={models}
             credentialsByProvider={credentialsByProvider}
@@ -282,8 +284,8 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
       <footer className={styles.statusbar}><span><span className={`${styles.dot} ${gateway?.running ? styles.online : styles.offline}`} />{gatewayText(gateway)}</span><span>{t('shell.pendingModels', { count: pending.length })} <span className={styles.separator}>/</span>{t('shell.configOnDevice')}</span></footer>
     </div>
     {providerEditor && <ProviderForm client={client} provider={providerEditor === 'new' ? undefined : providerEditor}
-      models={models}
-      onSaved={providerSaved} onKeysChanged={keysChanged} onModelsChanged={refresh}
+      providers={providers} models={models}
+      onSaved={providerSaved} onKeysChanged={keysChanged} onChanged={refresh}
       onClose={() => setProviderEditor(null)} />}
     {pendingNav && <Dialog title={t('editor.discardTitle')} description={t('editor.discardBody')} dirty={false}
       onClose={() => setPendingNav(null)}>
@@ -296,11 +298,14 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
             setPendingNav(null);
             setModelEditor(null);
             setEditorDirty(false);
-            setPage(target); setQuery(''); setNotice('');
+            setPage(target); setQuery('');
           }}>{t('editor.leaveDiscard')}</button>
         </div>
       </div></div>
     </Dialog>}
+    {/* 唯一的提示宿主：不论从哪个页面、哪个弹窗推的提示，都出现在同一个位置。 */}
+    <ToastHost />
+
     {confirm && <Dialog title={confirm.title} description={confirm.body} onClose={() => setConfirm(null)} busy={confirmBusy}>
       <div className="form-fields">
         <div className="form-footer">
@@ -311,7 +316,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
               setConfirmBusy(true); setError('');
               try {
                 await confirm.run();
-                setNotice(t('common.done'));
+                showToast(t('common.done'));
                 setConfirm(null);
                 await refresh();
               } catch (e) { setError(toCoreError(e).safeDetails.join(t('common.listSeparator')) || t('common.failed')); }

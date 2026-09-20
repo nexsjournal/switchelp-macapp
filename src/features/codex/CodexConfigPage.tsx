@@ -4,6 +4,7 @@ import type { ApplyPlan, ApplyStage, CodexInstance, FieldChange, Model } from '@
 import { type AppliedSummary, type ApplyStatus, type DesktopClient, type InspectResult, toCoreError } from '@/desktop/client';
 
 import { Dialog } from '@/components/Dialog';
+import { showToast } from '@/components/Toast';
 import styles from './CodexConfigPage.module.css';
 
 import { t } from '@/i18n';
@@ -103,7 +104,6 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
   const [error, setError] = useState('');
   /** 核心给出的恢复动作；界面只呈现自己确实能执行的那些。 */
   const [recovery, setRecovery] = useState<string[]>([]);
-  const [notice, setNotice] = useState('');
   const [restartConfirm, setRestartConfirm] = useState(false);
 
   const fail = useCallback((thrown: unknown, fallback: string) => {
@@ -113,7 +113,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
   }, []);
 
   const detect = useCallback(async (explicitPath?: string) => {
-    setBusy('detect'); setError(''); setNotice('');
+    setBusy('detect'); setError('');
     try {
       const found = await client.detectInstances(explicitPath);
       setInstances(found);
@@ -130,7 +130,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
   const awaitingReload = stage === 'awaiting_reload';
 
   async function run(label: string, work: () => Promise<void>) {
-    setBusy(label); setError(''); setRecovery([]); setNotice('');
+    setBusy(label); setError(''); setRecovery([]);
     try { await work(); }
     catch (thrown) { fail(thrown, t('common.failed')); }
     finally { setBusy(''); }
@@ -139,7 +139,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
   const makePlan = (kind: 'apply' | 'restore') => run('plan', async () => {
     const plan = kind === 'apply' ? await client.planApply({ instanceId, draftRevision: '' }) : await client.planRestore(instanceId);
     setDraft({ kind, plan }); setStatus(null);
-    setNotice(kind === 'apply' ? t('codex.diffPreviewed') : t('codex.restorePreviewed'));
+    showToast(kind === 'apply' ? t('codex.diffPreviewed') : t('codex.restorePreviewed'), 'info');
   });
 
   /**
@@ -160,18 +160,28 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
     return t('codex.restartHostFailed');
   }
 
+  /**
+   * 这句话该用什么口气。
+   *
+   * 「重启成功」是成功，「没能重启 / 退出了没起来」是失败——**「被强制结束」也是成功但要说清代价**，
+   * 所以它跟着成功走（信息量在文案里，不靠颜色）。语气错了会让人往错的方向处理。
+   */
+  function restartTone(report: { quitConfirmed: boolean; launchedConfirmed: boolean } | null): 'success' | 'danger' {
+    return report && report.quitConfirmed && report.launchedConfirmed ? 'success' : 'danger';
+  }
+
   const commit = () => run('commit', async () => {
     if (!draft) return;
     const request = { planId: draft.plan.id, planHash: draft.plan.planHash, idempotencyKey: newIdempotencyKey() };
     const result = draft.kind === 'apply' ? await client.executeApply(request) : await client.executeRestore(request);
     const next = await client.applyStatus(result.operationId);
     setStatus(next);
-    if (draft.kind === 'restore') { setNotice(t('stage.restored')); setDraft(null); onApplied?.(); return; }
+    if (draft.kind === 'restore') { showToast(t('stage.restored')); setDraft(null); onApplied?.(); return; }
     onApplied?.();
     // 配置写完了，但 Codex 只在启动时读它：直接重启，省掉「再点一次重启」这一步。
     // 重启失败不影响已经提交的配置，所以这里只降级成提示。
     const report = await client.restartHost(instanceId).catch(() => null);
-    setNotice(restartNotice(report, true));
+    showToast(restartNotice(report, true), restartTone(report));
   });
 
   /**
@@ -181,13 +191,13 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
   const restartHost = () => run('restart', async () => {
     const report = await client.restartHost(instanceId);
     setRestartConfirm(false);
-    setNotice(restartNotice(report, false));
+    showToast(restartNotice(report, false), restartTone(report));
   });
 
   const confirmReload = (loaded: boolean) => run('confirm', async () => {
     if (!status) return;
     setStatus(await client.confirmReload(status.operationId, loaded));
-    setNotice(loaded ? t('copy.hostLoaded') : t('copy.hostUnobservable'));
+    showToast(loaded ? t('copy.hostLoaded') : t('copy.hostUnobservable'), loaded ? 'success' : 'info');
   });
 
   const loadInspect = () => run('inspect', async () => {
@@ -230,7 +240,6 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
         </div>
       </div>
     </div>}
-    {notice && <div role="status" className="error-message" style={{ color: 'var(--text-primary)', background: 'var(--bg-elevated)' }}>{notice}</div>}
 
     <section className={styles.card}>
       <div className={styles.header}>

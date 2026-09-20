@@ -19,6 +19,4 @@
 .discard { padding: 24px; }
 /* `min-height: 0` 不能省：否则这个弹性项不肯收缩到内容高度以下，正文就永远不滚动。 */
 .body { overflow: auto; flex: 1; min-height: 0; }
-/* 结论条钉在滚动区与底栏之间：它是这次动作的结果，不是内容的一部分。 */
-.banner { flex-shrink: 0; padding: 0 24px 16px; }
 .footer { flex-shrink: 0; }

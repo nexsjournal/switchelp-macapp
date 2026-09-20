@@ -170,11 +170,11 @@ const noop = () => {};
 const backToProviders = () => { window.location.href = '/visual.html?view=providers'; };
 const directViews: Record<string, () => ReactElement> = {
   // 供应商弹窗·编辑态：地址、格式、Key、模型列表
-  'provider-form': () => <ProviderForm client={client} provider={providers[0]} models={models}
-    onSaved={noop} onKeysChanged={noop} onModelsChanged={noop} onClose={backToProviders} />,
+  'provider-form': () => <ProviderForm client={client} provider={providers[0]} providers={providers} models={models}
+    onSaved={noop} onKeysChanged={noop} onChanged={noop} onClose={backToProviders} />,
   // 供应商弹窗·新建态
-  'provider-form-new': () => <ProviderForm client={client} models={models}
-    onSaved={noop} onKeysChanged={noop} onModelsChanged={noop} onClose={backToProviders} />,
+  'provider-form-new': () => <ProviderForm client={client} providers={providers} models={models}
+    onSaved={noop} onKeysChanged={noop} onChanged={noop} onClose={backToProviders} />,
   // 手工添加模型（高级配置折叠）
   'model-form': () => <ModelFormDialog client={client} providerId="p_a" onSaved={noop} onClose={backToProviders} />,
   // 编辑已有模型（高级配置折叠，长度已填）

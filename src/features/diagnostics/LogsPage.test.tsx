@@ -1,7 +1,8 @@
-import { render, screen, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LogsPage } from './LogsPage';
 import { testClient } from '../../../tests/helpers/client';
+import { renderWithToasts } from '../../../tests/helpers/render';
 
 const warningEvent = {
   // 相对当前时间：时间范围筛选依赖真实时钟，写死日期会随时钟流逝而失效。
@@ -32,7 +33,7 @@ function logsClient(overrides = {}) {
 }
 
 test('说明收集边界，并把事件渲染成可点开的行', async () => {
-  render(<LogsPage client={logsClient()} />);
+  renderWithToasts(<LogsPage client={logsClient()} />);
 
   expect(await screen.findByText('result.upstreamFailed')).toBeInTheDocument();
   expect(screen.getByText('gs/p_a/m_1')).toBeInTheDocument();
@@ -45,7 +46,7 @@ test('改动导出范围后预览作废，避免导出与预览过的清单不�
   const user = userEvent.setup();
   const previewDiagnostics = vi.fn().mockResolvedValue({ items: [], totalBytes: 0 });
   const exportDiagnostics = vi.fn().mockResolvedValue({ savedPath: '/tmp/diagnostics.json' });
-  render(<LogsPage client={testClient({ listDiagnostics: vi.fn().mockResolvedValue({ items: [warningEvent], nextCursor: null }),
+  renderWithToasts(<LogsPage client={testClient({ listDiagnostics: vi.fn().mockResolvedValue({ items: [warningEvent], nextCursor: null }),
     previewDiagnostics, exportDiagnostics })} />);
   await screen.findByText('result.upstreamFailed');
 
@@ -62,7 +63,7 @@ test('改动导出范围后预览作废，避免导出与预览过的清单不�
 test('级别过滤传给后端，类别与时间只影响展示', async () => {
   const user = userEvent.setup();
   const listDiagnostics = vi.fn().mockResolvedValue({ items: [olderApplyEvent, warningEvent], nextCursor: null });
-  render(<LogsPage client={testClient({ listDiagnostics })} />);
+  renderWithToasts(<LogsPage client={testClient({ listDiagnostics })} />);
   await screen.findByText('result.upstreamFailed');
 
   await user.selectOptions(screen.getByLabelText('日志级别'), 'error');
@@ -83,7 +84,7 @@ test('级别过滤传给后端，类别与时间只影响展示', async () => {
 
 test('事件详情展示安全元数据与关联事件', async () => {
   const user = userEvent.setup();
-  render(<LogsPage client={logsClient()} />);
+  renderWithToasts(<LogsPage client={logsClient()} />);
   await screen.findByText('result.upstreamFailed');
 
   await user.click(screen.getByRole('button', { name: '查看事件详情 result.upstreamFailed' }));
@@ -98,7 +99,7 @@ test('事件详情展示安全元数据与关联事件', async () => {
 test('清空日志要确认，并明确只影响本工具记录', async () => {
   const user = userEvent.setup();
   const clearDiagnostics = vi.fn().mockResolvedValue(2);
-  render(<LogsPage client={logsClient({ clearDiagnostics })} />);
+  renderWithToasts(<LogsPage client={logsClient({ clearDiagnostics })} />);
   await screen.findByText('result.upstreamFailed');
 
   await user.click(screen.getByRole('button', { name: /清空日志/ }));
@@ -114,7 +115,7 @@ test('清空日志要确认，并明确只影响本工具记录', async () => {
 test('导出前必须先预览，预览要列出被排除的敏感项', async () => {
   const user = userEvent.setup();
   const exportDiagnostics = vi.fn().mockResolvedValue({ savedPath: '/tmp/exports/diagnostics.json' });
-  render(<LogsPage client={logsClient({
+  renderWithToasts(<LogsPage client={logsClient({
     previewDiagnostics: vi.fn().mockResolvedValue({
       totalBytes: 2048,
       items: [
