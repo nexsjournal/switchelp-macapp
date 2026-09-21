@@ -524,6 +524,84 @@ fn mid_stream_error_frame_is_surfaced_instead_of_reported_as_completed() {
     assert!(!text.contains(SECRET), "错误详情不得泄漏上游 Key");
 }
 
+/// 上游把连接干净关掉（对端 FIN），却**没有任何**终止标记：既没发 `[DONE]`，
+/// 也没在 delta 里给过非 null 的 `finish_reason`。
+///
+/// 回归：读循环的 `Ok(0) => break` 不带失败标志，收尾既不进 `client_gone`
+/// 也不进 `upstream_failed`，于是照走 `translator.finish()` —— 半句话被
+/// 伪装成一次完整回复。
+#[test]
+fn truncated_chat_stream_without_terminal_marker_is_reported_as_error() {
+    const SSE_TRUNCATED: &str = concat!(
+        "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"前半句\"},\"finish_reason\":null}]}\n\n",
+    );
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(SSE_TRUNCATED),
+        Protocol::ChatCompletions,
+    );
+    let token = harness.token.expose().to_owned();
+
+    let (status, text) = harness.post("responses", Some(&token), &harness.request_body());
+
+    assert_eq!(status, 200, "响应头早已发出，只能用事件收尾");
+    assert!(
+        text.contains("event: error"),
+        "截断必须给出明确的终止事件：\n{text}"
+    );
+    assert!(
+        !text.contains("response.completed"),
+        "不得把截断伪装成完整回复：\n{text}"
+    );
+    assert!(
+        text.contains("upstreamStreamIncomplete"),
+        "错误要指明上游在给出完成标记前结束了连接：\n{text}"
+    );
+    assert!(
+        text.contains("前半句"),
+        "截断前已经收到的内容仍要交给宿主：\n{text}"
+    );
+    assert!(
+        harness
+            .gateway
+            .diagnostics()
+            .list(None)
+            .iter()
+            .any(|event| event.result_key == "result.upstreamStreamIncomplete"),
+        "截断必须留痕"
+    );
+}
+
+/// 上游只发 `finish_reason` 而不发 `[DONE]`：OpenAI 兼容协议里确实存在这种
+/// 实现。只认 `[DONE]` 会把它们误判成截断——用一个假警报换一个假成功不划算。
+#[test]
+fn chat_stream_with_finish_reason_but_no_done_still_completes() {
+    const SSE_FINISH_ONLY: &str = concat!(
+        "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"你好\"},\"finish_reason\":\"stop\"}]}\n\n",
+    );
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(SSE_FINISH_ONLY),
+        Protocol::ChatCompletions,
+    );
+    let token = harness.token.expose().to_owned();
+
+    let (status, text) = harness.post("responses", Some(&token), &harness.request_body());
+
+    assert_eq!(status, 200);
+    assert!(
+        text.contains("event: response.completed"),
+        "上游给过 finish_reason 就不算截断：\n{text}"
+    );
+    assert!(
+        text.contains("\"status\":\"completed\""),
+        "完成事件必须是 completed 状态：\n{text}"
+    );
+    assert!(!text.contains("event: error"), "不得误报截断：\n{text}");
+}
+
 #[test]
 fn responses_upstream_passes_through_and_hides_the_upstream_id() {
     let harness = Harness::start(
