@@ -241,11 +241,17 @@ impl PluginService {
     }
 
     /// 读一个来源的技能目录。目录与安装都钉在解析出的提交上。
+    ///
+    /// **只读 `SKILL.md` 的正文**：同目录的其它文件只列清单（路径 + 大小），正文留给
+    /// [`Self::preview`] / [`Self::install`] 按选中的技能补。这样一个仓库里有多少大文件
+    /// 都不影响浏览这一页——从前每个技能都会重下一遍整棵 git tree 并把同目录文件全读下来
+    /// （实测默认源 anthropics/skills：21 次 tree 请求 + 394 个文件 10.4 MB），
+    /// 页面停在「正在读取仓库」好几分钟。
     pub fn browse(&self, repo_spec: &str, now: i64) -> Result<RepoCatalog, CoreError> {
         let (repo, git_ref) = source::parse_repo_spec(repo_spec)?;
         let commit = self.fetcher.resolve_commit(&repo, git_ref.as_deref())?;
-        let paths = self.fetcher.list_skill_paths(&repo, &commit)?;
-        if paths.is_empty() {
+        let blobs = self.fetcher.list_blobs(&repo, &commit)?;
+        if source::skill_paths(&blobs).is_empty() {
             return Err(
                 CoreError::new(ErrorCode::NotFound, "error.pluginRepoHasNoSkills").with_detail(
                     format!(
@@ -255,21 +261,18 @@ impl PluginService {
                 ),
             );
         }
-        source::assemble(self.fetcher.as_ref(), &repo, &commit, &paths, now)
+        source::assemble(self.fetcher.as_ref(), &repo, &commit, &blobs, now)
     }
 
     /// 生成安装计划。**不写文件**，界面据此展示将写入什么、哪里会冲突。
     pub fn preview(&self, request: &InstallRequest) -> Result<InstallPreview, CoreError> {
-        let catalog = self.browse(
-            &match &request.git_ref {
-                Some(git_ref) => format!("{}@{git_ref}", request.repo),
-                None => request.repo.clone(),
-            },
-            0,
-        )?;
-        let selected: Vec<&RepoSkill> = catalog
+        let mut catalog = self.browse(&spec_of(request), 0)?;
+        // 先取出仓库与提交：下面要拿 `skills` 的可变借用，同时还得知道往哪儿读文件。
+        let repo = catalog.repo.clone();
+        let commit = catalog.commit.clone();
+        let selected: Vec<&mut RepoSkill> = catalog
             .skills
-            .iter()
+            .iter_mut()
             .filter(|skill| {
                 request.skill_dirs.is_empty() || request.skill_dirs.contains(&skill.dir_name)
             })
@@ -284,6 +287,8 @@ impl PluginService {
         let targets = self.resolve_targets(&request.targets)?;
         let mut skills = Vec::with_capacity(selected.len());
         for skill in selected {
+            // 目录阶段只列了清单，正文在这里按**选中的技能**补——装什么读什么。
+            source::hydrate(self.fetcher.as_ref(), &repo, &commit, skill)?;
             let mut planned = Vec::new();
             for (tool_id, display_name, root) in &targets {
                 let files = to_file_pairs(skill);
@@ -324,13 +329,19 @@ impl PluginService {
     /// 执行安装。逐目标独立，失败的不会连累已成功的。
     pub fn install(&self, request: &InstallRequest, now: i64) -> Result<InstallReport, CoreError> {
         let preview = self.preview(request)?;
-        let catalog = self.browse(
-            &match &request.git_ref {
-                Some(git_ref) => format!("{}@{git_ref}", request.repo),
-                None => request.repo.clone(),
-            },
-            now,
-        )?;
+        let mut catalog = self.browse(&spec_of(request), now)?;
+        let repo = catalog.repo.clone();
+        let commit = catalog.commit.clone();
+        // 写盘用的是文件正文，所以这里也要把选中技能的正文读回来（目录阶段只列了清单）。
+        for plan in &preview.skills {
+            if let Some(skill) = catalog
+                .skills
+                .iter_mut()
+                .find(|skill| skill.dir_name == plan.dir_name)
+            {
+                source::hydrate(self.fetcher.as_ref(), &repo, &commit, skill)?;
+            }
+        }
         let mut report = InstallReport {
             repo: preview.repo.clone(),
             commit: preview.commit.clone(),
@@ -568,6 +579,14 @@ fn next_available_dir(root: &std::path::Path, dir_name: &str) -> String {
         }
     }
     install::suffixed_dir_name(dir_name, &taken)
+}
+
+/// 安装请求对应的来源写法：带 ref 时拼成 `owner/repo@ref`。
+fn spec_of(request: &InstallRequest) -> String {
+    match &request.git_ref {
+        Some(git_ref) => format!("{}@{git_ref}", request.repo),
+        None => request.repo.clone(),
+    }
 }
 
 fn to_file_pairs(skill: &RepoSkill) -> Vec<(String, Vec<u8>)> {
