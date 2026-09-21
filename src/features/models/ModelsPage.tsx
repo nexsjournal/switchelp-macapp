@@ -6,7 +6,8 @@ import { Dialog } from '@/components/Dialog';
 import { EmptyState } from '@/components/EmptyState';
 import { showToast } from '@/components/Toast';
 import { RowMenu } from '@/components/RowMenu';
-import { type ConnectionState, catalogVariant, connectionKeys, connectionVariant, modelDraft } from './policy';
+import { catalogVariant, connectionKeys, connectionVariant, modelDraft } from './policy';
+import { rememberConnection, useConnections } from './connectionStore';
 import styles from './ModelsPage.module.css';
 
 import { currentLocale, t } from '@/i18n';
@@ -54,13 +55,8 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
   const [busy, setBusy] = useState('');
   const [confirm, setConfirm] = useState<{ title: string; body: string; label: string; danger?: boolean; run: () => Promise<void> } | null>(null);
   const [probe, setProbe] = useState<{ model: Model; stages: { stageKey: string; status: string; messageKey: string; elapsedMs?: number | null }[] } | null>(null);
-  /**
-   * 每个模型最近一次「测试」的结果，用来在列表里给一个连接状态点。
-   *
-   * 只活在本次会话里：探测结果是**当时**的事实（Key 可能刚换、上游可能刚挂），
-   * 持久化下来只会让用户对着一个过期的绿点下判断。没测过就是中性。
-   */
-  const [connection, setConnection] = useState<Record<string, ConnectionState>>({});
+  /** 每个模型最近一次「测试」的结果。放在会话级的表里，切页面不丢（见 connectionStore）。 */
+  const connection = useConnections();
 
   // 换供应商就丢掉上一家的勾选：批量条会照旧报「已选 N 个」，但那些模型已经不在屏幕上，
   // 「批量删除」于是可能删掉用户看不见的行。
@@ -159,7 +155,7 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
     );
     // 有失败阶段就是失败；全通过或跳过（上游没有 /models 之类）算通过。
     const failed = report.stages.some(stage => stage.status === 'failed');
-    setConnection(current => ({ ...current, [model.id]: failed ? 'failed' : 'passed' }));
+    rememberConnection(model.id, failed ? 'failed' : 'passed');
     setProbe({ model, stages: report.stages });
   });
 

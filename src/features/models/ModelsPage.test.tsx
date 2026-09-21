@@ -1,8 +1,9 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ModelsPage } from './ModelsPage';
+import { resetConnections } from './connectionStore';
 import { ToastHost } from '@/components/Toast';
 import type { Model, Provider } from '@/contracts/types';
 import { testClient } from '../../../tests/helpers/client';
@@ -44,11 +45,14 @@ function renderPage(overrides: Partial<Parameters<typeof testClient>[0]> = {}, m
   const client = testClient(overrides);
   const onChanged = vi.fn();
   const onEditModel = vi.fn();
-  renderWithToasts(<ModelsPage client={client} providers={[providerA, providerB]} models={models} onChanged={onChanged} onEditModel={onEditModel} />);
-  return { client, onChanged, onEditModel };
+  const view = renderWithToasts(<ModelsPage client={client} providers={[providerA, providerB]} models={models} onChanged={onChanged} onEditModel={onEditModel} />);
+  return { client, onChanged, onEditModel, unmount: view.unmount };
 }
 
 describe('模型列表', () => {
+  // 连接状态现在是会话级的模块表（切页面不丢），用例之间必须清空。
+  beforeEach(() => { resetConnections(); });
+
   it('行里只报连接状态：没测过是中性，测过才给颜色', () => {
     // 用户反馈：逐行显示「已加载」既啰嗦又容易被读成「每个模型各自的状态」——
     // 加载状态是**供应商那一层**的事实（见 App 的卡片），行里该显示的是「这个模型连得上吗」。
@@ -97,6 +101,27 @@ describe('模型列表', () => {
     // 只更新被测试的那一行。
     expect(await screen.findByText('正常')).toBeInTheDocument();
     expect(screen.getAllByText('未测试')).toHaveLength(1);
+  });
+
+  it('测过之后切页面再回来，那一行还是「正常」而不是退回「未测试」', async () => {
+    // 用户反馈：测试完切一下页面回来，连接状态又变成「未测试」。原因是结果存在页面组件的
+    // state 里，卸载就没了；现在放在会话级的表里（见 connectionStore）。
+    const user = userEvent.setup();
+    const overrides = {
+      listCredentials: vi.fn().mockResolvedValue([{ id: 'k_1', providerId: 'p_a', label: '日常', status: 'verified', maskedSuffix: '0001', version: 1, createdAt: '2026-09-18T00:00:00Z' }]),
+      startProbe: vi.fn().mockResolvedValue({
+        stages: [{ stageKey: 'connect', status: 'passed', messageKey: 'probe.connectPassed', elapsedMs: 12 }],
+      }),
+    };
+    const first = renderPage(overrides);
+    await user.click(screen.getByRole('button', { name: '测试 目录中的模型' }));
+    expect(await screen.findByText('正常')).toBeInTheDocument();
+
+    // 切页面 = 卸载这一页；回来时重新挂载。
+    first.unmount();
+    renderPage(overrides);
+    expect(await screen.findByText('正常')).toBeInTheDocument();
+    expect(screen.queryAllByText('未测试')).toHaveLength(1);
   });
 
   it('测试失败时那一行是危险色，不是沉默的绿', async () => {

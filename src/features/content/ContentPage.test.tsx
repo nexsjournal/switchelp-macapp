@@ -46,6 +46,18 @@ it('状态行永远说清「上次更新」和「下次更新」', async () => {
   expect(screen.getByRole('button', { name: '立即刷新' })).toBeInTheDocument();
 });
 
+it('未来的时间说「后」，过去的时间说「前」', async () => {
+  // 用户截图里那句是「下次自动更新 5 分钟前」：相对时间函数把入参夹成非负、又一律按负数
+  // 格式化，于是未来的时间被念成过去的。夹具里 now 是固定值，两半各断言一次。
+  const client = baseClient({ contentStatus: vi.fn().mockResolvedValue(status({ lastOkAt: NOW - 600, nextFetchAt: NOW + 1800 })) });
+  renderWithToasts(<ContentPage client={client} />);
+
+  const line = await screen.findByText(/上次更新/);
+  expect(line.textContent).toMatch(/上次更新 10 ?分钟前/);
+  expect(line.textContent).toMatch(/下次自动更新 30 ?分钟后/);
+  expect(line.textContent).not.toMatch(/下次自动更新 30 ?分钟前/);
+});
+
 it('从没成功过时不写成「已更新」', async () => {
   const client = baseClient({ contentStatus: vi.fn().mockResolvedValue(status({ lastOkAt: null, totalItems: 0 })) });
   renderWithToasts(<ContentPage client={client} />);
