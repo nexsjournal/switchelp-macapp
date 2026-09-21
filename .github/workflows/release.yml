@@ -65,7 +65,9 @@ jobs:
           pnpm typecheck
           pnpm test
       - name: 核心测试
-        run: cargo test -p switch-core
+        run: |
+          cargo test -p switch-core
+          cargo test -p gptswitch-bridge
       - name: 格式与 clippy
         # 这个 job 在 ubuntu 上跑：`--workspace` 会编译 src-tauri，而 Tauri 在 Linux 上
         # 需要 webkit2gtk/gtk 开发库。工作区级 clippy 放在 ci.yml 的 macOS job 里，

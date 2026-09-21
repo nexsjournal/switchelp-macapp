@@ -329,8 +329,8 @@ fn discovery_updates_the_discovered_layer_without_overwriting_user_values() {
     );
     assert_eq!(
         after.display_name_layer.discovered.as_deref(),
-        Some("上游给的官方名字"),
-        "发现值要记在发现层，供界面提示“上游叫这个名字”"
+        Some("测试供应商/上游给的官方名字"),
+        "发现值要记在发现层，供界面提示“上游叫这个名字”；带供应商前缀，与菜单里显示的一致"
     );
 }
 
@@ -351,7 +351,55 @@ fn discovery_follows_the_upstream_name_when_the_user_never_renamed_it() {
         .unwrap();
 
     let after = service.list_models().unwrap().into_iter().next().unwrap();
-    assert_eq!(after.display_name, "上游给的官方名字");
+    assert_eq!(after.display_name, "测试供应商/上游给的官方名字");
+}
+
+/// 默认显示名带供应商前缀：Codex 的模型菜单是扁平的一份，跨供应商同名时要能区分。
+#[test]
+fn default_display_name_carries_the_provider_prefix() {
+    let (service, _vault, _repo) = setup();
+    let provider = service.save_provider(provider_draft(), 0).unwrap();
+    let mut draft = ready_model(provider.id.as_str(), "deepseek-v4.1", "deepseek-v4.1");
+    draft.display_name_overridden = false;
+    let saved = service.save_model(draft, 0).unwrap();
+    assert_eq!(saved.display_name, "测试供应商/deepseek-v4.1");
+    assert_eq!(
+        saved.display_name_layer.discovered.as_deref(),
+        Some("测试供应商/deepseek-v4.1"),
+        "发现层要和生效值同一个字符串，否则下一次刷新会把前缀冲掉"
+    );
+
+    // 用户显式改名：原样用用户的名字，系统不再替他加前缀。
+    let mut renamed = ready_model(provider.id.as_str(), "deepseek-v4.1", "ds4");
+    renamed.id = Some(saved.id.as_str().to_owned());
+    renamed.display_name_overridden = true;
+    let renamed = service.save_model(renamed, saved.version).unwrap();
+    assert_eq!(renamed.display_name, "ds4");
+}
+
+/// 供应商改名：它旗下模型的显示名前缀跟着改，菜单里不会留着旧名字。
+#[test]
+fn renaming_a_provider_requalifies_its_model_display_names() {
+    let (service, _vault, _repo) = setup();
+    let provider = service.save_provider(provider_draft(), 0).unwrap();
+    let mut draft = ready_model(provider.id.as_str(), "deepseek-v4.1", "deepseek-v4.1");
+    draft.display_name_overridden = false;
+    draft.in_catalog = true;
+    let saved = service.save_model(draft, 0).unwrap();
+    assert_eq!(saved.display_name, "测试供应商/deepseek-v4.1");
+
+    let mut renamed = provider_draft();
+    renamed.id = Some(provider.id.as_str().to_owned());
+    renamed.name = "qiyuan".into();
+    service.save_provider(renamed, provider.version).unwrap();
+
+    let after = service.list_models().unwrap().into_iter().next().unwrap();
+    assert_eq!(after.display_name, "qiyuan/deepseek-v4.1");
+    assert_eq!(
+        after.host_state,
+        switch_core::domain::model::HostState::PendingApply,
+        "菜单里的名字变了，磁盘上的目录就旧了"
+    );
 }
 
 /// 发现结果里没有的模型，刷新时保持原样。

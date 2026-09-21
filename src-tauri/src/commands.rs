@@ -16,6 +16,7 @@ use switch_core::{
         credential::Credential,
         error::{CoreError, ErrorCode},
         ids::{ModelId, ProviderId},
+        model::qualified_display_name,
         model::Model,
         provider::Provider,
     },
@@ -323,9 +324,17 @@ pub async fn apply_plan(
 ) -> Result<ApplyPlan, CoreError> {
     run(window, state, move |desktop| {
         let instance = desktop.instance(&instance_id)?;
-        desktop
-            .apply
-            .plan_apply(&instance, default_alias.as_deref())
+        // 共存模式下写的是托管 profile（应用数据目录里的第二个 CODEX_HOME），
+        // 用户真实的 ~/.codex 不参与——用的是同一条管线，换的只是目标实例。
+        if desktop.apply.coexist_enabled()? {
+            desktop
+                .apply
+                .plan_coexist(&instance, default_alias.as_deref())
+        } else {
+            desktop
+                .apply
+                .plan_apply(&instance, default_alias.as_deref())
+        }
     })
     .await
 }
@@ -412,7 +421,15 @@ fn restart_host(desktop: &DesktopState, instance_id: &str) -> Result<HostRestart
         .clone()
         .ok_or_else(|| CoreError::validation("这个实例没有可重启的应用路径；请手动重开 Codex"))?;
     let platform = switch_core::platform::Platform::current();
-    let plan = switch_core::platform::restart_plan(platform, &app_path);
+    // 共存模式靠给宿主带上一组环境变量生效（`CODEX_CLI_PATH` 指向 bridge）。
+    // 注入不了就**不重启**：普通重启会把宿主拉回纯原生，而界面还显示着共存已启用——
+    // 那正是「看着正常、实则全错」。
+    let plan = if desktop.apply.coexist_enabled()? {
+        let env = switch_core::codex::coexist::launch_env(&desktop.app_data_dir(), &instance)?;
+        switch_core::platform::restart_plan_with_env(platform, &app_path, &env)
+    } else {
+        switch_core::platform::restart_plan(platform, &app_path)
+    };
     let process_name = switch_core::platform::host_process_name(platform, &app_path);
     // 退出与启动都要等到**观察到**结果为止。这条命令会阻塞几秒到二三十秒，
     // 界面那侧显示「重启中」，比立刻返回一个不可信的成功好。
@@ -499,6 +516,189 @@ fn reconcile_host_reload(desktop: &DesktopState) -> Result<ReconciledReload, Cor
     })
 }
 
+/// 共存模式的状态。
+///
+/// 「开关」与「事实」分开报：`enabled` 只说明我们记下的意图，`hostUnderBridge` 才是
+/// 宿主此刻真的有没有跑在 bridge 上——后者由进程启动时间与 bridge 日志两个可观察事实算出，
+/// 拿不到证据时是 `null`（无法确认），不是 `false`。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoexistState {
+    pub enabled: bool,
+    /// bridge 有没有装好。没装好时 `bridgeDetail` 说明原因。
+    pub bridge_ready: bool,
+    pub bridge_detail: Option<String>,
+    pub bridge_path: Option<String>,
+    pub managed_home: String,
+    pub managed_config_exists: bool,
+    /// 宿主此刻是否跑在 bridge 上；`null` 表示无法确认。
+    pub host_under_bridge: Option<bool>,
+    /// 这个实例具不具备接管前提（有 CLI、没有硬阻塞）。
+    pub ready: bool,
+    pub blocked_reason: Option<String>,
+}
+
+/// 查共存模式状态。
+#[tauri::command]
+pub async fn coexist_status(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    instance_id: String,
+) -> Result<CoexistState, CoreError> {
+    run(window, state, move |desktop| {
+        let instance = desktop.instance(&instance_id)?;
+        let app_data = desktop.app_data_dir();
+        let enabled = desktop.apply.coexist_enabled()?;
+        let (bridge_ready, bridge_detail, bridge_path) = match desktop.bridge() {
+            Ok(path) => (true, None, Some(path.display().to_string())),
+            Err(reason) => (false, Some(reason.to_owned()), None),
+        };
+
+        // 事实层：宿主进程什么时候起的，bridge 什么时候起的。
+        let platform = switch_core::platform::Platform::current();
+        let host_under_bridge = instance.app_path.as_deref().and_then(|app_path| {
+            let process = switch_core::platform::host_process_name(platform, app_path);
+            let started = switch_core::platform::ProcessProbe::started_at_unix(
+                &switch_core::platform::SystemProcessProbe,
+                &process,
+            );
+            switch_core::codex::coexist::running_under_bridge(
+                switch_core::codex::coexist::last_start_unix(
+                    &switch_core::codex::coexist::bridge_log(&app_data),
+                ),
+                started,
+            )
+        });
+
+        let blocked_reason = if platform == switch_core::platform::Platform::Windows {
+            Some("error.coexistUnsupportedPlatform".to_owned())
+        } else if instance.cli_path.is_none() {
+            Some("error.coexistNeedsCli".to_owned())
+        } else {
+            instance.blocked_reason_key.clone()
+        };
+        Ok(CoexistState {
+            enabled,
+            bridge_ready,
+            bridge_detail,
+            bridge_path,
+            managed_home: switch_core::codex::coexist::managed_home(&app_data)
+                .display()
+                .to_string(),
+            managed_config_exists: switch_core::codex::coexist::managed_config_file(&app_data)
+                .exists(),
+            host_under_bridge,
+            ready: blocked_reason.is_none(),
+            blocked_reason,
+        })
+    })
+    .await
+}
+
+/// 开/关共存模式。
+///
+/// 打开时先做两件必须做的事，任何一件不成就整体失败（不允许「半个共存」）：
+/// 1. 把之前写进原生配置的路由字段还原掉——共存模式下原生那根必须是干净的，
+///    否则它自己也会读我们的目录，两根就变成了同一根；
+/// 2. 确认随包分发的 bridge 真的装好了。
+///
+/// 关掉只改意图。托管 profile 留在原地：再打开时不必重新播种，也不会动用户任何东西。
+#[tauri::command]
+pub async fn coexist_set(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    instance_id: String,
+    enabled: bool,
+) -> Result<CoexistState, CoreError> {
+    run(window, state, move |desktop| {
+        if enabled {
+            let instance = desktop.instance(&instance_id)?;
+            if switch_core::platform::Platform::current()
+                == switch_core::platform::Platform::Windows
+            {
+                return Err(CoreError::new(
+                    ErrorCode::CapabilityUnsupported,
+                    "error.coexistUnsupportedPlatform",
+                )
+                .with_detail(
+                    "共存模式目前只有 macOS 装配完整：Windows 上还没有注入路径。".to_owned(),
+                ));
+            }
+            if let Err(reason) = desktop.bridge() {
+                return Err(CoreError::new(ErrorCode::Internal, "error.bridgeMissing")
+                    .with_detail(reason.to_owned()));
+            }
+            switch_core::codex::coexist::launch_env(&desktop.app_data_dir(), &instance)?;
+            // 原生那份还带着我们的路由？先还原，再开共存。
+            restore_native_if_needed(desktop, &instance)?;
+        }
+        desktop.apply.set_coexist_enabled(enabled)?;
+        coexist_state_of(desktop, &instance_id)
+    })
+    .await
+}
+
+/// 用当前的原生配置重建托管 profile 的底子。
+///
+/// 「底子」指除路由以外的设置（插件、市场、项目信任）：它是开启共存时复制的那一份快照。
+/// 用户在原生配置里加了东西之后想让托管那边也带上，就靠这个动作——下一次生成计划时
+/// 会重新复制一份。
+#[tauri::command]
+pub async fn coexist_resync(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    instance_id: String,
+) -> Result<CoexistState, CoreError> {
+    run(window, state, move |desktop| {
+        if !desktop.apply.coexist_enabled()? {
+            return Err(CoreError::validation(
+                "共存模式没有开启，没有需要重建的托管 profile",
+            ));
+        }
+        switch_core::codex::coexist::clear_managed_config(&desktop.app_data_dir())?;
+        coexist_state_of(desktop, &instance_id)
+    })
+    .await
+}
+
+/// 原生配置里还有我们写的字段时，把它还原干净。
+fn restore_native_if_needed(
+    desktop: &DesktopState,
+    instance: &CodexInstance,
+) -> Result<(), CoreError> {
+    let plan = desktop.apply.plan_restore(instance)?;
+    if plan.changes.is_empty() {
+        return Ok(());
+    }
+    let idempotency = format!("coexist-restore-{}", plan.plan_hash);
+    desktop
+        .apply
+        .execute_restore(plan.id.as_str(), &plan.plan_hash, &idempotency)?;
+    Ok(())
+}
+
+fn coexist_state_of(desktop: &DesktopState, instance_id: &str) -> Result<CoexistState, CoreError> {
+    let instance = desktop.instance(instance_id)?;
+    let app_data = desktop.app_data_dir();
+    let (bridge_ready, bridge_detail, bridge_path) = match desktop.bridge() {
+        Ok(path) => (true, None, Some(path.display().to_string())),
+        Err(reason) => (false, Some(reason.to_owned()), None),
+    };
+    Ok(CoexistState {
+        enabled: desktop.apply.coexist_enabled()?,
+        bridge_ready,
+        bridge_detail,
+        bridge_path,
+        managed_home: switch_core::codex::coexist::managed_home(&app_data)
+            .display()
+            .to_string(),
+        managed_config_exists: switch_core::codex::coexist::managed_config_file(&app_data).exists(),
+        host_under_bridge: None,
+        ready: instance.cli_path.is_some(),
+        blocked_reason: instance.blocked_reason_key.clone(),
+    })
+}
+
 /// 生成还原计划。只撤销本工具写入且未被外部修改的字段。
 #[tauri::command]
 pub async fn restore_plan(
@@ -508,6 +708,18 @@ pub async fn restore_plan(
 ) -> Result<ApplyPlan, CoreError> {
     run(window, state, move |desktop| {
         let instance = desktop.instance(&instance_id)?;
+        if desktop.apply.coexist_enabled()? {
+            // 共存模式下我们从来没写过原生配置，没有可还原的东西。
+            // 报「没有可还原的字段」而不是静默成功：静默成功会让用户以为原生被清过了。
+            return Err(CoreError::new(
+                ErrorCode::ValidationFailed,
+                "error.coexistRestoreNotApplicable",
+            )
+            .with_detail(
+                "共存模式下原生 config.toml 没有被改动过；要退出共存模式请用「与原生共存」的开关。"
+                    .to_owned(),
+            ));
+        }
         desktop.apply.plan_restore(&instance)
     })
     .await
@@ -842,6 +1054,14 @@ pub async fn models_discover(
             .collect();
         let secret = desktop.workspace.resolve_secret(&credential_id)?;
         let models = fetch_models(&provider.endpoint, secret.expose(), &saved)?;
+        // 弹窗里预览的名字就是添加之后菜单里显示的名字：前缀规则只写在域层一处。
+        let models: Vec<DiscoveredModel> = models
+            .into_iter()
+            .map(|model| DiscoveredModel {
+                display_name: qualified_display_name(&provider.name, &model.display_name),
+                ..model
+            })
+            .collect();
 
         // 记入发现层：用户覆盖过的显示名保持不变（R07）。
         let pairs: Vec<(String, String)> = models

@@ -18,3 +18,4 @@ playwright-report/
 referimg/
 *.log
 dist-release/
+src-tauri/binaries/

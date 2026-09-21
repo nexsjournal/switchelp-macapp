@@ -871,6 +871,21 @@ pub fn execute_restore(
     Ok((render(&document, &snapshot.line_ending), outcomes))
 }
 
+/// 去掉我们已经写进配置的全部路由字段与供应商段落。
+///
+/// 用在「复制一份用户的配置，作为共存模式的托管 profile」这一步：托管那根要自己写
+/// 一份路由（指向同一个网关、同一份目录），把上一份路由带过去只会让两份配置互相打架，
+/// 而且会让托管那根在网关侧认成另一个实例。
+pub fn strip_managed_keys(text: &str) -> Result<String, CoreError> {
+    let snapshot = ConfigSnapshot::parse("<strip>", text)?;
+    let mut document = snapshot.document().clone();
+    for key in MANAGED_KEYS {
+        document.remove(key);
+    }
+    set_gateway_provider(&mut document, None)?;
+    Ok(render(&document, &snapshot.line_ending))
+}
+
 /// 内容摘要，用于 CAS 比对。
 pub fn hash(text: &str) -> String {
     let mut hasher = Sha256::new();

@@ -8,7 +8,10 @@ use crate::{
         credential::Credential,
         error::CoreError,
         ids::{CatalogAlias, CredentialId, ModelId, ProviderId},
-        model::{HostState, Model, ModelLifecycle, ModelPolicy},
+        model::{
+            qualified_display_name, strip_provider_qualifier, HostState, Model, ModelLifecycle,
+            ModelPolicy,
+        },
         provider::{AuthKind, Protocol, Provider},
         tokens::TokenCount,
     },
@@ -110,6 +113,8 @@ impl WorkspaceService {
                 now(),
             )?
         };
+        let previous_name = provider.name.clone();
+        let renamed_from = (previous_name != draft.name).then_some(previous_name);
         provider.name = draft.name;
         provider.endpoint = draft.endpoint;
         provider.protocol = draft.protocol;
@@ -118,7 +123,51 @@ impl WorkspaceService {
         provider.notes = draft.notes;
         provider.enabled = draft.enabled;
         provider.updated_at = now();
-        self.repository.save_provider(provider, expected_version)
+        let provider_id = provider.id.clone();
+        let saved = self.repository.save_provider(provider, expected_version)?;
+        if let Some(previous) = renamed_from {
+            self.requalify_model_display_names(&provider_id, &previous, &saved.name)?;
+        }
+        Ok(saved)
+    }
+
+    /// 供应商改名：它旗下模型的显示名前缀必须跟着改。
+    ///
+    /// 前缀是「这份菜单里认得出模型属于谁」的唯一依据，改名后还留着旧前缀等于骗人。
+    /// 改了显示名就是改了 Codex 菜单的内容，所以纳入目录的模型退回待应用。
+    fn requalify_model_display_names(
+        &self,
+        provider_id: &ProviderId,
+        previous_name: &str,
+        next_name: &str,
+    ) -> Result<(), CoreError> {
+        for model in self.repository.list_models()? {
+            if &model.provider_id != provider_id {
+                continue;
+            }
+            let base = strip_provider_qualifier(previous_name, &model.display_name);
+            let requalified = qualified_display_name(next_name, base);
+            if requalified == model.display_name {
+                continue;
+            }
+            let version = model.version;
+            let mut next = model.clone();
+            next.display_name = requalified.clone();
+            // 发现层与用户层存的是同一个生效值，改名后必须同步，
+            // 否则下一次发现刷新会把旧前缀原样带回来。
+            if next.display_name_layer.discovered.is_some() {
+                next.display_name_layer.discovered = Some(requalified.clone());
+            }
+            if next.display_name_layer.overridden {
+                next.display_name_layer.user_value = Some(requalified);
+            }
+            if next.in_catalog {
+                next.host_state = HostState::PendingApply;
+            }
+            next.updated_at = now();
+            self.repository.save_model(next, version)?;
+        }
+        Ok(())
     }
 
     pub fn add_credential(
@@ -320,7 +369,8 @@ impl WorkspaceService {
             .mutations
             .lock()
             .map_err(|_| CoreError::internal("写入锁不可用"))?;
-        self.repository
+        let provider = self
+            .repository
             .get_provider(&ProviderId::new(&draft.provider_id))?
             .ok_or_else(|| CoreError::not_found("供应商"))?;
         let previous = draft
@@ -362,7 +412,14 @@ impl WorkspaceService {
         model.upstream_id = draft.upstream_id;
         model.protocol_override = draft.protocol_override;
         model.catalog_alias = alias;
-        model.display_name = draft.display_name.trim().to_owned();
+        // 目录是扁平的一份菜单：默认显示名带供应商前缀（`qiyuan/deepseek-v4.1`），
+        // 跨供应商的同名模型才分得清。用户显式改过名字就原样用他的——那是他的选择。
+        let requested_name = draft.display_name.trim();
+        model.display_name = if draft.display_name_overridden {
+            requested_name.to_owned()
+        } else {
+            qualified_display_name(&provider.name, requested_name)
+        };
         // 只有用户确实改过名字才算覆盖层。否则显示名应当跟随上游发现值，
         // 否则一次发现刷新永远覆盖不了“上游官方名”这个更准确的值。
         if draft.display_name_overridden {
@@ -371,6 +428,8 @@ impl WorkspaceService {
                 .override_with(model.display_name.clone());
         } else {
             model.display_name_layer.clear_override();
+            // 发现层与生效值必须是同一个字符串，否则下一次刷新会把前缀冲掉。
+            model.display_name_layer.discovered = Some(model.display_name.clone());
         }
         // 手工编辑只能声明上游能力；宿主/网关能力与测试结论不能由 renderer 自行提升。
         model.policy = normalize_policy(draft.policy)?;
@@ -523,6 +582,10 @@ impl WorkspaceService {
             .mutations
             .lock()
             .map_err(|_| CoreError::internal("写入锁不可用"))?;
+        let provider = self
+            .repository
+            .get_provider(&ProviderId::new(provider_id))?
+            .ok_or_else(|| CoreError::not_found("供应商"))?;
         let mut updated = 0;
         for mut model in self.repository.list_models()? {
             if model.provider_id.as_str() != provider_id {
@@ -534,14 +597,16 @@ impl WorkspaceService {
             else {
                 continue;
             };
+            // 发现层存的就是目录里真正显示的名字，一进一出都带供应商前缀（幂等）。
+            let name = qualified_display_name(&provider.name, name);
             let version = model.version;
             let discovered_changed =
                 model.display_name_layer.discovered.as_deref() != Some(name.as_str());
             model.display_name_layer.discovered = Some(name.clone());
             // 未覆盖时显示名跟随发现值；覆盖过就保持用户值。
-            let name_followed = !model.display_name_layer.overridden && model.display_name != *name;
+            let name_followed = !model.display_name_layer.overridden && model.display_name != name;
             if name_followed {
-                model.display_name = name.clone();
+                model.display_name = name;
             }
             if discovered_changed || name_followed {
                 model.updated_at = now();

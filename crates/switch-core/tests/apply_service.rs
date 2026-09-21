@@ -1265,3 +1265,88 @@ fn an_unknown_host_start_time_never_confirms_by_itself() {
     assert_eq!(harness.stage(&operation_id), ApplyStage::AwaitingReload);
     assert_eq!(harness.host_states(), vec![HostState::AwaitingReload]);
 }
+
+/// 共存模式：产物只落进应用数据目录里的托管 profile，用户真实的 config.toml 一个字节不动。
+///
+/// 这条锁的是共存模式的**全部承诺**：官方模型走原生那根（它的配置必须原样），
+/// 我们的模型走托管那根（配置写在那儿）。写错一边，用户要么丢了原生配置，要么菜单里
+/// 出现的是一个指向别人家的路由。
+#[test]
+fn coexist_writes_the_managed_profile_and_leaves_the_native_config_alone() {
+    // 用户自己的配置里带着与路由无关的设置：托管 profile 要继承它们（插件、项目信任
+    // 都是他 Codex 体验的一部分），但不能继承路由——那是原生那根的。
+    // 注意 TOML 的表头规则：表头之后的行属于那张表。路由字段写在最前面，
+    // 否则它们会变成 `[projects...]` 的成员，测的就不是「剥离受管字段」了。
+    let native = r#"# 用户自己的设置
+approval_policy = "on-request"
+model = "gpt-5.6-sol"
+model_provider = "openai"
+
+[projects."/Users/me/work"]
+trust_level = "trusted"
+"#;
+    let harness = Harness::with_ready_model(Some(native));
+
+    let plan = harness
+        .service
+        .plan_coexist(&harness.instance, None)
+        .unwrap();
+    let managed_config = harness.layout_dir().join("codex-home").join("config.toml");
+    assert_eq!(
+        plan.config_path,
+        managed_config.display().to_string(),
+        "计划必须落在托管 profile 上"
+    );
+
+    let operation = plan.id.as_str().to_owned();
+    harness
+        .service
+        .execute_apply(&operation, &plan.plan_hash, "coexist-key")
+        .unwrap();
+
+    let managed = std::fs::read_to_string(&managed_config).unwrap();
+    assert!(
+        managed.contains("model_providers.gptswitch"),
+        "托管 profile 要带上网关 provider：{managed}"
+    );
+    assert!(
+        managed.contains("model_catalog_json"),
+        "托管 profile 要指向我们发布的目录"
+    );
+    assert!(
+        managed.contains("trust_level") && managed.contains("on-request"),
+        "与路由无关的用户设置要继承过来：{managed}"
+    );
+    assert!(
+        !managed.contains("model_provider = \"openai\""),
+        "原生那份路由不能被带进托管 profile（它要写给自己的）：{managed}"
+    );
+
+    assert_eq!(
+        harness.read_config(),
+        native,
+        "用户真实的 config.toml 必须一个字节都没变"
+    );
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&managed_config)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "托管 profile 里有用户的设置，不能给别人读");
+    }
+}
+
+/// 共存模式的开关是**意图**：记下来，但不能拿它当「已经生效」。
+#[test]
+fn coexist_switch_is_intent_not_evidence() {
+    let harness = Harness::with_ready_model(None);
+    assert!(!harness.service.coexist_enabled().unwrap());
+    harness.service.set_coexist_enabled(true).unwrap();
+    assert!(harness.service.coexist_enabled().unwrap());
+    harness.service.set_coexist_enabled(false).unwrap();
+    assert!(!harness.service.coexist_enabled().unwrap());
+}

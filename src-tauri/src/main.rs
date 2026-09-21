@@ -21,7 +21,7 @@ use tauri::{
     Manager,
 };
 
-use state::DesktopState;
+use state::{DesktopState, StartupParts};
 
 /// 本机网关的凭据 helper 路径。
 ///
@@ -30,6 +30,40 @@ use state::DesktopState;
 /// 否则宿主调用一个不存在的可执行文件。
 fn auth_helper(directory: &std::path::Path) -> String {
     helper_path(directory).display().to_string()
+}
+
+/// 把随包分发的 bridge 装进应用数据目录。
+///
+/// 随包的那份就在主可执行文件旁边：打包后是 `Switchelp.app/Contents/MacOS/`，开发时是
+/// `target/<profile>/`——cargo 把同一个工作区的 bin 放在一起，所以一条规则覆盖两种情形。
+/// 装一份到应用数据目录的理由是**路径要稳定**：宿主会长期持有这个路径，而应用升级会
+/// 替换整个 bundle。
+fn install_bridge(
+    directory: &std::path::Path,
+) -> Result<std::path::PathBuf, switch_core::CoreError> {
+    let executable = std::env::current_exe()
+        .map_err(|_| switch_core::CoreError::internal("取不到自身可执行文件路径"))?;
+    let beside = executable
+        .parent()
+        .ok_or_else(|| switch_core::CoreError::internal("自身可执行文件没有父目录"))?;
+    let platform = switch_core::platform::Platform::current();
+    // 打包后 sidecar 叫 `<名字>-app`（与开发时的 bin 区分开，见 bridge_bundle_name）；
+    // 开发时若开发者自己把产物放到旁边，也认那个不带后缀的名字。
+    let candidates = [
+        beside.join(switch_core::platform::bridge_bundle_name(platform)),
+        beside.join(switch_core::platform::bridge_file_name(platform)),
+    ];
+    let source = candidates
+        .iter()
+        .find(|path| path.exists())
+        .ok_or_else(|| {
+            switch_core::CoreError::new(switch_core::ErrorCode::Internal, "error.bridgeMissing")
+                .with_detail(format!(
+                    "随包分发的共存组件不在 {}，无法安装共存模式",
+                    candidates[0].display()
+                ))
+        })?;
+    switch_core::codex::coexist::install_bridge(directory, source)
 }
 
 /// 组装本机网关。绑定失败不致命：状态里保留原因，界面据此显示“网关未启动”。
@@ -215,6 +249,15 @@ fn main() {
                     error.message_key, error.safe_details
                 );
             }
+            // bridge 装不上不该拦住应用启动：共存模式用不了，其余功能照常；
+            // 界面会读到原因并如实显示（见 commands::coexist_status）。
+            let bridge = install_bridge(&directory);
+            if let Err(error) = &bridge {
+                eprintln!(
+                    "Switchelp bridge 未安装：{} {:?}",
+                    error.message_key, error.safe_details
+                );
+            }
             let (tray_running, tray_port) = match &gateway {
                 Ok(gateway) => (true, gateway.local_addr().map(|address| address.port())),
                 Err(_) => (false, None),
@@ -229,7 +272,7 @@ fn main() {
                 apply,
                 home,
                 directory.clone(),
-                gateway,
+                StartupParts { gateway, bridge },
                 diagnostics,
                 backups,
             )));
@@ -259,6 +302,9 @@ fn main() {
             commands::models_delete,
             commands::instances_detect,
             commands::config_inspect,
+            commands::coexist_status,
+            commands::coexist_set,
+            commands::coexist_resync,
             commands::apply_plan,
             commands::apply_execute,
             commands::apply_status,

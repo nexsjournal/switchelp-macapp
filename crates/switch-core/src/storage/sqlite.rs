@@ -7,12 +7,13 @@ use crate::domain::{
     credential::Credential,
     error::CoreError,
     ids::{CredentialId, InstanceId, ModelId, ProviderId},
-    model::Model,
+    model::{qualified_display_name, HostState, Model},
     provider::{Protocol, Provider},
 };
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
+    collections::HashMap,
     path::Path,
     sync::{Mutex, MutexGuard},
     time::Duration,
@@ -46,6 +47,17 @@ CREATE TABLE revisions (id TEXT PRIMARY KEY NOT NULL, payload TEXT NOT NULL CHEC
 CREATE TABLE operations (id TEXT PRIMARY KEY NOT NULL, payload TEXT NOT NULL CHECK(json_valid(payload)));
 ";
 
+/// v3：应用设置表。
+///
+/// 只放「应用自己的开关」，不放任何实体数据——实体各有专表，加一张宽表最容易长成
+/// 谁也说不清的第二份真相。共存模式的开关是第一个用户。
+const SETTINGS_SCHEMA: &str = "
+CREATE TABLE settings (
+    key TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL
+);
+";
+
 impl SqliteRepository {
     /// 父目录由宿主建立；不把任意数据库路径自动当成应用数据目录。
     pub fn open(path: &Path) -> Result<Self, CoreError> {
@@ -72,6 +84,8 @@ impl SqliteRepository {
             .map_err(db_error)?;
         let version = run_migrations(current, |step| match step.to {
             1 => tx.execute_batch(INITIAL_SCHEMA).map_err(db_error),
+            2 => migrate_display_name_prefixes(&tx),
+            3 => tx.execute_batch(SETTINGS_SCHEMA).map_err(db_error),
             _ => Err(CoreError::internal("未知的数据库升级步骤")),
         })?;
         tx.pragma_update(None, "user_version", version)
@@ -93,6 +107,80 @@ impl SqliteRepository {
             .lock()
             .map_err(|_| CoreError::internal("数据库锁不可用"))
     }
+}
+
+/// v2：给「还是默认形状」的模型显示名补上供应商前缀。
+///
+/// v2 之前显示名只有上游自己的名字。Codex 的模型菜单是一份**扁平列表**，多个供应商下
+/// 的同名模型在里面长得一模一样，选错只会表现为「请求打到了别家」。只补默认形状的
+/// 名字——等于上游 ID、等于发现值、或用户从没动过的；真正被用户改写成别的样子的名字
+/// 保持不动，迁移不替用户改主意。
+fn migrate_display_name_prefixes(tx: &Transaction<'_>) -> Result<(), CoreError> {
+    let mut provider_names: HashMap<String, String> = HashMap::new();
+    {
+        let mut statement = tx
+            .prepare("SELECT id, payload FROM providers")
+            .map_err(db_error)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(db_error)?;
+        for row in rows {
+            let (id, payload) = row.map_err(db_error)?;
+            let provider: Provider = decode(&payload)?;
+            provider_names.insert(id, provider.name);
+        }
+    }
+
+    let mut stored: Vec<(String, String)> = Vec::new();
+    {
+        let mut statement = tx
+            .prepare("SELECT id, payload FROM models")
+            .map_err(db_error)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(db_error)?;
+        for row in rows {
+            stored.push(row.map_err(db_error)?);
+        }
+    }
+
+    for (id, payload) in stored {
+        let mut model: Model = decode(&payload)?;
+        let Some(provider_name) = provider_names.get(model.provider_id.as_str()) else {
+            continue;
+        };
+        let layer = model.display_name_layer.clone();
+        let base = layer
+            .user_value
+            .clone()
+            .or_else(|| layer.discovered.clone())
+            .unwrap_or_else(|| model.display_name.clone());
+        let default_shaped = base == model.upstream_id
+            || layer.discovered.as_deref() == Some(base.as_str())
+            || (!layer.overridden && layer.discovered.is_none());
+        if !default_shaped {
+            continue;
+        }
+        let qualified = qualified_display_name(provider_name, &base);
+        model.display_name = qualified.clone();
+        model.display_name_layer.discovered = Some(qualified);
+        model.display_name_layer.user_value = None;
+        model.display_name_layer.overridden = false;
+        if model.in_catalog {
+            // 菜单里的名字变了，磁盘上的目录就旧了：退回待应用，让用户自己决定何时生效。
+            model.host_state = HostState::PendingApply;
+        }
+        tx.execute(
+            "UPDATE models SET payload = ?1 WHERE id = ?2",
+            params![encode(&model)?, id],
+        )
+        .map_err(db_error)?;
+    }
+    Ok(())
 }
 
 fn encode<T: Serialize>(value: &T) -> Result<String, CoreError> {
@@ -352,6 +440,26 @@ impl Repository for SqliteRepository {
         }
         Ok(())
     }
+
+    fn setting(&self, key: &str) -> Result<Option<String>, CoreError> {
+        self.lock()?
+            .query_row("SELECT value FROM settings WHERE key=?1", [key], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()
+            .map_err(db_error)
+    }
+
+    fn set_setting(&self, key: &str, value: &str) -> Result<(), CoreError> {
+        self.lock()?
+            .execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                params![key, value],
+            )
+            .map_err(db_error)?;
+        Ok(())
+    }
 }
 
 /// SQLite 版操作记录存储。与实体仓库共用同一数据库文件，但各自持有连接。
@@ -378,6 +486,8 @@ impl SqliteOperationStore {
             .map_err(db_error)?;
         let version = run_migrations(current, |step| match step.to {
             1 => tx.execute_batch(INITIAL_SCHEMA).map_err(db_error),
+            2 => migrate_display_name_prefixes(&tx),
+            3 => tx.execute_batch(SETTINGS_SCHEMA).map_err(db_error),
             _ => Err(CoreError::internal("未知的数据库升级步骤")),
         })?;
         tx.pragma_update(None, "user_version", version)

@@ -19,6 +19,13 @@ Codex  →  ~/.codex/config.toml (the fields this tool manages)
 - The **model menu** comes from a compiled catalog file (`model_catalog_json`), not from a list this tool draws
   itself. Note that `model_catalog_json` **replaces** the host's model list rather than extending it: while the tool
   is applied, the built-in models are not in the picker until you restore native mode.
+- **Coexist mode (Bridge)** keeps the official models in the menu. Instead of replacing `model_catalog_json` in
+  your real config, the app writes a managed profile under its own app-data directory and starts Codex through
+  `gptswitch-bridge`: that bridge runs two codex processes (yours, untouched, and the managed one), merges
+  `model/list` and `thread/list`, and pins every conversation to the process it started on. macOS only for now;
+  it works while the host is launched by this app (reopening Codex from the Dock falls back to plain native, and
+  the app says so).
+
 - **Upstream keys never reach `config.toml`**: they only go into the system credential store, and the host only ever
   receives a local gateway token.
 - Writing Codex config always goes **plan → digest check (CAS) → atomic replace**. A successful commit stops at

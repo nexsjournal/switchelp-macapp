@@ -110,6 +110,21 @@ export interface GatewayReport {
  * `quitConfirmed` 为 false 表示旧进程还在跑，本次没有重启；`launchedConfirmed`
  * 为 false 表示 Codex 已经退出但没有重新起来。界面按这两个值说准确的话。
  */
+export interface CoexistState {
+  enabled: boolean;
+  /** bridge 有没有装好；没装好时 `bridgeDetail` 说明原因。 */
+  bridgeReady: boolean;
+  bridgeDetail: string | null;
+  bridgePath: string | null;
+  managedHome: string;
+  managedConfigExists: boolean;
+  /** 宿主此刻是否跑在 bridge 上；null = 无法确认。 */
+  hostUnderBridge: boolean | null;
+  /** 这个实例具不具备接管前提（有 CLI、没有硬阻塞）。 */
+  ready: boolean;
+  blockedReason: string | null;
+}
+
 export interface HostRestart {
   appPath: string;
   quitConfirmed: boolean;
@@ -231,6 +246,22 @@ export interface DesktopClient {
   restartHost(instanceId: string): Promise<HostRestart>;
   planRestore(instanceId: string): Promise<ApplyPlan>;
   executeRestore(request: ExecutionRequest): Promise<{ operationId: string }>;
+
+  /**
+   * 共存模式（Bridge）的状态。
+   *
+   * `enabled` 是意图，`hostUnderBridge` 是事实：宿主此刻真的有没有跑在 bridge 上。
+   * 后者为 `null` 表示无法确认（拿不到进程启动时间或日志），界面必须如实这么说。
+   */
+  coexistStatus(instanceId: string): Promise<CoexistState>;
+  /** 开/关共存模式。打开时核心会先确认原生配置干净、bridge 已装好，任何一条不成就整体失败。 */
+  setCoexist(instanceId: string, enabled: boolean): Promise<CoexistState>;
+  /**
+   * 用当前的原生配置重建托管 profile 的底子（除路由外的设置）。
+   *
+   * 底子是开启共存时复制的那一份，之后原生配置的改动不会自动同步；这里是那个出口。
+   */
+  resyncCoexist(instanceId: string): Promise<CoexistState>;
 
   listDiagnostics(filter?: { level?: DiagnosticEvent['level'] }): Promise<ListResult<DiagnosticEvent>>;
   previewDiagnostics(request: DiagnosticsRequest): Promise<DiagnosticsPreview>;

@@ -58,6 +58,10 @@ jobs:
           workspaces: .
       - name: 核心测试
         run: cargo test -p switch-core
+      # bridge 的测试起真的子进程（mock app-server 就在同一个二进制里），
+      # 覆盖的是共存模式的协议行为：菜单合并、按线程路由、宿主退出后不留孤儿。
+      - name: 共存组件（bridge）测试
+        run: cargo test -p gptswitch-bridge
 
   lint:
     name: 格式与 clippy
