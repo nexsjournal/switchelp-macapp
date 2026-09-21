@@ -63,9 +63,13 @@
  * 而行的分隔线只有 1px、浅色主题下几乎看不见（用户就是在这里迷路的：
  * 「展开后我都看不到它下面是怎么区分分隔的」）。竖线之外，节与节之间还各有一条横线，
  * 于是「事实 / 用法 / 探针原文 / 动作」四段的边界不靠留白去猜。
+ *
+ * 线宽是 **1px**，不是 2px：这张卡的边框、行与行之间的分隔线都是 1px，只有这一处 2px，
+ * 看着就是一条粗杠（用户原话：「这个线条为啥这么粗」）。缩进 72px 与行的内容列对齐
+ * （16 箭头 + 12 间距 + 32 底纹 + 12 间距），所以竖线正落在名称那一列的左边缘。
  */
 .detail { display: grid; gap: 20px; margin: 0 0 16px 72px; padding: 12px 0 20px 20px;
-  border-left: 2px solid var(--border-subtle); }
+  border-left: 1px solid var(--border-subtle); }
 .description { margin: 0; font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); }
 /* 事实表：字段名一列、值一列，值一律等宽以便对齐路径。 */
 .facts { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px 16px; margin: 0; padding: 16px 20px;

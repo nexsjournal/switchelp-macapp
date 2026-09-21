@@ -17,13 +17,21 @@ const GITHUB_WINDOWS = [
   { key: 'github-month', label: 'content.window.month' },
 ] as const;
 
+/**
+ * 相对时间。**入参带符号**：负数＝过去（「11 秒前」），正数＝未来（「5 分钟后」）。
+ *
+ * 以前这里把入参夹成非负、又固定按负数格式化，于是「下次自动更新」也念成「5 分钟前」——
+ * 未来的时间被说成过去的（用户截图里那句）。显示相对时间的地方本来就有过去与未来两种，
+ * 所以符号是这个函数的输入，不该由调用方把 delta 凑成负数。
+ */
 function relative(seconds: number, locale: string): string {
   const formatter = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
-  const value = Math.max(0, seconds);
-  if (value < 60) return formatter.format(-Math.round(value), 'second');
-  if (value < 3600) return formatter.format(-Math.round(value / 60), 'minute');
-  if (value < 86_400) return formatter.format(-Math.round(value / 3600), 'hour');
-  return formatter.format(-Math.round(value / 86_400), 'day');
+  const magnitude = Math.abs(seconds);
+  const sign = seconds < 0 ? -1 : 1;
+  if (magnitude < 60) return formatter.format(sign * Math.round(magnitude), 'second');
+  if (magnitude < 3600) return formatter.format(sign * Math.round(magnitude / 60), 'minute');
+  if (magnitude < 86_400) return formatter.format(sign * Math.round(magnitude / 3600), 'hour');
+  return formatter.format(sign * Math.round(magnitude / 86_400), 'day');
 }
 
 /**
@@ -184,7 +192,7 @@ export function ContentPage({ client }: { client: DesktopClient }) {
     if (!status) return t('content.status.unknown');
     const parts: string[] = [];
     parts.push(status.lastOkAt
-      ? t('content.status.lastOk', { when: relative(now - status.lastOkAt, locale) })
+      ? t('content.status.lastOk', { when: relative(status.lastOkAt - now, locale) })
       : t('content.status.neverOk'));
     parts.push(status.nextFetchAt > now
       ? t('content.status.next', { when: relative(status.nextFetchAt - now, locale) })
@@ -278,7 +286,7 @@ export function ContentPage({ client }: { client: DesktopClient }) {
                       <span className={`${styles.sourceUrl} text-mono break-anywhere`}>{source.url}</span>
                       <span className={styles.sourceMeta}>
                         {source.lastOkAt
-                          ? t('content.sources.lastOk', { when: relative(now - source.lastOkAt, locale) })
+                          ? t('content.sources.lastOk', { when: relative(source.lastOkAt - now, locale) })
                           : t('content.sources.neverOk')}
                         {source.failStreak > 0 && ` · ${t('content.sources.streak', { streak: source.failStreak })}`}
                         {source.lastError && ` · ${source.lastError}`}
@@ -366,7 +374,7 @@ export function ContentPage({ client }: { client: DesktopClient }) {
                   <button type="button" className={styles.itemRow} onClick={() => window.open(item.url, '_blank', 'noreferrer')}>
                     <span className={styles.itemTitle}>{item.title}</span>
                     <span className={styles.itemMeta}>
-                      {item.sourceLabel} · {relative(now - item.publishedAt, locale)}
+                      {item.sourceLabel} · {relative(item.publishedAt - now, locale)}
                       <ExternalLink size={11} />
                     </span>
                   </button>
