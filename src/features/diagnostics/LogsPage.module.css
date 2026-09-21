@@ -28,7 +28,8 @@ svg.error { color: var(--status-danger); }
 .pager { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 16px; color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 .pager button { height: var(--control-height-compact); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 
-.scopes { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+/* 范围：与模型编辑器同一套勾选单元格，这里只负责它上方那条留白。 */
+.scopes { margin-bottom: 16px; }
 .preview { padding: 16px; border-radius: 8px; background: var(--bg-input); }
 .preview > p { margin: 0 0 8px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 .preview ul { list-style: none; margin: 0; padding: 0; }

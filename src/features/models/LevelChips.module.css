@@ -1,13 +1,14 @@
 /*
- * 思考档位：一个 chip = 一个档位，chip 一半是「设为默认」，一半是「删掉」，
- * 末尾的加号是唯一的添加入口（参考界面的样子）。
+ * 思考档位。形状两层：
+ * - 上面一行是「支持的档位」——复用全局的勾选单元格（CheckCell），
+ *   与「输入类型 / 模型能力」同一个形状、同一个对勾；
+ * - 下面一行是「默认档位」——只列出已勾选的档位，单选，选中的那枚用强调色描边与淡底。
+ * 不再是「chip 一半设默认、一半删除、末尾一个加号」，因为那个加号后面是自由文本输入。
  */
-.levels { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.level { display: inline-flex; align-items: center; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-input); }
-.pick { height: var(--control-height-compact); padding: 0 8px 0 12px; border: 0; border-radius: 0; background: transparent;
-  font-size: var(--font-size-control); line-height: var(--line-height-code); font-family: var(--font-mono); }
-.pick[aria-pressed='true'] { background: var(--accent-subtle); color: var(--accent); font-weight: 500; }
-.remove { width: 24px; height: var(--control-height-compact); padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text-muted); }
-.add { width: var(--control-height-compact); height: var(--control-height-compact); padding: 0; }
-/* 类名写两遍以压过全局的输入框规则（见 ProviderForm.module.css 里的说明）。 */
-.input.input { width: 120px; height: var(--control-height-compact); font-size: var(--font-size-control); line-height: var(--line-height-code); font-family: var(--font-mono); }
+.levels { display: grid; gap: 12px; }
+
+.defaultRow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.defaultLabel { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.picks { display: flex; flex-wrap: wrap; gap: 8px; }
+.pick { height: var(--control-height-compact); padding: 0 12px; font-size: var(--font-size-control); line-height: var(--line-height-control); }
+.pick[aria-pressed='true'] { background: var(--accent-subtle); border-color: var(--accent-border); color: var(--accent); font-weight: 500; }

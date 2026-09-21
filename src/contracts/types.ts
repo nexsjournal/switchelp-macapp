@@ -315,3 +315,267 @@ export interface DiagnosticEvent {
   elapsedMs?: number | null;
   safeMetadata: Record<string, string>;
 }
+
+/* ---- 工具管理 ---- */
+
+export type ToolCategory = 'cliCode' | 'utility' | 'runtime';
+
+/**
+ * 工具状态。全部来自一次真实探测，没有推断值：
+ * `unverified` 是「找到了文件但探针没通过」，它需要人看一眼，**不等于**已就绪。
+ */
+export type ToolStatus = 'ready' | 'needsLogin' | 'installed' | 'unverified' | 'notInstalled' | 'unsupportedPlatform';
+
+export type ToolPathSource = 'path' | 'candidate';
+
+export interface InstalledTool {
+  path: string;
+  pathSource: ToolPathSource;
+  version?: string | null;
+  configPath?: string | null;
+  configExists: boolean;
+  skillsPath?: string | null;
+  skillsCount: number;
+}
+
+export interface ToolAgentUsage {
+  tags: string[];
+  nonInteractive: string[];
+}
+
+export interface ToolState {
+  id: string;
+  displayName: string;
+  category: ToolCategory;
+  description: string;
+  status: ToolStatus;
+  installed?: InstalledTool | null;
+  website?: string | null;
+  docs?: string | null;
+  modelConfig: boolean;
+  skillTarget: boolean;
+  agentUsage: ToolAgentUsage;
+  versionProbeTail: string;
+  /** `null` = 没做过登录判定；空字符串 = 查了但没输出。两者含义不同。 */
+  authProbeTail?: string | null;
+  notes: string[];
+  probedAt: number;
+  cacheSeconds: number;
+}
+
+export interface SkillTarget {
+  toolId: string;
+  displayName: string;
+  root: string;
+}
+
+/* ---- 插件中心 ---- */
+
+export interface PluginSource {
+  repo: string;
+  label: string;
+  description: string;
+  builtin: boolean;
+}
+
+export interface SkillDocument {
+  id: string;
+  title?: string | null;
+  description?: string | null;
+  requiresBins: string[];
+  body: string;
+  frontMatterParsed: boolean;
+}
+
+export interface RepoFile {
+  path: string;
+  bytes: number;
+  text: string;
+}
+
+export interface RepoSkill {
+  dirName: string;
+  sourcePath: string;
+  document: SkillDocument;
+  files: RepoFile[];
+}
+
+export interface RepoCatalog {
+  repo: string;
+  commit: string;
+  skills: RepoSkill[];
+  fetchedAt: number;
+  truncated: boolean;
+}
+
+export interface FileFingerprint {
+  path: string;
+  sha256: string;
+  bytes: number;
+}
+
+/** `create` 新建；`update` 更新我们自己的安装；`conflict` 目标目录不是我们装的。 */
+export type PlannedAction = 'create' | 'update' | 'conflict';
+
+export interface PlannedFile {
+  path: string;
+  bytes: number;
+  sha256: string;
+}
+
+export interface TargetPlan {
+  toolId: string;
+  displayName: string;
+  root: string;
+  dir: string;
+  dirName: string;
+  action: PlannedAction;
+  files: PlannedFile[];
+  conflictDetail?: string | null;
+  foreignFiles: string[];
+}
+
+export interface SkillPlan {
+  skillId: string;
+  dirName: string;
+  sourcePath: string;
+  description?: string | null;
+  requiresBins: string[];
+  targets: TargetPlan[];
+}
+
+export interface InstallPreview {
+  repo: string;
+  commit: string;
+  skills: SkillPlan[];
+}
+
+/** 冲突处置只有这两个：**没有覆盖**，因为目标目录里的东西不是我们的。 */
+export type ConflictChoice = 'skip' | 'keepBoth';
+
+export interface InstallRequest {
+  repo: string;
+  gitRef?: string | null;
+  skillDirs: string[];
+  targets: string[];
+  conflictChoices: Record<string, ConflictChoice>;
+}
+
+export interface SkillRecord {
+  skillId: string;
+  dirName: string;
+  targetTool: string;
+  targetDisplayName: string;
+  sourceRepo: string;
+  sourceCommit: string;
+  sourcePath: string;
+  installedPath: string;
+  enabled: boolean;
+  installedAt: number;
+  files: FileFingerprint[];
+}
+
+export interface SkippedTarget {
+  toolId: string;
+  dirName: string;
+  reason: string;
+}
+
+export interface FailedTarget {
+  toolId: string;
+  dirName: string;
+  message: string;
+}
+
+/** 部分完成是常态，所以三个列表一起返回。 */
+export interface InstallReport {
+  repo: string;
+  commit: string;
+  installed: SkillRecord[];
+  skipped: SkippedTarget[];
+  failed: FailedTarget[];
+}
+
+export interface UpdateInfo {
+  skillId: string;
+  targetTool: string;
+  currentCommit: string;
+  latestCommit: string;
+}
+
+export interface UninstallOutcome {
+  dir: string;
+  removedFiles: string[];
+  keptModified: string[];
+  missingFiles: string[];
+  foreignFiles: string[];
+  removedDir: boolean;
+}
+
+/* ---- 内容中心 ---- */
+
+export type FeedKind = 'rss' | 'githubSearch';
+
+export interface FeedSource {
+  id: string;
+  kind: FeedKind;
+  url: string;
+  label: string;
+  lang: string;
+  enabled: boolean;
+  etag?: string | null;
+  lastModified?: string | null;
+  lastOkAt?: number | null;
+  lastError?: string | null;
+  failStreak: number;
+  nextFetchAt: number;
+  builtin: boolean;
+}
+
+export interface FeedSourceDraft {
+  id?: string | null;
+  kind: FeedKind;
+  url: string;
+  label: string;
+  lang: string;
+  enabled: boolean;
+}
+
+export interface FeedItem {
+  url: string;
+  sourceId: string;
+  sourceLabel: string;
+  title: string;
+  summary: string;
+  publishedAt: number;
+  firstSeenAt: number;
+  lang: string;
+  stars?: number | null;
+  repo?: string | null;
+}
+
+export interface FeedFailure {
+  sourceId: string;
+  label: string;
+  message: string;
+  failStreak: number;
+}
+
+export interface RefreshReport {
+  attempted: string[];
+  succeeded: string[];
+  notModified: string[];
+  failed: FeedFailure[];
+  skipped: string[];
+  newItems: number;
+  nextFetchAt: number;
+}
+
+export interface ContentStatus {
+  lastOkAt?: number | null;
+  nextFetchAt: number;
+  /** 每天自动抓取的本地小时数（升序），例如 [6, 18]。时刻表由核心持有，界面照它显示。 */
+  scheduleHours: number[];
+  failing: FeedFailure[];
+  totalItems: number;
+}

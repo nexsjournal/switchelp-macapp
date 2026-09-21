@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use switch_core::{
     application::{AppliedSummary, ModelDraft, ProviderDraft},
@@ -21,7 +22,8 @@ use switch_core::{
         provider::Provider,
     },
 };
-use tauri::{State, WebviewWindow};
+use tauri::{Emitter, Manager, State, WebviewWindow};
+use tauri_plugin_updater::UpdaterExt;
 
 use crate::state::DesktopState;
 
@@ -871,40 +873,237 @@ pub async fn backups_restore(
     .await
 }
 
-/// 更新检查结果。只做比较，不下载、不安装。
+// ---------------------------------------------------------------- 应用内更新
+
+/// 更新清单与发布页都从这一个仓库派生。只写一处，免得两处地址漂移。
+const UPDATE_REPO: &str = "nexsjournal/switchelp-macapp";
+/// 安装完成后的标记文件：下次启动读到它就报一句「已更新到 x.y.z」。
+const UPDATE_MARKER: &str = "update-pending.json";
+/// 进度事件名。前端在弹窗打开期间监听它。
+const UPDATE_PROGRESS_EVENT: &str = "update://progress";
+
+/// 更新检查结果。`latest` 的含义取决于 `has_update`：有更新时是能装的新版本，
+/// 没有时就是当前版本。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateReport {
     pub current: String,
     pub latest: Option<String>,
     pub has_update: bool,
+    /// 新版本的发布说明（Markdown，来自清单里的 notes）。可能缺省。
+    pub notes: Option<String>,
     pub release_url: Option<String>,
+    /// 发布日期，形如 `2026-09-21`。
     pub published_at: Option<String>,
     /// 查询失败的原因。有值时 `latest` 为空，界面不得显示成“已是最新”。
     pub error: Option<String>,
 }
 
-/// 检查更新。对公开仓库的 Release 做一次只读查询，不下载、不安装。
+/// 下载进度。`total` 为空表示上游没给长度（进度条退化成不确定态）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProgress {
+    /// `download` 或 `install`。
+    pub phase: &'static str,
+    pub downloaded: u64,
+    pub total: Option<u64>,
+}
+
+/// 把插件的错误翻成一句人话。
+///
+/// 只描述**发生了什么**，不猜原因、不给建议：网络失败就是「连不上更新源」，
+/// 而不是「请检查网络设置」。原始错误码附在后面，便于对着日志排查。
+fn describe_update_error(error: &tauri_plugin_updater::Error) -> String {
+    use tauri_plugin_updater::Error;
+    match error {
+        Error::Reqwest(inner) if inner.is_timeout() => {
+            "连不上更新源：请求超时（网络或代理）".to_owned()
+        }
+        Error::Reqwest(_) => "连不上更新源（网络或代理）".to_owned(),
+        Error::ReleaseNotFound => {
+            "更新源里没有可读的更新清单（Release 缺少 latest.json）".to_owned()
+        }
+        Error::TargetNotFound(target) => format!("这次发布没有 {target} 对应的更新包"),
+        Error::TargetsNotFound(targets) => format!("这次发布没有适合本机的更新包（{targets:?}）"),
+        Error::Minisign(_) | Error::Base64(_) | Error::SignatureUtf8(_) => {
+            "安装包签名校验没通过，已放弃安装".to_owned()
+        }
+        Error::AuthenticationFailed => "系统授权被取消，安装没有进行".to_owned(),
+        Error::EmptyEndpoints => "没有配置更新源".to_owned(),
+        Error::UnsupportedArch | Error::UnsupportedOs => "当前平台不支持应用内更新".to_owned(),
+        other => format!("更新失败：{other}"),
+    }
+}
+
+fn update_error(error: &tauri_plugin_updater::Error) -> CoreError {
+    // 签名不对不是「重试一下就好」：归为不可重试的校验失败，其余归为可重试的内部错误。
+    let code = match error {
+        tauri_plugin_updater::Error::Minisign(_)
+        | tauri_plugin_updater::Error::Base64(_)
+        | tauri_plugin_updater::Error::SignatureUtf8(_) => ErrorCode::ValidationFailed,
+        _ => ErrorCode::Internal,
+    };
+    CoreError::new(code, "error.updateInstallFailed").with_detail(describe_update_error(error))
+}
+
+/// 一次更新检查。不下载任何东西。
+async fn update_report(window: &WebviewWindow) -> UpdateReport {
+    let current = window.package_info().version.to_string();
+    let mut report = UpdateReport {
+        current: current.clone(),
+        latest: None,
+        has_update: false,
+        notes: None,
+        release_url: None,
+        published_at: None,
+        error: None,
+    };
+    let updater = match window.updater() {
+        Ok(updater) => updater,
+        Err(error) => {
+            report.error = Some(describe_update_error(&error));
+            return report;
+        }
+    };
+    match updater.check().await {
+        Ok(Some(update)) => {
+            report.has_update = true;
+            report.release_url = Some(format!(
+                "https://github.com/{UPDATE_REPO}/releases/tag/v{}",
+                update.version
+            ));
+            report.published_at = update.date.map(|date| date.date().to_string());
+            report.notes = update.body.clone();
+            report.latest = Some(update.version.clone());
+        }
+        // 没有更新：`latest` 回填当前版本，界面据此说「已是最新」。
+        Ok(None) => report.latest = Some(current),
+        Err(error) => report.error = Some(describe_update_error(&error)),
+    }
+    report
+}
+
+/// 检查更新。读一次更新源，**不下载、不安装**；下载安装走 `update_install`。
 #[tauri::command]
-pub async fn update_check(
+pub async fn update_check(window: WebviewWindow) -> Result<UpdateReport, CoreError> {
+    authorize(&window)?;
+    Ok(update_report(&window).await)
+}
+
+/// 下载并安装更新。
+///
+/// 成功时**不返回**：装完立刻重启（旧的应用包已经被移走，继续跑一份磁盘上已经不存在的
+/// bundle 不是个稳定状态）。前端只需要处理 Err——窗口会在重启时消失。
+#[tauri::command]
+pub async fn update_install(window: WebviewWindow, state: Desktop<'_>) -> Result<(), CoreError> {
+    authorize(&window)?;
+    let updater = window.updater().map_err(|error| update_error(&error))?;
+    // 重新检查一次：从用户看到「有新版本」到点下按钮之间，更新源可能已经变了。
+    let update = updater
+        .check()
+        .await
+        .map_err(|error| update_error(&error))?
+        .ok_or_else(|| {
+            CoreError::new(ErrorCode::ValidationFailed, "error.updateNotAvailable")
+                .with_detail("这次检查没有发现可安装的新版本，可能已经被更新过了".to_owned())
+        })?;
+
+    let handle = window.clone();
+    let downloaded = Arc::new(AtomicU64::new(0));
+    let bytes = {
+        let handle = handle.clone();
+        let downloaded = downloaded.clone();
+        update
+            .download(
+                move |chunk: usize, total: Option<u64>| {
+                    let done = downloaded.fetch_add(chunk as u64, Ordering::Relaxed) + chunk as u64;
+                    let _ = handle.emit(
+                        UPDATE_PROGRESS_EVENT,
+                        UpdateProgress {
+                            phase: "download",
+                            downloaded: done,
+                            total,
+                        },
+                    );
+                },
+                || {},
+            )
+            .await
+            .map_err(|error| update_error(&error))?
+    };
+
+    let total = downloaded.load(Ordering::Relaxed);
+    let _ = handle.emit(
+        UPDATE_PROGRESS_EVENT,
+        UpdateProgress {
+            phase: "install",
+            downloaded: total,
+            total: Some(total),
+        },
+    );
+    // 解包与替换应用包是阻塞的文件操作（在 macOS 上是「移走旧的、放进新的」）。
+    let installing = update.clone();
+    let version = update.version.clone();
+    tauri::async_runtime::spawn_blocking(move || installing.install(bytes))
+        .await
+        .map_err(|_| CoreError::internal("安装线程异常退出"))?
+        .map_err(|error| update_error(&error))?;
+
+    // 记账：重启后读它，告诉用户「已更新到 x.y.z」——安装本身发生在弹窗消失那一刻，
+    // 不给一句话，用户只能靠版本号自己确认。
+    let marker = state.inner().app_data_dir().join(UPDATE_MARKER);
+    let _ = std::fs::write(&marker, serde_json::json!({"version": version}).to_string());
+
+    window.app_handle().restart()
+}
+
+/// 取出并清掉「刚更新完」的标记。返回这次启动所对应的新版本号（没有则 null）。
+#[tauri::command]
+pub async fn update_take_result(
     window: WebviewWindow,
     state: Desktop<'_>,
-) -> Result<UpdateReport, CoreError> {
-    run(window, state, |_desktop| {
-        let status = switch_core::diagnostics::check_update(
-            env!("CARGO_PKG_VERSION"),
-            switch_core::diagnostics::UPDATE_ENDPOINT,
+) -> Result<Option<String>, CoreError> {
+    authorize(&window)?;
+    let marker = state.inner().app_data_dir().join(UPDATE_MARKER);
+    let Ok(text) = std::fs::read_to_string(&marker) else {
+        return Ok(None);
+    };
+    // 读完就删：这条提示只该出现一次。
+    let _ = std::fs::remove_file(&marker);
+    Ok(serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("version")
+                .and_then(|version| version.as_str())
+                .map(str::to_owned)
+        }))
+}
+
+/// 用系统浏览器打开发布页。安装失败时的兜底路径：用户自己去下载。
+///
+/// 地址只允许本仓库的发布页——这个命令会交给 shell 执行，放任意 URL 进来等于开了个后门；
+/// 调用方也必须先过 authorize（和其余命令一样，非主窗口不得触发）。
+#[tauri::command]
+pub async fn update_open_release_page(window: WebviewWindow, url: String) -> Result<(), CoreError> {
+    authorize(&window)?;
+    let prefix = format!("https://github.com/{UPDATE_REPO}/releases");
+    if !url.starts_with(&prefix) {
+        return Err(
+            CoreError::new(ErrorCode::ValidationFailed, "error.updateBadReleaseUrl")
+                .with_detail(format!("只允许打开本仓库的发布页，收到的是：{url}")),
         );
-        Ok(UpdateReport {
-            current: status.current,
-            latest: status.latest,
-            has_update: status.has_update,
-            release_url: status.release_url,
-            published_at: status.published_at,
-            error: status.error,
-        })
-    })
-    .await
+    }
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(opener)
+        .arg(&url)
+        .spawn()
+        .map_err(|_| CoreError::internal("无法打开浏览器"))?;
+    Ok(())
 }
 
 /// 平台信息。前端据此设置 `data-platform` 与窗口相关 CSS 变量。
@@ -1192,4 +1391,294 @@ fn status_of(desktop: &DesktopState, operation_id: &str) -> Result<ApplyStatus, 
         open: !state.finished(),
         events: state.operation.events.clone(),
     })
+}
+
+/* ------------------------------------------------------------------ 工具管理 */
+
+/// 当前界面语言，用于取工具展示名。前端传的是完整 locale（`zh-Hans` / `en`）。
+fn locale_of(value: Option<String>) -> String {
+    match value.as_deref() {
+        Some(locale) if locale.starts_with("zh") => "zh-Hans".to_owned(),
+        _ => "en".to_owned(),
+    }
+}
+
+fn now_seconds() -> i64 {
+    switch_core::time_now()
+}
+
+/// 工具清单与状态。`refresh = false` 时复用未过期的探测结论。
+#[tauri::command]
+pub async fn tools_state(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    locale: Option<String>,
+    refresh: bool,
+) -> Result<Vec<switch_core::toolhub::ToolState>, CoreError> {
+    run(window, state, move |desktop| {
+        let locale = locale_of(locale);
+        desktop.tools()?.list(&locale, refresh, now_seconds())
+    })
+    .await
+}
+
+/// 强制重探一个工具。
+#[tauri::command]
+pub async fn tools_probe(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    tool_id: String,
+    locale: Option<String>,
+) -> Result<switch_core::toolhub::ToolState, CoreError> {
+    run(window, state, move |desktop| {
+        let locale = locale_of(locale);
+        desktop.tools()?.probe_one(&tool_id, &locale, now_seconds())
+    })
+    .await
+}
+
+/// 支持安装技能的目标工具及其技能根目录。
+#[tauri::command]
+pub async fn tools_skill_targets(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<Vec<switch_core::toolhub::SkillTarget>, CoreError> {
+    run(window, state, |desktop| {
+        Ok(desktop.tools()?.skill_targets())
+    })
+    .await
+}
+
+/* ------------------------------------------------------------------ 插件中心 */
+
+#[tauri::command]
+pub async fn plugins_sources(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<Vec<switch_core::plugins::SourceSummary>, CoreError> {
+    run(window, state, |desktop| desktop.plugins().sources()).await
+}
+
+#[tauri::command]
+pub async fn plugins_add_source(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    repo: String,
+) -> Result<Vec<switch_core::plugins::SourceSummary>, CoreError> {
+    run(window, state, move |desktop| {
+        desktop.plugins().add_source(&repo)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn plugins_remove_source(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    repo: String,
+) -> Result<Vec<switch_core::plugins::SourceSummary>, CoreError> {
+    run(window, state, move |desktop| {
+        desktop.plugins().remove_source(&repo)
+    })
+    .await
+}
+
+/// 浏览一个来源的技能目录。这一步会联网，失败原因原样返回给界面。
+#[tauri::command]
+pub async fn plugins_browse(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    repo: String,
+) -> Result<switch_core::plugins::RepoCatalog, CoreError> {
+    run(window, state, move |desktop| {
+        desktop.plugins().browse(&repo, now_seconds())
+    })
+    .await
+}
+
+/// 生成安装计划。不写文件——界面据此展示将写入什么、哪里会冲突。
+#[tauri::command]
+pub async fn plugins_preview(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    request: switch_core::plugins::InstallRequest,
+) -> Result<switch_core::plugins::InstallPreview, CoreError> {
+    run(window, state, move |desktop| {
+        desktop.plugins().preview(&request)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn plugins_install(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    request: switch_core::plugins::InstallRequest,
+) -> Result<switch_core::plugins::InstallReport, CoreError> {
+    run(window, state, move |desktop| {
+        desktop.plugins().install(&request, now_seconds())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn plugins_installed(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<Vec<switch_core::plugins::SkillRecord>, CoreError> {
+    run(window, state, |desktop| desktop.plugins().installed()).await
+}
+
+#[tauri::command]
+pub async fn plugins_check_updates(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<Vec<switch_core::plugins::UpdateInfo>, CoreError> {
+    run(window, state, |desktop| desktop.plugins().check_updates()).await
+}
+
+/// 启用 / 禁用某个技能。实现是给技能目录改名，界面必须说明这一点。
+#[tauri::command]
+pub async fn plugins_set_enabled(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    skill_id: String,
+    target_tool: String,
+    enabled: bool,
+) -> Result<switch_core::plugins::SkillRecord, CoreError> {
+    run(window, state, move |desktop| {
+        desktop
+            .plugins()
+            .set_enabled(&skill_id, &target_tool, enabled)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn plugins_uninstall(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    skill_id: String,
+    targets: Vec<String>,
+) -> Result<Vec<switch_core::plugins::UninstallOutcome>, CoreError> {
+    run(window, state, move |desktop| {
+        desktop.plugins().uninstall(&skill_id, &targets)
+    })
+    .await
+}
+
+/* ------------------------------------------------------------------ 内容中心 */
+
+#[tauri::command]
+pub async fn content_sources(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<Vec<switch_core::content::FeedSource>, CoreError> {
+    run(window, state, |desktop| desktop.content().sources()).await
+}
+
+#[tauri::command]
+pub async fn content_save_source(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    draft: switch_core::content::FeedSourceDraft,
+) -> Result<switch_core::content::FeedSource, CoreError> {
+    run(window, state, move |desktop| {
+        desktop.content().save_source(draft, now_seconds())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn content_delete_source(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    source_id: String,
+) -> Result<(), CoreError> {
+    run(window, state, move |desktop| {
+        desktop.content().delete_source(&source_id)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn content_items(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    source_id: Option<String>,
+    lang: Option<String>,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<switch_core::content::FeedItem>, CoreError> {
+    run(window, state, move |desktop| {
+        desktop
+            .content()
+            .items(source_id.as_deref(), lang.as_deref(), limit, offset)
+    })
+    .await
+}
+
+/// 抓取。`sourceId` 指定单个源（手动刷新那一个）；`force` 忽略到期时间。
+#[tauri::command]
+pub async fn content_refresh(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    source_id: Option<String>,
+    force: bool,
+) -> Result<switch_core::content::RefreshReport, CoreError> {
+    run(window, state, move |desktop| {
+        desktop
+            .content()
+            .refresh(source_id.as_deref(), force, now_seconds())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn content_status(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<switch_core::content::ContentStatus, CoreError> {
+    run(window, state, |desktop| {
+        desktop.content().status(now_seconds())
+    })
+    .await
+}
+
+/// GitHub 令牌是否已配置。**不返回令牌本身**。
+#[tauri::command]
+pub async fn content_github_token_status(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+) -> Result<bool, CoreError> {
+    run(window, state, |desktop| {
+        Ok(desktop.github_token().is_some())
+    })
+    .await
+}
+
+/// 写入或清除 GitHub 令牌。令牌只进系统凭据库。
+#[tauri::command]
+pub async fn content_set_github_token(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    token: Option<String>,
+) -> Result<bool, CoreError> {
+    run(window, state, move |desktop| {
+        match token.filter(|value| !value.trim().is_empty()) {
+            Some(token) => {
+                desktop
+                    .vault()
+                    .store(switch_core::content::GITHUB_TOKEN_REF, token.trim())?;
+                Ok(true)
+            }
+            None => {
+                desktop
+                    .vault()
+                    .delete(switch_core::content::GITHUB_TOKEN_REF)?;
+                Ok(false)
+            }
+        }
+    })
+    .await
 }

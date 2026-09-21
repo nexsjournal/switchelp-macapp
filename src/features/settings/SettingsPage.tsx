@@ -60,6 +60,9 @@ export function SettingsPage({ client, gateway, onNavigate, onReopenOnboarding }
   }
 
   const checkUpdate = () => run('update', async () => { setUpdate(await client.checkUpdate()); });
+  /** 安装入口不在这里：它在侧栏左上角（见 docs/architecture/06-updates.md 的界面一节）。
+      这里的「到发布页」是手动兜底，走系统浏览器打开。 */
+  const openRelease = (url: string) => run('release', async () => { await client.openReleasePage(url); });
 
   const createBackup = () => run('backup', async () => {
     await client.createBackup(instances[0]!.id);
@@ -90,7 +93,9 @@ export function SettingsPage({ client, gateway, onNavigate, onReopenOnboarding }
     <section className={styles.card}>
       <h2><Palette size={18} />{t('settings.appearance')}</h2>
       <dl className={styles.rows}>
-        <dt>{t('settings.themeLabel')}</dt><dd>
+        {/* 控件的文字是垂直居中的（40px 高的下拉），标签默认与控件方框顶部对齐，
+            看上去像高了一截。带上 controlLabel：标签下沉 (40-20)/2，与控件里的文字对齐。 */}
+        <dt className={styles.controlLabel}>{t('settings.themeLabel')}</dt><dd>
           <select aria-label={t('settings.themeLabel')} value={preference} onChange={event => applyPreference(event.target.value as ThemePreference)}>
             <option value="dark">{t('settings.themeDark')}</option>
             <option value="light">{t('settings.themeLight')}</option>
@@ -98,7 +103,7 @@ export function SettingsPage({ client, gateway, onNavigate, onReopenOnboarding }
           </select>
           <span className="text-muted">{t('settings.themeNote', { resolved: resolved === 'dark' ? t('settings.themeDark') : t('settings.themeLight') })}</span>
         </dd>
-        <dt>{t('settings.language')}</dt><dd>
+        <dt className={styles.controlLabel}>{t('settings.language')}</dt><dd>
           <select aria-label={t('settings.language')} value={language} onChange={event => applyLanguage(event.target.value as LocalePreference)}>
             <option value="system">{t('common.followSystem')}</option>
             <option value="zh-CN">{t('settings.languageZh')}</option>
@@ -174,7 +179,7 @@ export function SettingsPage({ client, gateway, onNavigate, onReopenOnboarding }
       </dl>
       <div className={styles.actions}>
         <button onClick={() => void checkUpdate()} disabled={busy === 'update'}>{busy === 'update' ? t('diag.checking') : t('settings.checkUpdate')}</button>
-        {update?.hasUpdate && update.releaseUrl && <a className={styles.linkButton} href={update.releaseUrl} target="_blank" rel="noreferrer noopener">{t('settings.openRelease')}</a>}
+        {update?.hasUpdate && update.releaseUrl && <button onClick={() => openRelease(update.releaseUrl!)} disabled={busy === 'release'}>{t('settings.openRelease')}</button>}
         <button onClick={() => void createBackup()} disabled={busy === 'backup' || !instances.length}>{t('settings.backupNow')}</button>
       </div>
 

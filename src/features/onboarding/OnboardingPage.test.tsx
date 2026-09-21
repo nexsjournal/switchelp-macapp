@@ -61,7 +61,7 @@ test('检测到其他配置管理工具时说明冲突：残留是什么、在�
 
   expect(await screen.findByText(/检测到其他配置管理工具：other-tool/)).toBeInTheDocument();
   // 只报一个工具名等于把「去哪儿删、删什么」留给用户猜。
-  expect(screen.getByText(/托管标记还在配置文件里/)).toBeInTheDocument();
+  expect(screen.getByText(/它留下的标记还在配置文件里/)).toBeInTheDocument();
   const conflict = within(screen.getByRole('note'));
   expect(conflict.getByText('涉及的文件')).toBeInTheDocument();
   expect(conflict.getByText(instance.configFile)).toBeInTheDocument();

@@ -42,7 +42,7 @@ test('主导航有可读名称，模型表格的表头带列作用域', async ()
   render(<App client={client} />);
   await screen.findByText('测试供应商');
   // 模型表格已归到模型页（概览只留卡片）。
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await screen.findByText('测试模型');
 
   expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();

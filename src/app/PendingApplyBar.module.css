@@ -1,16 +1,15 @@
 /*
- * 待应用条：常驻在页面内容之后的一条，不是浮层（浮层会盖住最后一行的按钮）。
- * 左边说明「几个模型、涉及谁、为什么要重启」，右边是动作。
+ * 待应用条：网关页页头下面的一条普通行，不再吸底、不再跨页常驻。
+ *
+ * **不是卡片**：它只是「还有几个模型没生效」这一行事实 + 两个动作，用一条底部分割线与
+ * 下面的内容分开就够了。做成卡片会跟真正的卡片（供应商详情）抢层级，还会和下面的
+ * 两栏贴在一起看起来像同一个块。
  */
-/*
- * 吸在页面可视区底部：内容再长也不必滚到底才能看见「应用」。
- * 用 sticky 而不是 fixed——fixed 会盖住最后一行，也脱离文档流让页面看起来少一截；
- * sticky 在滚到底时回到自然位置（仍留出页面自身的下边距）。
- */
-.bar { position: sticky; bottom: 0; z-index: var(--z-apply-bar); display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  margin-top: 24px; padding: 12px 16px;
-  border: 1px solid var(--accent-border); border-radius: var(--radius-sm); background: var(--bg-elevated);
-  color: var(--accent); font-size: var(--font-size-label); line-height: var(--line-height-label); box-shadow: 0 -8px 16px var(--shadow-color); }
+.bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  /* 上 20 分开页头，下 16 让分割线不要贴着下面的两栏。 */
+  margin: 20px 0 16px; padding: 0 0 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--accent); font-size: var(--font-size-label); line-height: var(--line-height-label); }
 .bar > svg { flex-shrink: 0; }
 .text { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; color: var(--text-primary); }
 .text span { font-size: var(--font-size-caption); line-height: var(--line-height-caption); }

@@ -1,9 +1,12 @@
 /*
- * 勾选单元格。两种表面（整页编辑器、添加模型弹窗）共用一份样式，
+ * 勾选单元格。多选项的每一处（整页编辑器、添加模型弹窗、诊断包范围）共用一份样式，
  * 所以「同一件事看起来一样」靠复用而不是靠抄。
  *
  * 选择器带 `.cells` 前缀并显式写 `flex-direction: row`：全局的 `.form-fields label`
  * 会把单元格压成竖排，而它设的 `flex-direction` 我这边原本没有对应声明。
+ *
+ * 方框与对勾不在这里写：那是全局唯一的一套（global.css 的 `input[type='checkbox']`）。
+ * 这里只剩「带描边的单元格」这一层皮。
  */
 .cells { display: flex; flex-wrap: wrap; gap: 8px; }
 .cells .cell { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; min-height: var(--control-height-compact);
@@ -13,13 +16,3 @@
 .cells .cell > svg { color: var(--text-muted); }
 .cells .blocked { color: var(--text-muted); cursor: not-allowed; background: var(--bg-surface); }
 .cells .blocked:hover { background: var(--bg-surface); }
-
-/* 方框自己画：外框 18px，`flex-shrink: 0` 免得长标签把它挤扁。 */
-.cells .box { position: relative; display: inline-flex; flex-shrink: 0; }
-.cells .box input { appearance: none; -webkit-appearance: none; margin: 0; width: 18px; height: 18px;
-  border: 1px solid var(--border-control); border-radius: var(--radius-xs); background: var(--bg-surface); }
-.cells .box input:checked { background: var(--text-primary); border-color: var(--text-primary); }
-/* 勾号是真实元素而不是伪元素：`appearance: none` 之后各引擎对 input 上的 ::after
-   支持不一致，画一个自己的图标最稳。它只做视觉，点击由 label 承担。 */
-.cells .tick { position: absolute; left: 3px; top: 3px; color: var(--bg-surface); opacity: 0; pointer-events: none; }
-.cells .box input:checked ~ .tick { opacity: 1; }

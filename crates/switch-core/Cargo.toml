@@ -11,13 +11,15 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 toml_edit = "0.22"
-time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+time = { version = "0.3", features = ["formatting", "parsing", "macros", "local-offset"] }
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 percent-encoding = "2"
 rusqlite = { version = "0.40", features = ["bundled"] }
 zeroize = "1"
 ureq = "3.4.2"
+# 订阅源解析（RSS/Atom）。本就在依赖图里（经 plist → tauri），不新增下载面。
+quick-xml = "0.42"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 keyring = { version = "3.6", features = ["apple-native", "windows-native"] }

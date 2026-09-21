@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Activity, Boxes, ChevronRight, LayoutDashboard, ListChecks, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, SlidersHorizontal, Settings as SettingsIcon } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Activity, Boxes, ChevronRight, LayoutDashboard, ListChecks, Newspaper, PackageOpen, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, SlidersHorizontal, Wrench, Settings as SettingsIcon } from 'lucide-react';
 import type { Credential, Model, Provider } from '@/contracts/types';
-import { type AppliedSummary, type DesktopClient, type GatewayReport, type PlatformReport, toCoreError } from '@/desktop/client';
+import { type AppliedSummary, type DesktopClient, type GatewayReport, type PlatformReport, type UpdateReport, toCoreError } from '@/desktop/client';
 import { desktopClient } from '@/desktop/transport';
 import { ProviderForm } from '@/features/providers/ProviderForm';
 import { ModelEditorPage } from '@/features/models/ModelEditorPage';
 import { OnboardingPage } from '@/features/onboarding/OnboardingPage';
 import { OverviewPage } from '@/features/overview/OverviewPage';
 import { ModelsPage } from '@/features/models/ModelsPage';
+import { hostStateKeys, hostStateVariant, providerHostState } from '@/features/models/policy';
 import { Dialog } from '@/components/Dialog';
 import { ToastHost, showToast } from '@/components/Toast';
 import { PendingApplyBar } from './PendingApplyBar';
@@ -17,15 +18,30 @@ import { CodexConfigPage } from '@/features/codex/CodexConfigPage';
 import { ConnectionPage } from '@/features/diagnostics/ConnectionPage';
 import { LogsPage } from '@/features/diagnostics/LogsPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
+import { ToolsPage } from '@/features/tools/ToolsPage';
+import { PluginHubPage } from '@/features/plugins/PluginHubPage';
+import { ContentPage } from '@/features/content/ContentPage';
+import { UpdateDialog } from '@/features/update/UpdateDialog';
+import { UpdatePill } from '@/features/update/UpdatePill';
 
 import styles from './App.module.css';
 
 import { useLocale, t } from '@/i18n';
-type Page = 'overview' | 'providers' | 'codexConfig' | 'diagnostics' | 'logs' | 'settings';
+type Page = 'overview' | 'providers' | 'codexConfig' | 'tools' | 'plugins' | 'content' | 'diagnostics' | 'logs' | 'settings';
+/**
+ * 侧栏导航。`group` 只做视觉分组：它是分隔标签，不可点击也不折叠——
+ * 为一组分隔引入折叠状态，收益是一条线，成本是用户又要学一个新控件。
+ */
 const navigation = [
-  { id: 'overview', icon: LayoutDashboard }, { id: 'providers', icon: Server },
+  { id: 'overview', icon: LayoutDashboard },
+  { id: 'providers', icon: Server },
   { id: 'codexConfig', icon: SlidersHorizontal },
-  { id: 'diagnostics', icon: Activity }, { id: 'logs', icon: ListChecks },
+  // 「扩展」一组：内容中心放在最前（按用户要求），其余按「工具 → 插件」的因果顺序。
+  { id: 'content', icon: Newspaper, group: 'shell.navGroup.extensions' },
+  { id: 'tools', icon: Wrench },
+  { id: 'plugins', icon: PackageOpen },
+  { id: 'diagnostics', icon: Activity, group: 'shell.navGroup.diagnostics' },
+  { id: 'logs', icon: ListChecks },
 ] as const;
 /**
  * 网关状态文案。未启动时必须显示原因或“未启动”，绝不能笼统写成“已接通”。
@@ -128,6 +144,9 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
   /** 破坏性操作一律走确认：说明后果、说清不能撤销，再执行。 */
   const [confirm, setConfirm] = useState<{ title: string; body: string; confirmLabel: string; run: () => Promise<void> } | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
+  /** 更新检查结果；失败或未检查时为 null（侧栏里就不会出现更新按钮）。 */
+  const [update, setUpdate] = useState<UpdateReport | null>(null);
+  const [updateOpen, setUpdateOpen] = useState(false);
   const selectedProvider = providers.find(p => p.id === selectedProviderId);
   /**
    * 向导渲染在概览页里。供应商弹窗是覆盖在上面的模态，**不**让向导卸载——否则用户点
@@ -172,6 +191,24 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
     if (result?.confirmedOperationIds.length) await refresh();
   }, [client, refresh]);
   useEffect(() => { void reconcileReload(); }, [reconcileReload]);
+  /**
+   * 启动即查一次更新：更新按钮要在侧栏里自己出现，不能等用户先去设置页点「检查更新」。
+   *
+   * 失败静默——查不到就是没有按钮，不该在界面上报警（手动入口在设置页，那里会如实
+   * 显示失败原因）。这里也不阻塞首屏：它跟数据加载并行跑。
+   */
+  useEffect(() => {
+    void client.checkUpdate().then(setUpdate).catch(() => setUpdate(null));
+  }, [client]);
+  /**
+   * 上一次更新装完的结果。安装成功时不会有收尾界面（装完即重启），所以「到底成功了没有」
+   * 只能靠这条提示说清楚；标记文件读一次就删，只在更新后的第一次启动出现。
+   */
+  useEffect(() => {
+    void client.takeUpdateResult()
+      .then(version => { if (version) showToast(t('update.done', { version })); })
+      .catch(() => undefined);
+  }, [client]);
   useEffect(() => {
     // 窗口重新获得焦点是对账的最佳时机：用户切去重启 Codex、再切回来就走这条。
     window.addEventListener('focus', reconcileReload);
@@ -215,9 +252,9 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
   /** Key 变了：供应商行的状态与详情里的当前 Key 都要跟着变。 */
   function keysChanged() { setKeyVersion(version => version + 1); void refresh(); }
   /**
-   * 供应商弹窗保存成功后只刷新数据，**不关弹窗**：它就地变成这家供应商的编辑态，
-   * 用户接着加 Key、获取模型，不必保存完再去找回来。
-   * 提示由弹窗自己推（它知道这次保存是新键还是更新），这里不重复报一次。
+   * 供应商弹窗保存成功后只刷新数据；**关不关弹窗由弹窗自己决定**（见 ProviderForm 的 save()：
+   * 保存成功即关闭，因为用户把「不关」读成「没保存成功」）。
+   * 提示也由弹窗自己推（它知道这次保存是新键还是更新），这里不重复报一次。
    */
   function providerSaved() { keysChanged(); }
   const pending = models.filter(m => m.inCatalog && m.hostState !== 'loaded');
@@ -237,10 +274,25 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
     {/* 显式把焦点交给主内容：部分引擎不会为片段链接移动焦点。 */}
     <a className="skip-link" href="#main-content" onClick={() => document.getElementById('main-content')?.focus()}>{t('common.skipToContent')}</a>
     <aside className={styles.sidebar}>
-      <div className={styles.brand} data-tauri-drag-region="deep"><div className={styles.brandIcon}><AppLogo size={20} /></div><div><strong>{t('app.name')}</strong><span>{t('app.subtitle')}</span></div></div>
+      <div className={styles.brand} data-tauri-drag-region="deep">
+        <div className={styles.brandIcon}><AppLogo size={20} /></div>
+        <div>
+          <strong>{t('app.name')}</strong>
+          {/* 有更新时按钮**顶掉副标题那一行**（同一位置、同一列），所以品牌块只有两行，
+              徽标也仍然是和这一整列居中的——把按钮挂到这一列外面，徽标就只跟名字那一行居中，
+              看起来「徽标和按钮没对齐」。 */}
+          {update?.hasUpdate && update.latest
+            ? <span className={styles.brandUpdate}><UpdatePill version={update.latest} onClick={() => setUpdateOpen(true)} /></span>
+            : <span className={styles.brandSubtitle}>{t('app.subtitle')}</span>}
+        </div>
+      </div>
       {/* 文字包在 span 里：窄窗（含 200% 缩放）侧栏收窄成图标栏时把它视觉隐藏，
           但保留在无障碍树里——收起文字不该把按钮的可见名字也一起收掉。 */}
-      <nav aria-label={t('shell.navLabel')}>{navigation.map(({ id, icon: Icon }) => <button key={id} className={page === id ? styles.active : ''} aria-current={page === id ? 'page' : undefined} onClick={() => navigate(id)}><Icon size={18} /><span className={styles.navLabel}>{t(`nav.${id}`)}</span></button>)}</nav>
+      <nav aria-label={t('shell.navLabel')}>{navigation.map(({ id, icon: Icon, ...entry }) => <Fragment key={id}>
+        {/* 分组标签只在组的第一个条目前出现一次。 */}
+        {'group' in entry && entry.group && <span className={styles.navGroup} aria-hidden="true">{t(entry.group)}</span>}
+        <button className={page === id ? styles.active : ''} aria-current={page === id ? 'page' : undefined} onClick={() => navigate(id)}><Icon size={18} /><span className={styles.navLabel}>{t(`nav.${id}`)}</span></button>
+      </Fragment>)}</nav>
       {/* 设置按设计放在侧栏底部，与日常导航分开。 */}
       <button className={`${styles.settingsEntry} ${page === 'settings' ? styles.active : ''}`}
         aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}>
@@ -257,12 +309,26 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
           onDirtyChange={setEditorDirty}
           onCancel={() => { setModelEditor(null); setEditorDirty(false); }}
           onSaved={async () => { setModelEditor(null); setEditorDirty(false); showToast(t('copy.draftSaved')); await refresh(); }} /> : <>
-        {!showOnboarding && <header className={styles.pageHeader}><div><h1 className="text-page-title">{t(`nav.${page}`)}</h1><p>{({ overview: t('page.overviewHint'), providers: t('page.providersHint'), codexConfig: t('page.codexHint'), diagnostics: t('page.diagnosticsHint'), logs: t('page.logsHint'), settings: t('page.settingsHint') })[page]}</p></div>
+        {!showOnboarding && <header className={styles.pageHeader}><div><h1 className="text-page-title">{t(`nav.${page}`)}</h1><p>{({
+              overview: t('page.overviewHint'), providers: t('page.providersHint'), codexConfig: t('page.codexHint'),
+              tools: t('page.toolsHint'), plugins: t('page.pluginsHint'), content: t('page.contentHint'),
+              diagnostics: t('page.diagnosticsHint'), logs: t('page.logsHint'), settings: t('page.settingsHint'),
+            })[page]}</p></div>
           <div className="actions"><button className="icon-button" aria-label={t('common.reload')} disabled={loading} onClick={() => void refresh()}><RefreshCw size={18} className={loading ? styles.spin : ''} /></button>
-            {page !== 'codexConfig' && page !== 'logs' && page !== 'diagnostics' && page !== 'settings' && <button className="primary" disabled={loading} onClick={() => setProviderEditor('new')}><Plus size={18} />{t('action.addProvider')}</button>}</div></header>}
+            {page !== 'codexConfig' && page !== 'logs' && page !== 'diagnostics' && page !== 'settings'
+              && page !== 'tools' && page !== 'plugins' && page !== 'content'
+              && <button className="primary" disabled={loading} onClick={() => setProviderEditor('new')}><Plus size={18} />{t('action.addProvider')}</button>}</div></header>}
         {/* 页面状态（加载失败）留在页面里：它要一直看得见，直到状态本身改变。
             动作结果（已保存、已应用…）走全局 Toast，弹窗与常规界面共用同一个位置。 */}
         {error && <div className="error-message" role="alert">{error}</div>}
+        {/*
+          * 「应用 + 重启」只出现在供应商与模型页，紧跟页头——用户正是在这一页配完供应商与模型，
+          * 生效的入口就该在这一页看得见。它以前是**每个页面**吸底的一条，理由是「入口不能只在
+          * Codex 配置页里」，但代价是任何一页都被它盖住一行、看起来像全局状态栏。
+          * 「有几个模型待确认加载」这个事实在上方胶囊与底栏仍然可见，口径是同一句文案。
+          */}
+        {page === 'providers' && !showOnboarding && !modelEditor && <PendingApplyBar client={client} providers={providers}
+          models={models} summary={summary} onApplied={refresh} onOpenDiff={() => navigate('codexConfig')} />}
         {!loaded && !error ? <div className={styles.empty} role="status" aria-live="polite">{t('shell.loading')}</div> : <>
           {showOnboarding && <OnboardingPage client={client} providers={providers} models={models}
             credentialsByProvider={credentialsByProvider}
@@ -289,8 +355,17 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
                 onChange={event => setQuery(event.target.value)} />
             </div>}
             {visibleProviders.map(provider => {
-              const status = providerStatus(provider, credentialsByProvider[provider.id] ?? []);
-              const modelCount = models.filter(m => m.providerId === provider.id).length;
+              const own = models.filter(m => m.providerId === provider.id);
+              const modelCount = own.length;
+              /*
+               * 「已加载」是**供应商这一层**的事实：同一家的模型要么一起进了菜单、要么一起
+               * 待应用。逐行显示既啰嗦又容易被读成「每个模型各自的状态」。
+               * 一家供应商一个模型都没配时，Codex 状态无从谈起，那一行退回 Key 的状态。
+               */
+              const hostState = providerHostState(own);
+              const status = hostState
+                ? { tone: (hostStateVariant(hostState) || 'muted') as 'success' | 'warning' | 'muted', label: t(hostStateKeys[hostState]) }
+                : providerStatus(provider, credentialsByProvider[provider.id] ?? []);
               const selected = selectedProviderId === provider.id;
               return <button key={provider.id} className={`${styles.providerItem} ${selected ? styles.selected : ''}`}
                 onClick={() => setSelectedProviderId(provider.id)} aria-current={selected ? 'true' : undefined}>
@@ -332,15 +407,13 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
               onEditModel={target => setModelEditor(target)} providerScope={selectedProvider.id} embedded />
           </section> : <section className={styles.card}><EmptyState icon={Settings2} title={t('providers.noneSelected')} description={t('providers.noneSelectedBody')} /></section>}</div>}
           {page === 'codexConfig' && <CodexConfigPage client={client} models={models} summary={summary} onApplied={() => void refresh()} />}
+          {page === 'tools' && <ToolsPage client={client} />}
+          {page === 'plugins' && <PluginHubPage client={client} />}
+          {page === 'content' && <ContentPage client={client} />}
           {page === 'diagnostics' && <ConnectionPage client={client} providers={providers} />}
           {page === 'logs' && <LogsPage client={client} />}
           {page === 'settings' && <SettingsPage client={client} gateway={gateway} onNavigate={navigate}
             onReopenOnboarding={openOnboarding} />}
-          {/* 待应用条常驻在页面内容之后：配好供应商与模型之后，生效只差「应用 + 重启」这一步，
-              入口不能只在 Codex 配置页里（真机上用户在自己配的页面上找不到任何能生效的按钮）。
-              Codex 配置页自己就有完整的操作行，那里不重复出现。 */}
-          {page !== 'codexConfig' && !showOnboarding && !modelEditor && <PendingApplyBar client={client} providers={providers}
-            models={models} summary={summary} onApplied={refresh} onOpenDiff={() => navigate('codexConfig')} />}
         </>}
       </>}
       </main>
@@ -366,6 +439,9 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
       </footer>} />}
     {/* 唯一的提示宿主：不论从哪个页面、哪个弹窗推的提示，都出现在同一个位置。 */}
     <ToastHost />
+
+    {/* 更新弹窗：入口在侧栏左上角的更新胶囊。 */}
+    {updateOpen && update && <UpdateDialog client={client} report={update} onClose={() => setUpdateOpen(false)} />}
 
     {confirm && <Dialog width="narrow" title={confirm.title} description={confirm.body} onClose={() => setConfirm(null)} busy={confirmBusy}
       footer={<footer className="form-footer">

@@ -212,11 +212,20 @@ fn upgrading_from_v1_prefixes_default_shaped_display_names() {
         repo.save_model(default_shaped, 0).unwrap();
         repo.save_model(custom, 0).unwrap();
     }
-    // 退回 v1：schema 版本调回去，并删掉 v3 才有的表——真实 v1 库里没有它，
+    // 退回 v1：schema 版本调回去，并删掉 v3 / v4 才有的表——真实 v1 库里没有它们，
     // 留着就不是「一个 v1 库」了（迁移不该被要求容忍一个不可能存在的中间状态）。
+    // 新增表时这里要跟着加：漏一张就会让「从 v1 升级」的模拟失真。
     {
         let connection = rusqlite::Connection::open(&path).unwrap();
-        connection.execute_batch("DROP TABLE settings;").unwrap();
+        connection
+            .execute_batch(
+                "DROP TABLE settings;
+                 DROP TABLE tool_probe_cache;
+                 DROP TABLE installed_skills;
+                 DROP TABLE feed_items;
+                 DROP TABLE feed_sources;",
+            )
+            .unwrap();
         connection.pragma_update(None, "user_version", 1).unwrap();
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))

@@ -49,7 +49,7 @@ section '① 本机绝对路径里的用户名'
 # 放行的是仓库里约定的中性占位（/Users/example、/Users/me、/home/user…），
 # 真实姓名不在其中，所以换机器也拦得住。
 PATHS='/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+|C:\\{1,2}Users\\{1,2}[A-Za-z0-9._-]+'
-PLACEHOLDER='/(Users|home)/(example|me|user|username|test|you|developer|nobody)([/"]|$)|C:\\{1,2}Users\\{1,2}(example|me|user)'
+PLACEHOLDER='/(Users|home)/(example|someone|demo|me|user|username|test|you|developer|nobody)([/"]|$)|C:\\{1,2}Users\\{1,2}(example|me|user)'
 if hits=$(scan "$PATHS" | grep -vE "$PLACEHOLDER"); then
   printf '%s\n' "$hits" | head -20
   flag "把真实用户名换成中性占位（例如 /Users/example）后再提交"

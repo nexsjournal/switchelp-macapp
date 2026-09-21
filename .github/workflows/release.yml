@@ -224,6 +224,10 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_KEYCHAIN_PROFILE: gptswitch
+          # 应用内更新的 minisign 私钥：没配就产不出更新包，Release 里会缺 latest.json。
+          # 密钥只生成一次、公钥固化在已发布的包里，见 docs/architecture/06-updates.md §4。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm exec tauri build --target ${{ matrix.target }}
 
       - name: 校验签名与公证
@@ -245,11 +249,22 @@ jobs:
           fi
 
       - name: 归集产物
+        env:
+          # 平台键用矩阵里的 target 直接换算：darwin-aarch64 / darwin-x86_64。
+          PLATFORM: ${{ matrix.target == 'aarch64-apple-darwin' && 'darwin-aarch64' || 'darwin-x86_64' }}
         run: |
           mkdir -p out
           find target -type f -name '*.dmg' -exec cp {} out/ \;
           ditto -c -k --keepParent "target/${{ matrix.target }}/release/bundle/macos/Switchelp.app" \
             "out/Switchelp-${{ matrix.target }}.zip"
+          # 应用内更新要的两个附件：更新包与它的 minisign 签名。
+          BUNDLE="target/${{ matrix.target }}/release/bundle/macos"
+          cp "$BUNDLE/Switchelp.app.tar.gz" "$BUNDLE/Switchelp.app.tar.gz.sig" out/
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          node scripts/make-latest-json.mjs --version "$VERSION" \
+            --sig out/Switchelp.app.tar.gz.sig \
+            --url "https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag || github.ref_name }}/Switchelp.app.tar.gz" \
+            --target "$PLATFORM" > "out/latest-$PLATFORM.json"
           ls -la out
 
       - uses: actions/upload-artifact@v4
@@ -275,6 +290,21 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: 合并各架构的更新清单
+        run: |
+          # 每个 macOS 架构各出一条 latest-*.json；下载者拿到的那份必须是合起来的。
+          # 版本不一致时脚本会报错退出——那说明两个架构出了不同版本，宁可不发。
+          shopt -s nullglob
+          manifests=(artifacts/latest-*.json)
+          if [ ${#manifests[@]} -gt 0 ]; then
+            node scripts/make-latest-json.mjs --merge "${manifests[@]}" > artifacts/latest.json
+            rm -f "${manifests[@]}"
+            echo "已合并 ${#manifests[@]} 份清单："
+            cat artifacts/latest.json
+          else
+            echo "::warning::这次没有更新清单（未配置 TAURI_SIGNING_PRIVATE_KEY 时产不出来），Release 里的应用内更新不可用：老用户点更新会报「更新源里没有可读的更新清单」。"
+          fi
 
       - name: 列出即将发布的产物
         id: collect

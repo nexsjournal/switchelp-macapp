@@ -8,45 +8,87 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  /* 底色：画布最暗，卡片最亮，层级靠亮度差而不是描边堆叠 */
-  --bg-canvas: #09090b;
-  --bg-sidebar: #101012;
-  --bg-surface: #18181b;
-  --bg-elevated: #202024;
-  --bg-input: #111114;
-  --bg-hover: #252529;
-  --bg-selected: #2d2d32;
+  /*
+   * 底色：画布最暗，卡片最亮，层级靠亮度差而不是描边堆叠。
+   * 灰阶一律带一点冷（蓝色相），暖灰配上天蓝强调色会显脏——这一档相对旧值只挪了色相，
+   * 亮度基本不变，所以文字对比度不变（实测弱文字压卡片 5.43、压浮起层 4.93，都过 4.5）。
+   */
+  --bg-canvas: #08090c;
+  --bg-sidebar: #0d0f13;
+  --bg-surface: #15181d;
+  --bg-elevated: #1d2127;
+  --bg-input: #0f1116;
+  --bg-hover: #23262c;
+  --bg-selected: #2b2e35;
 
   --text-primary: #f4f4f5;
   --text-secondary: #b4b4be;
   --text-muted: #8d8d99;
 
-  --border-subtle: #303036;
+  --border-subtle: #2b3038;
   --border-control: #777783;
+  /*
+   * 表单控件的**静息态**描边（2026-09-21 加，当天又调暗一档）。
+   *
+   * 第一版从 --border-control（#777783）降到 #6a6a76，理由是那一档压浮起层只剩 3.03，
+   * 再暗就过不了验收规则里的「需要识别的控件边界 3:1」。用户第二次仍然说「太明显」，
+   * 所以第二次是**明知低于 3:1 的有意取舍**：我在对话里给出实测数字（3.54 / 3.33 / 3.03）
+   * 和三条替代方案（保持 / 改设计用底色区分 / 0.5px 发丝线），用户选了「再暗一档，接受低于 3:1」。
+   * 现在是：压输入底 2.38、压卡片 2.24、压浮起层 2.03——不再满足 3:1，
+   * 这是一条**已登记的例外**（见 docs/development/02-testing-and-release.md §可访问性、
+   * docs/design/01-foundations.md 的表单描边一节）。审计时不要当成没过线的 bug 报回来。
+   *
+   * 悬停档不动，仍是 --border-control（压输入底 4.27）：它同时还要当状态点的**填充色**，
+   * 那些点是非文本元素、照样要 3:1，不能跟着降。
+   */
+  --border-field: #50505c;
 
-  /* 强调色：唯一的“亮色”，只用在需要吸引注意的地方 */
-  --accent: #38bdf8;
-  --accent-strong: #0ea5e9;
-  --accent-fg: #06202e;
-  --accent-subtle: #0e2a3a;
-  --accent-border: #1d5f7d;
+  /*
+   * 强调色：唯一的“亮色”，只用在需要吸引注意的地方。
+   *
+   * 2026-09-21 由天蓝换成青绿（用户原话：蓝「太常规、太普通，像一个假的 App」）。
+   * 青绿不是「另一个默认蓝」；同色系的暖橙没有走，因为灰阶本身带冷蓝相，暖色配上去显脏。
+   * 实测：深字压强调底 9.09、强调色文字压自己的淡底 6.76、压侧栏 10.30，全部远超 AA。
+   */
+  --accent: #2dd4bf;
+  --accent-strong: #14b8a6;
+  --accent-fg: #04211d;
+  --accent-subtle: #0c3a33;
+  --accent-border: #1f7d70;
 
-  --action-primary-bg: #38bdf8;
-  --action-primary-fg: #06202e;
+  --action-primary-bg: #2dd4bf;
+  --action-primary-fg: #04211d;
 
-  --focus-ring: #38bdf8;
+  --focus-ring: #2dd4bf;
 
-  --status-success: #6ee7b7;
+  /*
+   * 填充档：点、条这类非文本元素。深色主题下与文字档同值就够了。
+   *
+   * 成功绿这一轮从薄荷色（`#6ee7b7`）挪到更纯的绿：薄荷与新的青绿强调色只差十几度色相，
+   * 「已加载」的绿点会和侧栏当前的青绿项像同一个颜色。实测新值压卡片 10.21、
+   * 压自己的淡底 8.79、压选中底 7.80，全部合格。
+   */
+  --status-success-dot: #4ade80;
+  --status-warning-dot: #fcd34d;
+  --status-danger-dot: #fda4af;
+  --status-success: #4ade80;
   --status-warning: #fcd34d;
   --status-danger: #fda4af;
   --status-info: #7dd3fc;
 
-  --status-success-bg: #10261f;
+  --status-success-bg: #0e2a20;
   --status-warning-bg: #2a2413;
   --status-danger-bg: #2c171d;
   --status-info-bg: #14242d;
 
   --select-arrow: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%238d8d99' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><path d='M3 4.6 6 1.8l3 2.8'/><path d='M3 7.4 6 10.2l3-2.8'/></svg>");
+  /*
+   * 勾选框里的对勾。全项目只有这一个图形：原生控件对勾的形状随引擎变（实测 macOS 上
+   * 18px 的原生对勾是折线，直角、笔画细，和 Lucide 的圆头图标不是一套），所以勾选框
+   * 由我们自己画（见 global.css）。
+   * 勾的颜色跟着「勾选框被填成什么底」走：深色主题填的是近白色，勾就得是深色。
+   */
+  --checkbox-tick: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%2315181d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M2.6 6.4 4.9 8.7 9.4 3.5'/></svg>");
 
   --overlay: rgba(0, 0, 0, 0.56);
   --shadow-color: rgba(0, 0, 0, 0.28);
@@ -68,8 +110,10 @@
   --bg-surface: #ffffff;
   --bg-elevated: #ffffff;
   --bg-input: #ffffff;
-  --bg-hover: #e8e8ec;
-  --bg-selected: #e0e0e6;
+  --bg-hover: #eeeef2;
+  /* 选中底比悬停底更深一档，但不要太深：状态点（非文本，只要求 3:1）压在上面，
+     底越深点越糊。旧值 #e0e0e6 下鲜艳绿点只有 2.51，现在 #eaeaef 下是 2.75。 */
+  --bg-selected: #eaeaef;
 
   --text-primary: #18181b;
   --text-secondary: #52525b;
@@ -77,35 +121,64 @@
 
   --border-subtle: #dadae0;
   --border-control: #777783;
+  /* 静息态描边，与深色主题同一档的**有意取舍**（完整说明见深色主题里对这条 token 的注释）。
+     实测 #aaaab2 压白底 2.31、压画布 2.14、压侧栏 2.01——同样低于 3:1，同一条已登记例外。
+     浅色主题的输入框是白底白卡片，边界只由这条描边表达，所以它是这次取舍里代价最大的一处。 */
+  --border-field: #aaaab2;
 
   /*
-   * 强调色：亮色下用更深的同类色。白字主按钮、accent 链接、accent-subtle 上的
-   * 小标签都必须过 AA（4.5:1）；#0284c7 只有 4.10，统一压到 #0369a1（约 5.6:1）。
+   * 强调色分两档，因为它们的要求不同：
+   *
+   * - `--accent` / `--action-primary-bg` 是**底**（白字压在上面）：白字要过 AA 4.5:1，
+   *   所以青绿必须够深。#0f766e 是同时过两关的一档：白字压它 5.47；再亮一档
+   *   「accent 当字压在 accent-subtle 上」（侧栏选中项就是这么用的）就掉到 4.5 以下。
+   * - `--accent-fg` 是**字**：压在 accent 深底上，白永远是最高对比。
+   * - `--accent-subtle` / `--accent-border` 是淡底与描边：这里可以放开亮度。
+   *   实测 #0f766e 压 #e3f5f1 是 4.85，压侧栏底 4.77——两处都是「强调色当字」的真实用法。
    */
-  --accent: #0369a1;
-  --accent-strong: #0369a1;
+  --accent: #0f766e;
+  --accent-strong: #115e59;
   --accent-fg: #ffffff;
-  --accent-subtle: #e3f2fd;
-  --accent-border: #9dc9e8;
+  --accent-subtle: #e3f5f1;
+  --accent-border: #94d3c8;
 
-  --action-primary-bg: #0369a1;
+  --action-primary-bg: #0f766e;
   --action-primary-fg: #ffffff;
 
-  --focus-ring: #0369a1;
+  --focus-ring: #0f766e;
 
-  --status-success: #166534;
-  --status-warning: #854d0e;
-  --status-danger: #9f1239;
-  --status-info: #075985;
+  /*
+   * 状态色同样分两档：
+   * - 文字档（`--status-*`）压在浅色底或白底上，必须过 AA；旧值取的是 *-800
+   *   （#166534 / #854d0e / #9f1239），在白底上对比很高，看上去就是「发黑」。
+   *   现在改用 *-700 一档，实测：压白底 5.02 / 5.02 / 6.29，压各自的浅底 4.56 / 4.64 / 5.43。
+   * - 填充档（`--status-*-dot`）是点：非文本元素只要 3:1，于是可以用真正的绿/琥珀/红。
+   *   实测（冷启动实测，不是估算）：压白卡片 3.30 / 3.19 / 4.83；压在 --bg-selected
+   *   （#eaeaef）上 2.75 / 2.66 / 4.03 —— 绿与琥珀在选中底上低于 3:1，这是浅色主题的物理
+   *   上限（再深一档就回到「发黑」）。选中态另有一条描边与文字，颜色不是唯一线索。
+   */
+  --status-success: #047857;
+  --status-warning: #b45309;
+  --status-danger: #be123c;
+  --status-info: #0369a1;
 
-  --status-success-bg: #e7f5ee;
-  --status-warning-bg: #fbf3dd;
-  --status-danger-bg: #fce8ec;
-  --status-info-bg: #e4f0f7;
+  --status-success-dot: #059669;
+  --status-warning-dot: #d97706;
+  --status-danger-dot: #dc2626;
+
+  /* 浅底跟着文字档一起调浅，否则「亮一点的文字」压上去就差一点点过不了线（4.45 / 4.48）。
+     成功淡底偏绿而不是偏青：强调色换成青绿之后，薄荷色的淡底（旧值 #e6f7f1）与侧栏
+     选中项的淡底（--accent-subtle）几乎同色，两种「淡底」就分不出来了。实测 4.99。 */
+  --status-success-bg: #e9f8ee;
+  --status-warning-bg: #fef5e4;
+  --status-danger-bg: #fdeaea;
+  --status-info-bg: #e6f2fb;
 
   --overlay: rgba(24, 24, 27, 0.32);
   --shadow-color: rgba(24, 24, 27, 0.12);
   --select-arrow: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%237c7c88' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><path d='M3 4.6 6 1.8l3 2.8'/><path d='M3 7.4 6 10.2l3-2.8'/></svg>");
+  /* 浅色主题的勾选框填的是近黑色，勾用白色（见深色主题里对这条 token 的说明）。 */
+  --checkbox-tick: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M2.6 6.4 4.9 8.7 9.4 3.5'/></svg>");
 }
 
 :root {

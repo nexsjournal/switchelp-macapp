@@ -23,9 +23,14 @@ const SOURCE_PREFIXES = new Set([
   'action', 'advice', 'app', 'auth', 'capability', 'codex', 'common', 'compat', 'copy', 'credential', 'diag',
   'editor', 'effect', 'empty', 'error', 'group', 'host', 'key', 'logs', 'models', 'nav', 'onboarding',
   'overview', 'page', 'probe', 'probeState', 'providers', 'reason', 'settings', 'shell', 'stage', 'time', 'warning',
+  // 扩展与内容三页（工具管理 / 插件中心 / 内容中心）。
+  'content', 'plugins', 'tools',
+  // 应用内更新：侧栏左上角的更新按钮与更新弹窗。
+  'update',
 ]);
 /** Rust 侧只会以 messageKey 形式给出这些前缀的键。 */
 const CORE_PREFIXES = new Set(['action', 'compat', 'credential', 'error', 'group', 'host', 'probe', 'reason', 'stage', 'warning']);
+// 扩展板块的错误前缀同样以 `error.` 开头，所以不需要单独列出。
 
 /**
  * 动态键的取值来自 TypeScript 类型或 Rust 枚举，静态扫描看不到，因此显式列出。
@@ -40,6 +45,14 @@ const DYNAMIC_KEYS = new Set([
   ...['passed', 'failed', 'skipped', 'running'].map(name => `probeState.${name}`),
   ...['defaultModel', 'providerRoute', 'catalog', 'gatewayProvider', 'contextOverride', 'reasoningDefault',
     'restore', 'test', 'other'].map(name => `reason.${name}`),
+  // 扩展板块：导航来自 Page 联合类型，状态/分类/来源来自 Rust 枚举，静态扫描都看不到。
+  ...['tools', 'plugins', 'content'].map(name => `nav.${name}`),
+  ...['ready', 'needsLogin', 'installed', 'unverified', 'notInstalled', 'unsupportedPlatform'].map(name => `tools.status.${name}`),
+  ...['cliCode', 'utility', 'runtime'].map(name => `tools.category.${name}`),
+  ...['path', 'candidate'].map(name => `tools.pathSource.${name}`),
+  // 状态词典按 Rust 的 ToolStatus 枚举拼键名，静态扫描看不到。
+  ...['ready', 'needsLogin', 'installed', 'unverified', 'notInstalled', 'unsupportedPlatform']
+    .map(name => `tools.legend.${name}`),
 ]);
 
 function walk(dir: string, match: (file: string) => boolean): string[] {

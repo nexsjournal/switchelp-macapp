@@ -64,7 +64,7 @@ test('回归：保存供应商不会因为「刚把 Key 设为当前」而误报
     discoverModels: vi.fn().mockResolvedValue([{ upstreamId: 'vendor/a', displayName: 'a', alreadySaved: false }]),
   });
   render(<App client={client} />);
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(screen.getAllByRole('button', { name: '添加供应商' })[0]!);
   const dialog = screen.getByRole('dialog');
   await user.type(within(dialog).getByLabelText('供应商名称'), '示例中转');
@@ -99,7 +99,7 @@ test('回归：宿主的版本还没刷新上来时，撞上冲突会自己重�
     saveProvider, listCredentials: vi.fn().mockResolvedValue([credential]),
   });
   render(<App client={client} />);
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(screen.getByRole('button', { name: '编辑配置' }));
   const dialog = await screen.findByRole('dialog');
 
@@ -111,7 +111,7 @@ test('回归：宿主的版本还没刷新上来时，撞上冲突会自己重�
 });
 
 test('回归：配好模型后，页面上有「应用并重启 Codex」这一步，不必自己去找入口', async () => {
-  // 真机反馈：在「供应商与模型」页配好供应商与模型之后，行上只有「编辑 / 测试 / 更多」，
+  // 真机反馈：在「网关」页配好网关之后，行上只有「编辑 / 测试 / 更多」，
   // 没有任何能让配置生效的按钮——用户只能猜。待应用条把这一步摆在页面上。
   const user = userEvent.setup();
   const model = modelRow();
@@ -125,7 +125,7 @@ test('回归：配好模型后，页面上有「应用并重启 Codex」这一�
     applyStatus: vi.fn().mockResolvedValue({ operationId: 'op_1', open: false, events: [] }) });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
 
   // 条上写清「几个模型待应用」以及为什么要重启。
   const bar = await screen.findByRole('region', { name: '待应用' });
@@ -160,7 +160,7 @@ test('已应用但没等到回执时，条上说事实，并把回执交回用�
     confirmReload });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
 
   const bar = await screen.findByRole('region', { name: '待应用' });
   expect(within(bar).getByText('已应用，等 Codex 确认加载')).toBeInTheDocument();
@@ -188,7 +188,7 @@ test('待应用条的「查看差异」交给宿主切到 Codex 配置页', asyn
     listModels: vi.fn().mockResolvedValue([modelRow()]), listCredentials: vi.fn().mockResolvedValue([]) });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   const bar = await screen.findByRole('region', { name: '待应用' });
   await user.click(within(bar).getByRole('button', { name: '查看差异' }));
   expect(await screen.findByRole('heading', { level: 1, name: 'Codex 配置' })).toBeInTheDocument();
@@ -201,7 +201,7 @@ test('供应商弹窗：标题是文字，名称是表单字段，「更多」�
     listCredentials: vi.fn().mockResolvedValue([]), deleteProvider, listModels: vi.fn().mockResolvedValue([]) });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(screen.getByRole('button', { name: '编辑配置' }));
   const dialog = await screen.findByRole('dialog');
 
@@ -232,7 +232,7 @@ test('替换当前 Key 只通过专用调用传递秘密，不把掩码当原值
     saveProvider: vi.fn().mockResolvedValue(active) });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(screen.getByRole('button', { name: '编辑配置' }));
   const dialog = await screen.findByRole('dialog');
   // 已有 Key 时输入框是空的，占位符给出掩码：留空＝不动它，写新值＝替换。
@@ -251,7 +251,7 @@ test('替换当前 Key 只通过专用调用传递秘密，不把掩码当原值
   expect(JSON.stringify(localStorage)).not.toContain('synthetic');
 });
 
-test('添加供应商时第一个 Key 一起保存并设为当前，弹窗留在原地继续用', async () => {
+test('添加供应商时第一个 Key 一起保存并设为当前，保存成功后关掉弹窗', async () => {
   const user = userEvent.setup();
   const saveProvider = vi.fn().mockResolvedValue({ ...provider, id: 'p_new', name: '新服务', activeCredentialId: 'k_new' });
   const addCredential = vi.fn().mockResolvedValue({ id: 'k_new', label: '默认' });
@@ -259,7 +259,7 @@ test('添加供应商时第一个 Key 一起保存并设为当前，弹窗留在
   const client = testClient({ saveProvider, addCredential, selectCredential });
   render(<App client={client} />);
   // 不依赖接入向导是否已展开：直接从导航进供应商页，用页头的「添加供应商」。
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   // 空态和页头各有一个「添加供应商」，取页头那个。
   await user.click(screen.getAllByRole('button', { name: '添加供应商' })[0]!);
   const dialog = screen.getByRole('dialog');
@@ -271,10 +271,10 @@ test('添加供应商时第一个 Key 一起保存并设为当前，弹窗留在
   // 备注留空时记作「默认」，不需要人为了一个内部标签再想一个名字。
   await waitFor(() => expect(addCredential).toHaveBeenCalledWith('p_new', '默认', 'synthetic-secret'));
   expect(selectCredential).toHaveBeenCalledWith('p_new', 'k_new');
-  // 弹窗不关：就地变成这家供应商的编辑态，接着还能获取可用模型、加模型。
+  // 保存成功＝这件事办完了：弹窗关掉，只留一条确认。
+  // （旧行为是留在原地变成编辑态，用户把它读成了「没保存成功」。）
   expect(await screen.findByText('已保存。')).toBeInTheDocument();
-  expect(within(dialog).getByRole('button', { name: '获取可用模型' })).toBeInTheDocument();
-  expect(within(dialog).getByRole('button', { name: '添加模型' })).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 });
 
 test('没有 Key 时点获取可用模型会说明缺什么，而不是静默失败', async () => {
@@ -286,7 +286,7 @@ test('没有 Key 时点获取可用模型会说明缺什么，而不是静默失
     listCredentials: vi.fn().mockResolvedValue([credential]) });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(screen.getByRole('button', { name: '编辑配置' }));
   const dialog = await screen.findByRole('dialog');
 
@@ -305,7 +305,7 @@ test('新建时点获取可用模型：先把地址与 Key 存下来，再去问
   const client = testClient({ saveProvider, addCredential, selectCredential,
     discoverModels, listCredentials: vi.fn().mockResolvedValue([]) });
   render(<App client={client} />);
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(screen.getAllByRole('button', { name: '添加供应商' })[0]!);
   const dialog = screen.getByRole('dialog');
   await user.type(within(dialog).getByLabelText('供应商名称'), '新服务');
@@ -338,7 +338,7 @@ test('获取可用模型：弹窗里勾选确认，一次把模型按默认长�
     ]) });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(screen.getByRole('button', { name: '编辑配置' }));
   const dialog = await screen.findByRole('dialog');
   await user.click(within(dialog).getByRole('button', { name: '获取可用模型' }));
@@ -373,7 +373,7 @@ test('手工添加模型：模型 ID 与长度落进策略，供应商弹窗留�
     listCredentials: vi.fn().mockResolvedValue([credential]), saveModel });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(screen.getByRole('button', { name: '编辑配置' }));
   const dialog = await screen.findByRole('dialog');
   await user.click(within(dialog).getByRole('button', { name: '添加模型' }));
@@ -411,7 +411,7 @@ test('供应商弹窗就地显示这家供应商的模型与长度徽章', async
     listCredentials: vi.fn().mockResolvedValue([]), listModels: vi.fn().mockResolvedValue([modelRow()]) });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(screen.getByRole('button', { name: '编辑配置' }));
   const dialog = await screen.findByRole('dialog');
 
@@ -437,7 +437,7 @@ test('模型行的测试连接把结论说出来，成功与失败都不含糊',
     listCredentials: vi.fn().mockResolvedValue([credential]), listModels: vi.fn().mockResolvedValue([modelRow()]), startProbe });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(screen.getByRole('button', { name: '编辑配置' }));
   const dialog = await screen.findByRole('dialog');
   await user.click(await within(dialog).findByRole('button', { name: '测试 目录中的模型 的连接' }));
@@ -460,7 +460,7 @@ test('删除已纳入目录的模型：先移出目录，再用新版本号删�
     listModels: vi.fn().mockResolvedValue([modelRow()]), saveModel, deleteModel });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(screen.getByRole('button', { name: '编辑配置' }));
   const dialog = await screen.findByRole('dialog');
   await user.click(await within(dialog).findByRole('button', { name: '删除模型 目录中的模型' }));
@@ -487,7 +487,7 @@ test('编辑器有未保存修改时侧栏导航先确认，放弃后才真正�
     listModels: vi.fn().mockResolvedValue([model]) });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(await screen.findByRole('button', { name: '编辑 目录中的模型' }));
   expect(await screen.findByRole('heading', { level: 1, name: '目录中的模型' })).toBeInTheDocument();
 
@@ -535,7 +535,7 @@ test('纳入目录的模型不能直接删除，必须先移出', async () => {
   const user = userEvent.setup();
   render(<App client={client} />);
   await screen.findByText('目录中的模型');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(await screen.findByRole('button', { name: '更多操作 目录中的模型' }));
 
   // 菜单里能看到删除，但已纳入目录时禁用。
@@ -557,7 +557,7 @@ test('移出目录要确认，并按版本号提交 inCatalog=false', async () =
     listModels: vi.fn().mockResolvedValue([model]), saveModel });
   render(<App client={client} />);
   await screen.findByText('目录中的模型');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(await screen.findByRole('button', { name: '更多操作 目录中的模型' }));
   await user.click(screen.getByRole('menuitem', { name: '移出 Codex 目录' }));
   const dialog = await screen.findByRole('dialog');
@@ -627,7 +627,7 @@ test('退出向导后可以从设置页重新打开', async () => {
   await user.click(await screen.findByRole('button', { name: '稍后再说' }));
   expect(screen.queryByRole('heading', { name: '接入向导' })).not.toBeInTheDocument();
 
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(screen.getByRole('button', { name: '设置' }));
   await user.click(await screen.findByRole('button', { name: '重新打开接入向导' }));
   expect(await screen.findByRole('heading', { name: '接入向导' })).toBeInTheDocument();
@@ -652,7 +652,7 @@ test('Key 池：加第二个 Key、改名、停用、删除都能做，当前 Ke
   });
   render(<App client={client} />);
   await screen.findByText('测试供应商');
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   await user.click(screen.getByRole('button', { name: '编辑配置' }));
   const dialog = await screen.findByRole('dialog');
 
@@ -699,7 +699,7 @@ test('供应商列表可以搜索：过滤逻辑早就在，缺的是输入框',
   const user = userEvent.setup();
   const other = { ...provider, id: 'p_other', name: '另一家' };
   render(<App client={testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider, other], nextCursor: null }) })} />);
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '供应商与模型' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   const list = await screen.findByRole('region', { name: '供应商列表' });
   expect(within(list).getByText('测试供应商')).toBeInTheDocument();
   expect(within(list).getByText('另一家')).toBeInTheDocument();
@@ -712,4 +712,61 @@ test('供应商列表可以搜索：过滤逻辑早就在，缺的是输入框',
   await user.clear(screen.getByLabelText('搜索供应商'));
   await user.type(screen.getByLabelText('搜索供应商'), '不存在的东西');
   expect(await screen.findByText('没有匹配的供应商')).toBeInTheDocument();
+});
+
+test('供应商卡片报的是 Codex 状态：已加载/待应用/未纳入，且不再逐行重复', async () => {
+  // 用户反馈：加载状态应该在**左边供应商卡片**上说清楚，而不是在下面每个模型行里显示「已加载」。
+  const user = userEvent.setup();
+  const loaded = { ...modelRow(), id: 'm_a', displayName: '甲', hostState: 'loaded' as const };
+  const client = testClient({
+    listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
+    listModels: vi.fn().mockResolvedValue([loaded]),
+    listCredentials: vi.fn().mockResolvedValue([]),
+    detectInstances: vi.fn().mockResolvedValue([instance]),
+  });
+  render(<App client={client} />);
+  await screen.findByText('测试供应商');
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
+
+  // 卡片上出现聚合状态；模型行里不再出现宿主状态文案。
+  const list = screen.getByLabelText('供应商列表');
+  const card = within(list).getByRole('button', { name: /测试供应商/ });
+  expect(within(card).getByText('已加载')).toBeInTheDocument();
+  expect(screen.queryByText('Codex 状态')).not.toBeInTheDocument();
+});
+
+test('供应商的模型里只要有一个待应用，卡片就报待应用', async () => {
+  const user = userEvent.setup();
+  const loaded = { ...modelRow(), id: 'm_a', displayName: '甲', hostState: 'loaded' as const };
+  const pending = { ...modelRow(), id: 'm_b', displayName: '乙', hostState: 'pending_apply' as const };
+  const client = testClient({
+    listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
+    listModels: vi.fn().mockResolvedValue([loaded, pending]),
+    listCredentials: vi.fn().mockResolvedValue([]),
+    detectInstances: vi.fn().mockResolvedValue([instance]),
+  });
+  render(<App client={client} />);
+  await screen.findByText('测试供应商');
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
+
+  const list = screen.getByLabelText('供应商列表');
+  const card = within(list).getByRole('button', { name: /测试供应商/ });
+  expect(within(card).getByText('待应用')).toBeInTheDocument();
+});
+
+test('一个模型都没配的供应商仍然报 Key 状态：那时 Codex 状态无从谈起', async () => {
+  const user = userEvent.setup();
+  const client = testClient({
+    listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
+    listModels: vi.fn().mockResolvedValue([]),
+    listCredentials: vi.fn().mockResolvedValue([]),
+    detectInstances: vi.fn().mockResolvedValue([instance]),
+  });
+  render(<App client={client} />);
+  await screen.findByText('测试供应商');
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
+
+  const list = screen.getByLabelText('供应商列表');
+  const card = within(list).getByRole('button', { name: /测试供应商/ });
+  expect(within(card).getByText('待填写 Key')).toBeInTheDocument();
 });

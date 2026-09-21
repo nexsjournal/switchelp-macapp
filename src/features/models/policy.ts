@@ -43,6 +43,52 @@ export function hostStateVariant(state: Model['hostState']): 'success' | 'warnin
   return '';
 }
 
+/**
+ * 模型行的连接状态：最近一次「测试」的结果。
+ *
+ * 三种取值里 `untested` 是**中性**的：没有证据不等于有问题。这一点与
+ * [hostStateVariant] 同一个道理——颜色不用来替用户下结论。
+ */
+export type ConnectionState = 'passed' | 'failed' | 'untested';
+
+export const connectionKeys: Record<ConnectionState, string> = {
+  passed: 'models.connectionPassed',
+  failed: 'models.connectionFailed',
+  untested: 'models.connectionUntested',
+};
+
+export function connectionVariant(state: ConnectionState): 'success' | 'danger' | '' {
+  if (state === 'passed') return 'success';
+  if (state === 'failed') return 'danger';
+  return '';
+}
+
+/**
+ * 「这个模型有没有加进 Codex 目录」的状态点。
+ *
+ * 已加入＝成功色，未加入保持中性：没纳入目录是一种选择，不是错误（与
+ * [hostStateVariant] 对 `not_in_catalog` 的处理一致）。
+ */
+export function catalogVariant(inCatalog: boolean): 'success' | '' {
+  return inCatalog ? 'success' : '';
+}
+
+/**
+ * 一个供应商的 Codex 状态：由它旗下模型的状态聚合而来。
+ *
+ * 用在供应商卡片上——「已加载」是**供应商这一层**的信息（用户原话：应该在左边卡片里提示），
+ * 逐行重复没有意义。聚合规则要能一眼解释：有任何待应用的就说待应用；否则有等待重载的就说
+ * 等待重载；否则一条都没纳入目录就说未纳入；剩下的才是已加载。
+ */
+export function providerHostState(own: Model[]): Model['hostState'] | null {
+  if (!own.length) return null;
+  if (own.some(model => model.hostState === 'pending_apply')) return 'pending_apply';
+  if (own.some(model => model.hostState === 'awaiting_reload')) return 'awaiting_reload';
+  if (!own.some(model => model.inCatalog)) return 'not_in_catalog';
+  if (own.some(model => model.hostState === 'load_unconfirmed')) return 'load_unconfirmed';
+  return 'loaded';
+}
+
 /** 从上游发现结果带出的预填：上游只给 ID 与显示名，其余能力值仍要人确认。 */
 export type ModelPreset = { providerId: string; upstreamId: string; displayName: string };
 
@@ -87,6 +133,35 @@ export function discoveredModelPolicy(previous: ModelPolicy = defaultPolicy()): 
 export function reasoningKeptKey(policy: ModelPolicy): string | null {
   if (policy.reasoning.support !== 'supported' || policy.reasoning.control === 'effort') return null;
   return policy.reasoning.control === 'budget' ? 'editor.reasoningKeptBudget' : 'editor.reasoningKeptToggle';
+}
+
+/**
+ * Codex 接受的思考档位，从低到高。
+ *
+ * 取值不是拍脑袋定的：`none / minimal / low / medium / high / xhigh / max / ultra`
+ * 是从本机 ChatGPT.app 里那份 codex 二进制的 `ReasoningEffort` 枚举读出来的
+ * （`strings` 里的变体名连写：`noneminimalmediumxhighmaxultrapersistent`）。
+ * 档位会被投影进 Codex 的模型目录，写它不认识的值，轻则这一档在宿主里没有标签，
+ * 重则整个目录条目被拒——所以这里给集合，而不是让人手输（用户点名的就是这个）。
+ *
+ * `none` 故意不在表里：它表示「这次不思考」，而核心的适配器注释里记着一个真实故障——
+ * 宿主在没有档位可选时会送一个 `none`，转发出去上游直接拒绝（moonshot 返回 400
+ * `reasoning.effort value "none" is not supported`）。把它摆成「最低档」会诱导用户
+ * 声明出一个大概率被上游拒的值；不声明任何档位才是「这个模型不声明思考」的表达方式。
+ */
+export const REASONING_LEVEL_PRESETS: readonly { value: string; labelKey: string }[] = [
+  { value: 'minimal', labelKey: 'editor.level.minimal' },
+  { value: 'low', labelKey: 'editor.level.low' },
+  { value: 'medium', labelKey: 'editor.level.medium' },
+  { value: 'high', labelKey: 'editor.level.high' },
+  { value: 'xhigh', labelKey: 'editor.level.xhigh' },
+  { value: 'max', labelKey: 'editor.level.max' },
+  { value: 'ultra', labelKey: 'editor.level.ultra' },
+];
+
+/** 带当前语言的标签：模块只加载一次，不能把文案冻在启动时的语言上。 */
+export function reasoningLevelPresets(): { value: string; label: string }[] {
+  return REASONING_LEVEL_PRESETS.map(preset => ({ value: preset.value, label: t(preset.labelKey) }));
 }
 
 /** Token 数的紧凑写法（模型行上的徽章）：1048576 → `1M`，131072 → `131K`。 */

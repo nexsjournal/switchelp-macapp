@@ -104,7 +104,7 @@ test('清空日志要确认，并明确只影响本工具记录', async () => {
 
   await user.click(screen.getByRole('button', { name: /清空日志/ }));
   const dialog = await screen.findByRole('dialog');
-  expect(within(dialog).getByText(/不影响 Codex 会话历史，也不影响配置事务与备份记录/)).toBeInTheDocument();
+  expect(within(dialog).getByText(/不影响 Codex 会话历史，也不影响配置记录与备份/)).toBeInTheDocument();
   expect(clearDiagnostics).not.toHaveBeenCalled();
 
   await user.click(within(dialog).getByRole('button', { name: '清空日志' }));

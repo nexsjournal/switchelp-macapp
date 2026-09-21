@@ -1,4 +1,6 @@
-.page { display: grid; gap: 24px; max-width: 880px; }
+/* 宽度与其它页对齐：以前写死 880，而默认窗口的主内容区约 1000，右侧会白出一大条
+   （用户原话「右边这一大块是空的」）。这里不再自设上限，交给 main 的内边距。 */
+.page { display: grid; gap: 24px; }
 .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
 .header h1 { margin: 0; }
 .header p { margin: 8px 0 0; font-size: var(--font-size-label); line-height: var(--line-height-label); }
@@ -32,6 +34,9 @@
 .instances { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .instances li { border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-input); }
 .instances li.picked { border-color: var(--accent-border); background: var(--accent-subtle); }
+/* 选中底色会把弱文字压到 4.5 以下（实测深色 3.84，就是那行配置路径），
+   选中行里的辅助文字提级为次级色——与供应商列表、插件列表同一条处理。 */
+.instances li.picked :global(.text-muted) { color: var(--text-secondary); }
 /* 全局给 input 设了 width:100%，单选按钮会被拉满并把文字挤到一边。 */
 .instanceChoice { display: flex; gap: 12px; padding: 16px; cursor: pointer; align-items: flex-start; }
 .instanceChoice input[type='radio'] { width: auto; flex-shrink: 0; margin-top: 4px; }

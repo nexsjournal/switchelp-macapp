@@ -192,9 +192,19 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
     } finally { setBusy(''); }
   }
 
-  /** 「保存」按钮：只落库，不动模型；模型相关的动作各走各的（见下面几个）。 */
+  /**
+   * 「保存」按钮：只落库，不动模型；模型相关的动作各走各的（见下面几个）。
+   *
+   * 保存成功后**关闭弹窗**。从前是留在弹窗里就地变成这家供应商的编辑态（理由是「接着加 Key、
+   * 获取模型」），但用户的实际读法是「点了保存什么都没发生」——只有一条 toast，
+   * 弹窗纹丝不动（用户原话：「给人的感觉就以为没有操作成功一样」）。
+   * 加 Key、获取可用模型、改名这些就地动作各自保存、各自报 toast、都不关弹窗，
+   * 所以关掉它不会丢掉任何已完成的事；要接着配置，从列表里再打开这家供应商即可。
+   */
   async function save() {
-    if (await persist()) showToast(t('providers.saved'));
+    if (!await persist()) return;
+    showToast(t('providers.saved'));
+    onClose();
   }
 
   /**

@@ -144,19 +144,47 @@ pub fn prepare(
 }
 
 /// Responses 的 `input` 数组翻译成 chat 的 `messages`。
+///
+/// 系统级内容的两个来源——顶层 `instructions` 与 `input` 里的 `developer` 消息——合并成
+/// **一条**开头的 system 消息。Codex 现在把开发者指令放在 `input` 里发（本机实测 0.155：
+/// 一条 role 为 `developer` 的 message，1.3 万字符），而 chat 协议没有 `developer` 角色：
+/// 原样转发会被只认 system/user/assistant/tool 的上游直接拒绝（moonshot 的
+/// `/chat/completions` 回 `400 role 'developer' is not allowed`）。也不能拆成两条 system——
+/// 上游普遍要求 system 位于首位。
 fn messages(request: &Value, losses: &mut Vec<AdaptationLoss>) -> Result<Vec<Value>, CoreError> {
-    let mut messages: Vec<Value> = Vec::new();
+    let mut system_parts: Vec<String> = Vec::new();
     if let Some(instructions) = request.get("instructions").and_then(Value::as_str) {
         if !instructions.trim().is_empty() {
-            messages.push(json!({"role": "system", "content": instructions}));
+            system_parts.push(instructions.to_owned());
         }
     }
+
+    let mut messages: Vec<Value> = Vec::new();
     let Some(items) = request.get("input").and_then(Value::as_array) else {
-        return Ok(messages);
+        return Ok(with_system(system_parts, messages));
     };
+    let mut developer_after_conversation = false;
     for item in items {
         match item.get("type").and_then(Value::as_str) {
-            Some("message") => push_message(&mut messages, item, losses),
+            Some("message") => {
+                if item.get("role").and_then(Value::as_str) == Some("developer") {
+                    let (texts, images) = message_parts(item, losses);
+                    if !images.is_empty() {
+                        losses.push(AdaptationLoss::new(
+                            "input.developer.image",
+                            "loss.contentPartDropped",
+                            "developer 消息里的图片无法并入 system 消息，未发送",
+                        ));
+                    }
+                    // 合并会把它的位置提前到开头；已经不在一起了就得记一笔。
+                    if !messages.is_empty() {
+                        developer_after_conversation = true;
+                    }
+                    system_parts.extend(texts);
+                } else {
+                    push_message(&mut messages, item, losses);
+                }
+            }
             Some("function_call") => push_function_call(&mut messages, item, losses),
             Some("function_call_output") => push_tool_output(&mut messages, item),
             Some("reasoning") => losses.push(AdaptationLoss::new(
@@ -176,25 +204,34 @@ fn messages(request: &Value, losses: &mut Vec<AdaptationLoss>) -> Result<Vec<Val
             )),
         }
     }
-    Ok(messages)
+    if developer_after_conversation {
+        losses.push(AdaptationLoss::new(
+            "input.developer",
+            "loss.developerInstructionReordered",
+            "developer 消息出现在对话之后，已并入开头的 system 消息",
+        ));
+    }
+    Ok(with_system(system_parts, messages))
 }
 
-fn push_message(messages: &mut Vec<Value>, item: &Value, losses: &mut Vec<AdaptationLoss>) {
-    let Some(role) = item.get("role").and_then(Value::as_str) else {
-        losses.push(AdaptationLoss::new(
-            "input.message.role",
-            "loss.inputItemDropped",
-            "消息缺少 role，未发送",
-        ));
-        return;
-    };
-    let Some(parts) = item.get("content").and_then(Value::as_array) else {
-        messages.push(json!({"role": role, "content": ""}));
-        return;
-    };
+/// 系统级内容恒在首位：上游普遍要求 system 打头，也不接受夹在对话中间的 system。
+fn with_system(system_parts: Vec<String>, mut messages: Vec<Value>) -> Vec<Value> {
+    if !system_parts.is_empty() {
+        messages.insert(
+            0,
+            json!({"role": "system", "content": system_parts.join("\n\n")}),
+        );
+    }
+    messages
+}
 
+/// 一条 message 的内容分片：文本按原顺序、图片保留原始 URL。
+fn message_parts(item: &Value, losses: &mut Vec<AdaptationLoss>) -> (Vec<String>, Vec<Value>) {
     let mut texts: Vec<String> = Vec::new();
     let mut images: Vec<Value> = Vec::new();
+    let Some(parts) = item.get("content").and_then(Value::as_array) else {
+        return (texts, images);
+    };
     for part in parts {
         match part.get("type").and_then(Value::as_str) {
             Some("input_text") | Some("output_text") | Some("text") => {
@@ -234,7 +271,23 @@ fn push_message(messages: &mut Vec<Value>, item: &Value, losses: &mut Vec<Adapta
             None => {}
         }
     }
+    (texts, images)
+}
 
+fn push_message(messages: &mut Vec<Value>, item: &Value, losses: &mut Vec<AdaptationLoss>) {
+    let Some(role) = item.get("role").and_then(Value::as_str) else {
+        losses.push(AdaptationLoss::new(
+            "input.message.role",
+            "loss.inputItemDropped",
+            "消息缺少 role，未发送",
+        ));
+        return;
+    };
+    if item.get("content").and_then(Value::as_array).is_none() {
+        messages.push(json!({"role": role, "content": ""}));
+        return;
+    }
+    let (texts, images) = message_parts(item, losses);
     // 纯文本用字符串形式：兼容性最好，不必让每个供应商都接受分片数组。
     let content = if images.is_empty() {
         json!(texts.join("\n"))
@@ -825,6 +878,75 @@ mod tests {
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[1]["type"], "image_url");
         assert_eq!(content[1]["image_url"]["url"], "data:image/png;base64,AAAA");
+    }
+
+    /// Codex 真实发出的形状：顶层 `instructions`，`input` 里还有一条 role 为 `developer`
+    /// 的开发者指令（0.155 实测，1.3 万字符）。
+    fn codex_request() -> Value {
+        json!({
+            "instructions": "顶层指令",
+            "input": [
+                {"type": "message", "role": "developer", "content": [
+                    {"type": "input_text", "text": "开发者指令"}]},
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "你好"}]},
+            ],
+        })
+    }
+
+    #[test]
+    fn developer_instructions_are_folded_into_the_system_message() {
+        let prepared = prepare(
+            "https://api.moonshot.cn/v1",
+            "kimi-k3",
+            &codex_request(),
+            &RouteLimits::default(),
+        )
+        .unwrap();
+        let body = body_of(&prepared);
+        let messages = body["messages"].as_array().unwrap();
+
+        assert!(
+            messages
+                .iter()
+                .all(|message| message["role"] != "developer"),
+            "chat 上游不认识 developer，发出去就是 400"
+        );
+        assert_eq!(messages.len(), 2, "system + user：系统级内容只留一条");
+        assert_eq!(messages[0]["role"], "system");
+        let system = messages[0]["content"].as_str().unwrap();
+        assert_eq!(
+            system, "顶层指令\n\n开发者指令",
+            "顶层指令在前、开发者指令在后，顺序固定"
+        );
+        assert_eq!(messages[1]["role"], "user");
+        assert!(
+            !loss_features(&prepared.losses).contains(&"input.developer"),
+            "开发者指令本来就在最前面，合并没有改变语义"
+        );
+    }
+
+    #[test]
+    fn a_developer_message_after_the_conversation_is_folded_and_marked() {
+        let request = json!({
+            "input": [
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "你好"}]},
+                {"type": "message", "role": "developer", "content": [
+                    {"type": "input_text", "text": "补充指令"}]},
+            ],
+        });
+        let prepared = prepare("https://host/v1", "m", &request, &RouteLimits::default()).unwrap();
+        let body = body_of(&prepared);
+        let messages = body["messages"].as_array().unwrap();
+
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[0]["content"], "补充指令");
+        assert_eq!(messages[1]["role"], "user");
+        assert!(
+            loss_features(&prepared.losses).contains(&"input.developer"),
+            "位置被提前了，必须记为损失"
+        );
     }
 
     #[test]

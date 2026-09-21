@@ -23,7 +23,7 @@ pub struct SqliteRepository {
     connection: Mutex<Connection>,
 }
 
-const INITIAL_SCHEMA: &str = "
+pub(crate) const INITIAL_SCHEMA: &str = "
 CREATE TABLE providers (
     id TEXT PRIMARY KEY NOT NULL,
     payload TEXT NOT NULL CHECK(json_valid(payload))
@@ -51,7 +51,7 @@ CREATE TABLE operations (id TEXT PRIMARY KEY NOT NULL, payload TEXT NOT NULL CHE
 ///
 /// 只放「应用自己的开关」，不放任何实体数据——实体各有专表，加一张宽表最容易长成
 /// 谁也说不清的第二份真相。共存模式的开关是第一个用户。
-const SETTINGS_SCHEMA: &str = "
+pub(crate) const SETTINGS_SCHEMA: &str = "
 CREATE TABLE settings (
     key TEXT PRIMARY KEY NOT NULL,
     value TEXT NOT NULL
@@ -86,6 +86,7 @@ impl SqliteRepository {
             1 => tx.execute_batch(INITIAL_SCHEMA).map_err(db_error),
             2 => migrate_display_name_prefixes(&tx),
             3 => tx.execute_batch(SETTINGS_SCHEMA).map_err(db_error),
+            4 => tx.execute_batch(super::hub::HUB_SCHEMA).map_err(db_error),
             _ => Err(CoreError::internal("未知的数据库升级步骤")),
         })?;
         tx.pragma_update(None, "user_version", version)
@@ -115,7 +116,7 @@ impl SqliteRepository {
 /// 的同名模型在里面长得一模一样，选错只会表现为「请求打到了别家」。只补默认形状的
 /// 名字——等于上游 ID、等于发现值、或用户从没动过的；真正被用户改写成别的样子的名字
 /// 保持不动，迁移不替用户改主意。
-fn migrate_display_name_prefixes(tx: &Transaction<'_>) -> Result<(), CoreError> {
+pub(crate) fn migrate_display_name_prefixes(tx: &Transaction<'_>) -> Result<(), CoreError> {
     let mut provider_names: HashMap<String, String> = HashMap::new();
     {
         let mut statement = tx
@@ -183,15 +184,15 @@ fn migrate_display_name_prefixes(tx: &Transaction<'_>) -> Result<(), CoreError> 
     Ok(())
 }
 
-fn encode<T: Serialize>(value: &T) -> Result<String, CoreError> {
+pub(crate) fn encode<T: Serialize>(value: &T) -> Result<String, CoreError> {
     serde_json::to_string(value).map_err(|_| CoreError::internal("元数据编码失败"))
 }
 
-fn decode<T: DeserializeOwned>(value: &str) -> Result<T, CoreError> {
+pub(crate) fn decode<T: DeserializeOwned>(value: &str) -> Result<T, CoreError> {
     serde_json::from_str(value).map_err(|_| CoreError::internal("元数据结构损坏，已停止读取"))
 }
 
-fn one<T: DeserializeOwned>(
+pub(crate) fn one<T: DeserializeOwned>(
     connection: &Connection,
     sql: &str,
     id: &str,
@@ -215,7 +216,7 @@ fn list<T: DeserializeOwned>(
     rows.map(|row| decode(&row.map_err(db_error)?)).collect()
 }
 
-fn db_error(error: rusqlite::Error) -> CoreError {
+pub(crate) fn db_error(error: rusqlite::Error) -> CoreError {
     // 不将 SQL、绑定参数或 SQLite 原始错误文本暴露给 UI。
     match error.sqlite_error_code() {
         Some(rusqlite::ErrorCode::ConstraintViolation) => {
@@ -488,6 +489,7 @@ impl SqliteOperationStore {
             1 => tx.execute_batch(INITIAL_SCHEMA).map_err(db_error),
             2 => migrate_display_name_prefixes(&tx),
             3 => tx.execute_batch(SETTINGS_SCHEMA).map_err(db_error),
+            4 => tx.execute_batch(super::hub::HUB_SCHEMA).map_err(db_error),
             _ => Err(CoreError::internal("未知的数据库升级步骤")),
         })?;
         tx.pragma_update(None, "user_version", version)

@@ -1,4 +1,4 @@
-import { Check, Lock } from 'lucide-react';
+import { Lock } from 'lucide-react';
 import styles from './CheckCell.module.css';
 
 /**
@@ -13,9 +13,9 @@ import styles from './CheckCell.module.css';
  * `disabled` 是「当前链路发不出去」的项（PDF、视频）：可见、灰态、点不动，
  * 需求 R22 要求它们可见但不启用，而不是藏起来。
  *
- * 勾选框是自绘的：全局那套 `accent-color` + 透明边框撑点击区的写法，在本项目里
- * 直接把方框画成了实心块（浅色主题下看着像已经勾上）。自绘之后两种主题都是
- * 同样的「空框 / 实心框 + 勾」，不依赖各引擎对原生控件的各自实现。
+ * 方框与对勾不在这里画：那是全局唯一的那一套（`global.css` 的 `input[type='checkbox']`，
+ * 对勾用 `--checkbox-tick`）。这个组件只负责把「方框 + 文字 + 可选的小锁」装进一个
+ * 带描边的单元格里——整页编辑器、添加模型弹窗、诊断包范围因此共用同一个形状与同一个对勾。
  */
 export function CheckCell({ label, hint, checked, disabled = false, locked = false, onChange }: {
   label: string;
@@ -27,11 +27,8 @@ export function CheckCell({ label, hint, checked, disabled = false, locked = fal
   onChange?: (next: boolean) => void;
 }) {
   return <label className={disabled ? `${styles.cell} ${styles.blocked}` : styles.cell} title={hint}>
-    <span className={styles.box}>
-      <input type="checkbox" checked={checked} disabled={disabled}
-        onChange={event => onChange?.(event.target.checked)} />
-      <Check size={12} className={styles.tick} aria-hidden="true" />
-    </span>
+    <input type="checkbox" checked={checked} disabled={disabled}
+      onChange={event => onChange?.(event.target.checked)} />
     <span>{label}</span>
     {locked && <Lock size={12} aria-hidden="true" />}
   </label>;

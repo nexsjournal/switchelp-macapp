@@ -49,26 +49,70 @@ function renderPage(overrides: Partial<Parameters<typeof testClient>[0]> = {}, m
 }
 
 describe('模型列表', () => {
-  it('Codex 状态用语义色：已加载是成功色，待应用与等待重载是警告色', () => {
-    // 真机反馈：配置早已生效、Codex 也重启过了，界面却一直把「已加载」显示成中性甚至
-    // 琥珀色。语义色只有两格，映射集中在一处，避免两个页面各写一套。
+  it('行里只报连接状态：没测过是中性，测过才给颜色', () => {
+    // 用户反馈：逐行显示「已加载」既啰嗦又容易被读成「每个模型各自的状态」——
+    // 加载状态是**供应商那一层**的事实（见 App 的卡片），行里该显示的是「这个模型连得上吗」。
     renderPage({}, [
       { ...catalogModel, id: 'm_loaded', displayName: '已加载的', hostState: 'loaded' },
-      { ...catalogModel, id: 'm_pending', displayName: '待应用的', hostState: 'pending_apply' },
-      { ...catalogModel, id: 'm_await', displayName: '等待重载的', hostState: 'awaiting_reload' },
       { ...catalogModel, id: 'm_loose', displayName: '不在目录的', hostState: 'not_in_catalog', inCatalog: false },
     ]);
 
-    // 按状态文案找到那个徽章再读 class——不依赖列结构，也不依赖文案之外的东西。
-    const chip = (label: string) => screen.getByText(label).closest('td')!.querySelector('span.badge')!.className;
-    expect(chip('已加载')).toContain('success');
-    expect(chip('待应用')).toContain('warning');
-    expect(chip('等待重载')).toContain('warning');
-    // 「未加入目录」不是问题状态，不该用颜色替用户下结论。
-    expect(chip('未加入目录')).not.toContain('warning');
-    expect(chip('未加入目录')).not.toContain('success');
+    // 两个模型都没测过：中性的点 + 「未测试」，而且**不再**出现「已加载」这类宿主状态文案。
+    expect(screen.getAllByText('未测试')).toHaveLength(2);
+    expect(screen.queryByText('已加载')).not.toBeInTheDocument();
+    const dot = screen.getAllByText('未测试')[0]!.closest('td')!.querySelector('[class*="statusDot"]')!;
+    expect(dot.className).not.toContain('success');
+    expect(dot.className).not.toContain('danger');
   });
 
+  it('目录归属用绿点表示「加上了」，未加入保持中性', () => {
+    renderPage();
+    const inCatalog = screen.getByLabelText('已加入 Codex 目录');
+    expect(inCatalog.className).toContain('success');
+    const out = screen.getByLabelText('未加入 Codex 目录');
+    expect(out.className).not.toContain('success');
+    expect(out.className).not.toContain('danger');
+  });
+
+  it('跑一次测试之后，那一行变成绿点（通过）', async () => {
+    const user = userEvent.setup();
+    const startProbe = vi.fn().mockResolvedValue({
+      stages: [
+        { stageKey: 'connect', status: 'passed', messageKey: 'probe.connectPassed', elapsedMs: 12 },
+        { stageKey: 'credential', status: 'passed', messageKey: 'probe.credentialPassed', elapsedMs: 20 },
+      ],
+    });
+    renderPage({
+      listCredentials: vi.fn().mockResolvedValue([{ id: 'k_1', providerId: 'p_a', label: '日常', status: 'verified', maskedSuffix: '0001', version: 1, createdAt: '2026-09-18T00:00:00Z' }]),
+      startProbe,
+    });
+
+    expect(screen.getAllByText('未测试')).toHaveLength(2);
+    await user.click(screen.getByRole('button', { name: '测试 目录中的模型' }));
+
+    expect(startProbe).toHaveBeenCalledWith(
+      { providerId: 'p_a', modelId: 'm_1', credentialId: 'k_1' },
+      { includeGenerate: false },
+    );
+    // 只更新被测试的那一行。
+    expect(await screen.findByText('正常')).toBeInTheDocument();
+    expect(screen.getAllByText('未测试')).toHaveLength(1);
+  });
+
+  it('测试失败时那一行是危险色，不是沉默的绿', async () => {
+    const user = userEvent.setup();
+    renderPage({
+      listCredentials: vi.fn().mockResolvedValue([{ id: 'k_1', providerId: 'p_a', label: '日常', status: 'verified', maskedSuffix: '0001', version: 1, createdAt: '2026-09-18T00:00:00Z' }]),
+      startProbe: vi.fn().mockResolvedValue({
+        stages: [{ stageKey: 'credential', status: 'failed', messageKey: 'probe.upstreamRejected', elapsedMs: 30 }],
+      }),
+    });
+
+    await user.click(screen.getByRole('button', { name: '测试 目录中的模型' }));
+    // 探测弹窗里也有「失败」二字，所以按行取：只认状态列里那个。
+    const cell = await screen.findByText('失败', { selector: 'td span.text-muted' });
+    expect(cell.closest('td')!.querySelector('[class*="statusDot"]')!.className).toContain('danger');
+  });
 
   it('按名称搜索、按供应商与目录归属筛选', async () => {
     const user = userEvent.setup();
@@ -104,7 +148,7 @@ describe('模型列表', () => {
     await user.click(within(bar).getByRole('button', { name: '批量移出目录' }));
     const dialog = await screen.findByRole('dialog');
     // 已在目录外的模型不会被移出，确认框要说清可执行的数量。
-    expect(within(dialog).getByText(/其中可执行 1 个/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/其中可以操作 1 个/)).toBeInTheDocument();
     expect(saveModel).not.toHaveBeenCalled();
 
     await user.click(within(dialog).getByRole('button', { name: '移出目录' }));

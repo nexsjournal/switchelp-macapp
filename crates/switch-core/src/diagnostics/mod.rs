@@ -10,12 +10,10 @@
 mod discovery;
 mod export;
 mod probe;
-mod update;
 
 pub use discovery::{fetch as fetch_models, DiscoveredModel};
 pub use export::{build_export, preview_export, write_export, ExportPreview, PreviewItem};
 pub use probe::{ProbePlan, ProbeReport, ProbeState, ProbeTarget, Probes, StageOutcome};
-pub use update::{check as check_update, UpdateStatus, DEFAULT_ENDPOINT as UPDATE_ENDPOINT};
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;

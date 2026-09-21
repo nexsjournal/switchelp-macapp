@@ -9,7 +9,7 @@ import { Switch } from '@/components/Switch';
 import { LevelChips } from './LevelChips';
 import {
   EDITABLE_INPUT_KINDS, capabilityState, defaultPolicy, inputBlocked, inputLabel, parseTokens,
-  policyFromCapability, reasoningKeptKey, type CapabilityState,
+  policyFromCapability, reasoningKeptKey, reasoningLevelPresets, type CapabilityState,
 } from './policy';
 import styles from './ModelEditorPage.module.css';
 
@@ -171,7 +171,7 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
         <p className="field-hint">{t('editor.abilityTriState')}</p>
 
         <h3 className="form-section">{t('editor.levelsTitle')}</h3>
-        <LevelChips levels={ability.levels} defaultLevel={ability.defaultLevel} busy={busy}
+        <LevelChips levels={ability.levels} defaultLevel={ability.defaultLevel} presets={reasoningLevelPresets()} busy={busy}
           onChange={next => { setAbility(current => ({ ...current, ...next })); setReasoningTouched(true); updateDirty(true); }} />
         <p className="field-hint">{keptReasoning ? t(keptReasoning) : t('editor.reasoningLevelsHint')}</p>
 

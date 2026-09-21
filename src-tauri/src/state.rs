@@ -12,9 +12,14 @@ use switch_core::{
     application::{ApplyService, WorkspaceService},
     codex::backup::BackupStore,
     codex::detect::{CodexInstance, DetectInput, InstanceDetector, RealFs},
+    content::{ContentService, FeedFetcher, HttpFeedFetcher},
+    credentials::SecretVault,
     diagnostics::{DiagnosticLog, Probes},
     domain::error::CoreError,
     gateway::Gateway,
+    plugins::PluginService,
+    storage::HubStore,
+    toolhub::ToolHubService,
 };
 
 /// 启动时的两个「可能失败」的装配结果。
@@ -24,6 +29,8 @@ use switch_core::{
 pub struct StartupParts {
     pub gateway: Result<Arc<Gateway>, CoreError>,
     pub bridge: Result<PathBuf, CoreError>,
+    /// 工具清单。加载失败时整个工具管理板块为不可用，因此原因要保留到状态里。
+    pub catalog: Result<Arc<ToolHubService>, CoreError>,
 }
 
 /// 一次进程生命周期内共享的壳状态。
@@ -48,7 +55,18 @@ pub struct DesktopState {
     probes: Arc<Probes>,
     /// 配置备份存储。
     backups: Arc<BackupStore>,
+    /// 扩展板块的元数据存储（工具探测缓存、已装技能、订阅源与资讯条目）。
+    hub: Arc<dyn HubStore>,
+    /// 工具管理。清单加载失败时保留原因，界面显示「清单不可用」而不是空表。
+    tools: Result<Arc<ToolHubService>, String>,
+    /// 插件中心。
+    plugins: Arc<PluginService>,
+    /// 抓取器与凭据库：内容服务每次按需装配，这样换了令牌立刻生效。
+    feed_fetcher: Arc<dyn FeedFetcher>,
+    vault: Arc<dyn SecretVault>,
 }
+
+/// 资讯刷新间隔在设置表里的键。
 
 fn now_unix() -> i64 {
     SystemTime::now()
@@ -66,6 +84,9 @@ impl DesktopState {
         parts: StartupParts,
         diagnostics: Arc<DiagnosticLog>,
         backups: Arc<BackupStore>,
+        hub: Arc<dyn HubStore>,
+        plugins: Arc<PluginService>,
+        vault: Arc<dyn SecretVault>,
     ) -> Self {
         let (gateway, gateway_error) = match parts.gateway {
             Ok(gateway) => (Some(gateway), None),
@@ -87,6 +108,13 @@ impl DesktopState {
                 .cloned()
                 .unwrap_or_else(|| error.message_key.clone())
         });
+        let tools = parts.catalog.map_err(|error| {
+            error
+                .safe_details
+                .first()
+                .cloned()
+                .unwrap_or_else(|| error.message_key.clone())
+        });
         Self {
             workspace,
             apply,
@@ -99,7 +127,58 @@ impl DesktopState {
             diagnostics,
             probes: Arc::new(Probes::new()),
             backups,
+            hub,
+            tools,
+            plugins,
+            feed_fetcher: Arc::new(HttpFeedFetcher::new()),
+            vault,
         }
+    }
+
+    /// 工具管理服务；清单没加载成功时给出原因。
+    pub fn tools(&self) -> Result<&Arc<ToolHubService>, CoreError> {
+        self.tools.as_ref().map_err(|reason| {
+            CoreError::new(
+                switch_core::ErrorCode::CatalogSchemaMismatch,
+                "error.toolCatalogUnavailable",
+            )
+            .with_detail(reason.clone())
+        })
+    }
+
+    pub fn plugins(&self) -> &Arc<PluginService> {
+        &self.plugins
+    }
+
+    /// 按需装配内容服务：令牌从凭据库现读，改完立即生效。
+    ///
+    /// 抓取节奏不再可配：固定在本地 06:00 与 18:00 各一次（见
+    /// `switch_core::content::DAILY_FETCH_HOURS`），时刻表由核心持有。
+    pub fn content(&self) -> ContentService {
+        ContentService::new(
+            self.hub.clone(),
+            self.feed_fetcher.clone(),
+            self.github_token(),
+        )
+    }
+
+    /// GitHub 令牌。取不到（凭据库未授权、条目不存在）时按「没有令牌」处理——
+    /// 匿名访问本来就能用，只是频率低一些，不该因此让整个资讯页失败。
+    pub fn github_token(&self) -> Option<String> {
+        self.vault
+            .load(switch_core::content::GITHUB_TOKEN_REF)
+            .ok()
+            .flatten()
+            .filter(|token| !token.trim().is_empty())
+            .or_else(|| {
+                std::env::var("SWITCHELP_GITHUB_TOKEN")
+                    .ok()
+                    .filter(|token| !token.trim().is_empty())
+            })
+    }
+
+    pub fn vault(&self) -> &Arc<dyn SecretVault> {
+        &self.vault
     }
 
     /// 应用数据目录。托管 profile、bridge 与备份都在这儿。
