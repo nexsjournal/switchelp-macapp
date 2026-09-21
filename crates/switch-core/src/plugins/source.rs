@@ -18,6 +18,8 @@ use super::skill::{self, SkillDocument, MAX_FILES_PER_SKILL, MAX_FILE_BYTES};
 pub const MAX_SKILLS_PER_REPO: usize = 60;
 /// 单次抓取的字节总量上限。
 pub const MAX_TOTAL_BYTES: usize = 8 * 1024 * 1024;
+/// 并发读文件的线程数上限。太低没效果，太高对源站不礼貌。
+const READ_CONCURRENCY: usize = 6;
 
 /// 从哪抓的。写进归属清单，卸载与更新时才知道自己是从哪一版装的。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,43 +117,127 @@ pub fn parse_repo_spec(raw: &str) -> Result<(String, Option<String>), CoreError>
     Ok((format!("{}/{}", parts[0], parts[1]), git_ref))
 }
 
+/// 提交里的一个文件：路径 + 字节数。
+///
+/// 目录阶段只要这两样：技能在哪、装上去会写多少。**正文一律不在这里读**——
+/// 见 [`assemble`] 的说明。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoBlob {
+    pub path: String,
+    pub size: u64,
+}
+
 /// 只读的仓库读取接口。
 pub trait RepoFetcher: Send + Sync {
     /// 把分支名解析成提交 SHA。
     fn resolve_commit(&self, repo: &str, git_ref: Option<&str>) -> Result<String, CoreError>;
-    /// 列出仓库里所有 `SKILL.md` 的路径。
-    fn list_skill_paths(&self, repo: &str, commit: &str) -> Result<Vec<String>, CoreError>;
+    /// 列出提交里的**全部文件**（路径 + 字节数）。
+    ///
+    /// 一次请求拿全：技能清单与「技能目录里还有哪些文件」都从这一份里筛。
+    /// 从前这两件事各有一个方法，目录阶段于是按技能数重复下载同一棵 tree
+    /// （实测 anthropics/skills：20 个技能 = 21 次 tree 请求，每次 160 KB），
+    /// 既慢又白烧 GitHub 的接口限额（未认证只有 60 次/小时）。
+    fn list_blobs(&self, repo: &str, commit: &str) -> Result<Vec<RepoBlob>, CoreError>;
     /// 读一个文件。
     fn read_file(&self, repo: &str, commit: &str, path: &str) -> Result<Vec<u8>, CoreError>;
-    /// 列出某个目录下的文件（递归）。
-    ///
-    /// 默认返回空：不支持这个能力的抓取器只会装载 `SKILL.md` 本身，
-    /// 不会假装技能里还有别的文件。
-    fn list_files_under(
-        &self,
-        _repo: &str,
-        _commit: &str,
-        _dir: &str,
-    ) -> Result<Vec<String>, CoreError> {
-        Ok(Vec::new())
-    }
 }
 
-/// 把 `SKILL.md` 路径列表变成技能清单：每个技能带上它同目录下的所有文件。
+/// 一份文件清单里的技能路径（`SKILL.md`），按路径排序。
+pub fn skill_paths(blobs: &[RepoBlob]) -> Vec<String> {
+    let mut paths: Vec<String> = blobs
+        .iter()
+        .map(|blob| blob.path.as_str())
+        .filter(|path| {
+            path.rsplit_once('/')
+                .map(|(_, file)| file.eq_ignore_ascii_case("SKILL.md"))
+                .unwrap_or(false)
+        })
+        .map(str::to_owned)
+        .collect();
+    paths.sort();
+    paths
+}
+
+/// 某个目录下的文件（含更深一层）。
+fn blobs_under<'a>(blobs: &'a [RepoBlob], dir: &str) -> Vec<&'a RepoBlob> {
+    if dir.is_empty() {
+        return Vec::new();
+    }
+    let prefix = format!("{dir}/");
+    blobs
+        .iter()
+        .filter(|blob| blob.path.starts_with(&prefix))
+        .collect()
+}
+
+/// 读一批文件。**并发**：一个仓库有几十个 `SKILL.md`，串行读一轮就是几十秒
+/// （实测每个 raw 请求约 1.4 秒），页面看起来就是卡住了。抓取器是 `Sync` 的，
+/// 所以用受限的线程池分批读，把「读几十个文件」压到个位数秒。
+fn read_many(
+    fetcher: &dyn RepoFetcher,
+    repo: &str,
+    commit: &str,
+    paths: &[String],
+) -> Result<Vec<Vec<u8>>, CoreError> {
+    let workers = paths.len().min(READ_CONCURRENCY).max(1);
+    if workers == 1 {
+        return paths
+            .iter()
+            .map(|path| fetcher.read_file(repo, commit, path))
+            .collect();
+    }
+    let mut slots: Vec<Option<Result<Vec<u8>, CoreError>>> = Vec::new();
+    slots.resize_with(paths.len(), || None);
+    let slots = std::sync::Mutex::new(slots);
+    std::thread::scope(|scope| {
+        for worker in 0..workers {
+            let slots = &slots;
+            scope.spawn(move || {
+                let mut index = worker;
+                while index < paths.len() {
+                    let read = fetcher.read_file(repo, commit, &paths[index]);
+                    slots.lock().expect("读结果锁")[index] = Some(read);
+                    index += workers;
+                }
+            });
+        }
+    });
+    slots
+        .into_inner()
+        .expect("读结果锁")
+        .into_iter()
+        .map(|slot| slot.unwrap_or_else(|| Err(CoreError::internal("读取任务没有返回结果"))))
+        .collect()
+}
+
+/// 把一份文件清单变成技能目录。
+///
+/// **目录阶段只读 `SKILL.md` 的正文，同目录的其它文件只列清单（路径 + 字节数）。**
+/// 这不是省事，是这一页能不能用的分界线：技能的同目录里放着 `references/`、脚本、
+/// 甚至字体与 XSD（实测默认源 anthropics/skills：414 个文件、10.4 MB），
+/// 为了显示一份清单把它们逐个下下来，就是用户看到的「一直显示正在读取仓库」——
+/// 几百个串行 HTTPS 请求、好几分钟，还烧掉 GitHub 未认证限额。正文在
+/// [`hydrate`] 里按**选中的技能**补，装什么读什么。
 pub fn assemble(
     fetcher: &dyn RepoFetcher,
     repo: &str,
     commit: &str,
-    skill_paths: &[String],
+    blobs: &[RepoBlob],
     now: i64,
 ) -> Result<RepoCatalog, CoreError> {
     let mut skills = Vec::new();
     let mut total_bytes = 0usize;
     let mut truncated = false;
 
-    let mut sorted: Vec<&String> = skill_paths.iter().collect();
-    sorted.sort();
-    for path in sorted.into_iter().take(MAX_SKILLS_PER_REPO) {
+    let listed = skill_paths(blobs);
+    let wanted: Vec<String> = listed.iter().take(MAX_SKILLS_PER_REPO).cloned().collect();
+    if listed.len() > wanted.len() {
+        truncated = true;
+    }
+    // 一次并发读回所有 SKILL.md：它们的正文是目录列表与详情页要显示的东西。
+    let markdowns = read_many(fetcher, repo, commit, &wanted)?;
+
+    for (path, markdown) in wanted.iter().zip(markdowns) {
         let Some(dir_name) = skill_directory(path) else {
             continue;
         };
@@ -161,48 +247,45 @@ pub fn assemble(
             None => dir_name.clone(),
         };
 
-        let markdown = fetcher.read_file(repo, commit, path)?;
         if markdown.len() > MAX_FILE_BYTES {
             truncated = true;
             continue;
         }
         let text = String::from_utf8_lossy(&markdown).into_owned();
         let document = skill::parse(&text, &dir_name);
+        total_bytes += markdown.len();
 
+        // 同目录下的其它文件：只记路径与大小（技能常配 references/、examples/ 之类）。
+        let prefix = format!("{source_path}/");
         let mut files = vec![RepoFile {
             path: "SKILL.md".to_owned(),
             bytes: markdown.len() as u64,
             text,
         }];
-        total_bytes += markdown.len();
-
-        // 同目录下的其它文件一并带上（技能常配 references/、examples/ 之类）。
-        for sibling in fetcher.list_files_under(repo, commit, &source_path)? {
-            if files.len() >= MAX_FILES_PER_SKILL {
+        for sibling in blobs_under(blobs, &source_path) {
+            if sibling.path.ends_with("/SKILL.md") || sibling.path == "SKILL.md" {
+                continue;
+            }
+            if files.len() >= MAX_FILES_PER_SKILL || total_bytes >= MAX_TOTAL_BYTES {
                 truncated = true;
                 break;
             }
-            if sibling.ends_with("/SKILL.md") || sibling == "SKILL.md" {
-                continue;
-            }
-            if total_bytes >= MAX_TOTAL_BYTES {
-                truncated = true;
-                break;
-            }
-            let bytes = fetcher.read_file(repo, commit, &sibling)?;
-            if bytes.len() > MAX_FILE_BYTES {
+            // 超过单文件上限的同目录文件不列进清单：安装走的是 `RepoFile.text`（字符串），
+            // 二进制附件在那一层已经被改坏，宁可不装也不要装个坏的。
+            // 待办：把 `RepoFile` 换成能带原始字节（或 base64）的形状，再放开这一条。
+            if sibling.size > MAX_FILE_BYTES as u64 {
                 truncated = true;
                 continue;
             }
-            total_bytes += bytes.len();
-            let relative = sibling
-                .strip_prefix(&format!("{source_path}/"))
-                .unwrap_or(sibling.as_str())
-                .to_owned();
+            total_bytes += sibling.size as usize;
             files.push(RepoFile {
-                path: relative,
-                bytes: bytes.len() as u64,
-                text: String::from_utf8_lossy(&bytes).into_owned(),
+                path: sibling
+                    .path
+                    .strip_prefix(&prefix)
+                    .unwrap_or(sibling.path.as_str())
+                    .to_owned(),
+                bytes: sibling.size,
+                text: String::new(),
             });
         }
 
@@ -221,6 +304,38 @@ pub fn assemble(
         fetched_at: now,
         truncated,
     })
+}
+
+/// 把**选中技能**的同目录文件正文读回来（目录阶段只列了清单）。
+///
+/// 装什么读什么：预览与安装只对用户勾选的技能调用它，所以一个仓库里有多少个大文件
+/// 都不再影响浏览那一页的速度。失败原样上报——半套文件装上去比失败更糟。
+pub fn hydrate(
+    fetcher: &dyn RepoFetcher,
+    repo: &str,
+    commit: &str,
+    skill: &mut RepoSkill,
+) -> Result<(), CoreError> {
+    let wanted: Vec<String> = skill
+        .files
+        .iter()
+        .filter(|file| file.path != "SKILL.md")
+        .map(|file| {
+            if skill.source_path.is_empty() {
+                file.path.clone()
+            } else {
+                format!("{}/{}", skill.source_path, file.path)
+            }
+        })
+        .collect();
+    let bodies = read_many(fetcher, repo, commit, &wanted)?;
+    let mut bodies = bodies.into_iter();
+    for file in skill.files.iter_mut().filter(|file| file.path != "SKILL.md") {
+        let Some(bytes) = bodies.next() else { break };
+        file.text = String::from_utf8_lossy(&bytes).into_owned();
+        file.bytes = bytes.len() as u64;
+    }
+    Ok(())
 }
 
 /// `skills/demo/SKILL.md` → `demo`。
@@ -354,7 +469,7 @@ impl RepoFetcher for GithubFetcher {
             .ok_or_else(|| CoreError::internal(format!("{repo} 没有返回提交 SHA")))
     }
 
-    fn list_skill_paths(&self, repo: &str, commit: &str) -> Result<Vec<String>, CoreError> {
+    fn list_blobs(&self, repo: &str, commit: &str) -> Result<Vec<RepoBlob>, CoreError> {
         let payload = self.json(&format!(
             "{}/repos/{repo}/git/trees/{commit}?recursive=1",
             self.api_base
@@ -366,13 +481,15 @@ impl RepoFetcher for GithubFetcher {
         Ok(tree
             .iter()
             .filter(|node| node.get("type").and_then(|value| value.as_str()) == Some("blob"))
-            .filter_map(|node| node.get("path").and_then(|value| value.as_str()))
-            .filter(|path| {
-                path.rsplit_once('/')
-                    .map(|(_, file)| file.eq_ignore_ascii_case("SKILL.md"))
-                    .unwrap_or(false)
+            .filter_map(|node| {
+                let path = node.get("path").and_then(|value| value.as_str())?;
+                // tree 里的每个 blob 都带 size；缺了就按 0 记，装的时候以实际写入为准。
+                let size = node.get("size").and_then(|value| value.as_u64()).unwrap_or(0);
+                Some(RepoBlob {
+                    path: path.to_owned(),
+                    size,
+                })
             })
-            .map(str::to_owned)
             .collect())
     }
 
@@ -388,39 +505,6 @@ impl RepoFetcher for GithubFetcher {
             ),
             "text/plain",
         )
-    }
-
-    fn list_files_under(
-        &self,
-        repo: &str,
-        commit: &str,
-        dir: &str,
-    ) -> Result<Vec<String>, CoreError> {
-        self.list_under(repo, commit, dir)
-    }
-}
-
-/// 列出技能目录下的文件。GitHub 的 tree 接口默认是递归的，
-/// 这里单独再查一次同目录，避免把返回体撑大。
-impl GithubFetcher {
-    fn list_under(&self, repo: &str, commit: &str, dir: &str) -> Result<Vec<String>, CoreError> {
-        if dir.is_empty() {
-            return Ok(Vec::new());
-        }
-        let payload = self.json(&format!(
-            "{}/repos/{repo}/git/trees/{commit}?recursive=1",
-            self.api_base
-        ))?;
-        let Some(tree) = payload.get("tree").and_then(|value| value.as_array()) else {
-            return Ok(Vec::new());
-        };
-        Ok(tree
-            .iter()
-            .filter(|node| node.get("type").and_then(|value| value.as_str()) == Some("blob"))
-            .filter_map(|node| node.get("path").and_then(|value| value.as_str()))
-            .filter(|path| path.starts_with(&format!("{dir}/")))
-            .map(str::to_owned)
-            .collect())
     }
 }
 
@@ -452,13 +536,17 @@ pub(crate) mod fake {
             Ok(self.commit.clone())
         }
 
-        fn list_skill_paths(&self, _repo: &str, _commit: &str) -> Result<Vec<String>, CoreError> {
-            Ok(self
+        fn list_blobs(&self, _repo: &str, _commit: &str) -> Result<Vec<RepoBlob>, CoreError> {
+            let mut blobs: Vec<RepoBlob> = self
                 .files
-                .keys()
-                .filter(|path| path.ends_with("SKILL.md"))
-                .cloned()
-                .collect())
+                .iter()
+                .map(|(path, bytes)| RepoBlob {
+                    path: path.clone(),
+                    size: bytes.len() as u64,
+                })
+                .collect();
+            blobs.sort_by(|left, right| left.path.cmp(&right.path));
+            Ok(blobs)
         }
 
         fn read_file(&self, _repo: &str, _commit: &str, path: &str) -> Result<Vec<u8>, CoreError> {
@@ -532,8 +620,12 @@ mod tests {
         assert_eq!(skill_directory("a/b/readme.md"), None);
     }
 
+    /// 目录阶段只列同目录文件的清单（路径 + 大小），**不读正文**。
+    ///
+    /// 这是「一直显示正在读取仓库」的回归测试：从前每个技能都会把同目录的文件逐个下下来
+    /// （默认源实测 394 个文件、10.4 MB、几百个串行请求），而界面只需要一份清单。
     #[test]
-    fn assemble_collects_sibling_files_into_the_same_skill() {
+    fn assemble_lists_sibling_files_without_downloading_them() {
         let fetcher = FakeFetcher::new(&[
             (
                 "skills/demo/SKILL.md",
@@ -542,15 +634,8 @@ mod tests {
             ("skills/demo/references/notes.md", "笔记"),
             ("skills/other/SKILL.md", "---\nname: other\n---\n"),
         ]);
-        // 用真实抓取器的同级文件能力需要网络；这里只验证 SKILL.md 的装载。
-        let catalog = assemble(
-            &fetcher,
-            "owner/repo",
-            &fetcher.commit,
-            &fetcher.list_skill_paths("owner/repo", "deadbeef").unwrap(),
-            42,
-        )
-        .unwrap();
+        let blobs = fetcher.list_blobs("owner/repo", &fetcher.commit).unwrap();
+        let catalog = assemble(&fetcher, "owner/repo", &fetcher.commit, &blobs, 42).unwrap();
         assert_eq!(catalog.skills.len(), 2);
         assert_eq!(catalog.commit, "deadbeef");
         let demo = catalog
@@ -559,22 +644,83 @@ mod tests {
             .find(|skill| skill.dir_name == "demo")
             .unwrap();
         assert_eq!(demo.document.id, "demo");
-        assert_eq!(demo.files.len(), 1, "假抓取器不提供同级文件");
-        assert_eq!(demo.files[0].path, "SKILL.md");
         assert_eq!(demo.source_path, "skills/demo");
+        assert_eq!(
+            demo.files.iter().map(|file| file.path.as_str()).collect::<Vec<_>>(),
+            vec!["SKILL.md", "references/notes.md"],
+        );
+        let sibling = &demo.files[1];
+        assert_eq!(sibling.bytes, "笔记".len() as u64, "大小来自 tree，不必读正文");
+        assert!(sibling.text.is_empty(), "目录阶段不该下载同目录文件的正文");
+
+        // 选中这个技能时才把正文读回来。
+        let mut wanted = catalog
+            .skills
+            .iter()
+            .find(|skill| skill.dir_name == "demo")
+            .unwrap()
+            .clone();
+        hydrate(&fetcher, "owner/repo", &fetcher.commit, &mut wanted).unwrap();
+        assert_eq!(wanted.files[1].text, "笔记");
+    }
+
+    /// 一次目录抓取只请求一次 tree。
+    ///
+    /// 从前是按技能数重复请求（默认源 20 个技能 = 21 次 160 KB 的 tree），
+    /// 既慢又烧 GitHub 未认证的 60 次/小时限额。
+    #[test]
+    fn browsing_asks_for_the_tree_once() {
+        struct Counting<'a> {
+            inner: &'a FakeFetcher,
+            trees: std::sync::atomic::AtomicUsize,
+        }
+        impl RepoFetcher for Counting<'_> {
+            fn resolve_commit(
+                &self,
+                repo: &str,
+                git_ref: Option<&str>,
+            ) -> Result<String, CoreError> {
+                self.inner.resolve_commit(repo, git_ref)
+            }
+            fn list_blobs(&self, repo: &str, commit: &str) -> Result<Vec<RepoBlob>, CoreError> {
+                self.trees.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.inner.list_blobs(repo, commit)
+            }
+            fn read_file(
+                &self,
+                repo: &str,
+                commit: &str,
+                path: &str,
+            ) -> Result<Vec<u8>, CoreError> {
+                self.inner.read_file(repo, commit, path)
+            }
+        }
+
+        let inner = FakeFetcher::new(&[
+            ("skills/a/SKILL.md", "---\nname: a\n---\n"),
+            ("skills/a/refs/one.md", "一"),
+            ("skills/b/SKILL.md", "---\nname: b\n---\n"),
+            ("skills/b/refs/two.md", "二"),
+        ]);
+        let counting = Counting {
+            inner: &inner,
+            trees: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let blobs = counting.list_blobs("owner/repo", &inner.commit).unwrap();
+        let catalog = assemble(&counting, "owner/repo", &inner.commit, &blobs, 0).unwrap();
+        assert_eq!(catalog.skills.len(), 2);
+        assert_eq!(
+            counting.trees.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "tree 只该请求一次"
+        );
     }
 
     #[test]
     fn skills_without_a_name_use_the_directory_name() {
         let fetcher = FakeFetcher::new(&[("x/noname/SKILL.md", "正文，没有 front-matter")]);
-        let catalog = assemble(
-            &fetcher,
-            "o/r",
-            "deadbeef",
-            &fetcher.list_skill_paths("o/r", "deadbeef").unwrap(),
-            0,
-        )
-        .unwrap();
+        let blobs = fetcher.list_blobs("o/r", &fetcher.commit).unwrap();
+        let catalog = assemble(&fetcher, "o/r", "deadbeef", &blobs, 0).unwrap();
         assert_eq!(catalog.skills[0].document.id, "noname");
         assert!(!catalog.skills[0].document.front_matter_parsed);
     }
