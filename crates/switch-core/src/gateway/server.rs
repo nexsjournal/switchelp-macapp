@@ -668,6 +668,27 @@ impl Gateway {
             return chunked.finish();
         }
 
+        // 上游干净断开（对端 FIN）却没给任何终止标记：既没有 `[DONE]`，也没有非 null
+        // 的 `finish_reason`。判据取两者之一而不是只认 `[DONE]`——只发 `finish_reason`
+        // 的兼容实现确实存在，只认 `[DONE]` 会把它们误判成截断，那是拿假警报换假成功。
+        if !saw_done && !translator.saw_terminal() {
+            let error = CoreError::new(ErrorCode::Internal, "error.upstreamStreamIncomplete")
+                .with_detail("上游在给出完成标记前结束了连接，这次回复不完整".to_owned());
+            let _ = chunked.write_frame("error", &error_payload(&error));
+            self.config.diagnostics.record(
+                DiagnosticEvent::new(
+                    crate::diagnostics::now_rfc3339(),
+                    LogLevel::Warning,
+                    "gateway",
+                    "stream".to_owned(),
+                    "result.upstreamStreamIncomplete",
+                )
+                .with_metadata("error_code", "UPSTREAM_STREAM_INCOMPLETE")
+                .with_metadata("pending_bytes", parser.pending_bytes().to_string()),
+            );
+            return chunked.finish();
+        }
+
         for event in parser.finish().into_iter() {
             if let Ok(data) = serde_json::from_str::<Value>(&event.data) {
                 for frame in translator.feed(&data) {
@@ -766,6 +787,17 @@ impl Translator {
                     payload: event.payload,
                 })
                 .collect(),
+        }
+    }
+
+    /// 上游是否给过终止标记。
+    ///
+    /// 直通路径的事件由上游自己发（包括 `response.completed`），网关无从、
+    /// 也不该在这里判定，必须返回「是」，否则会把 responses 直通误判成截断。
+    fn saw_terminal(&self) -> bool {
+        match self {
+            Translator::Passthrough { .. } => true,
+            Translator::Chat { state } => state.saw_finish_reason(),
         }
     }
 }

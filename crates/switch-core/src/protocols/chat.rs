@@ -417,6 +417,11 @@ pub struct ChatStream {
     usage: Option<Value>,
     created: bool,
     completed: bool,
+    /// 上游是否在 delta 里给过非 null 的 `finish_reason`。
+    ///
+    /// `[DONE]` 虽被 OpenAI 兼容协议要求，但确有只发 `finish_reason` 的实现；
+    /// 上游干净断开时用它区分「正常结束」与「半截被截断」。
+    saw_finish_reason: bool,
 }
 
 struct ToolCall {
@@ -445,6 +450,7 @@ impl ChatStream {
             usage: None,
             created: false,
             completed: false,
+            saw_finish_reason: false,
         }
     }
 
@@ -475,6 +481,13 @@ impl ChatStream {
             return events;
         };
         for choice in choices {
+            // `finish_reason` 与 `delta` 平级；即使该帧没有 delta 也要记账。
+            if choice
+                .get("finish_reason")
+                .is_some_and(|reason| !reason.is_null())
+            {
+                self.saw_finish_reason = true;
+            }
             let Some(delta) = choice.get("delta") else {
                 continue;
             };
@@ -586,6 +599,11 @@ impl ChatStream {
                 ));
             }
         }
+    }
+
+    /// 上游是否给过协议层终止标记（非 null 的 `finish_reason`）。
+    pub fn saw_finish_reason(&self) -> bool {
+        self.saw_finish_reason
     }
 
     /// 上游流结束：补齐未关闭的条目并给出 `response.completed`。

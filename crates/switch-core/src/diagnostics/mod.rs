@@ -29,7 +29,7 @@ pub const MAX_RETAINED_BYTES: usize = 20 * 1024 * 1024;
 ///
 /// 这是**唯一**的准入清单：这里没有的键在 `with_metadata` 里被直接丢弃。
 /// 新增字段必须同时在这里登记，避免顺手把请求正文塞进日志。
-pub const ALLOWED_METADATA_KEYS: [&str; 19] = [
+pub const ALLOWED_METADATA_KEYS: [&str; 20] = [
     "instance_id",
     "revision_id",
     "operation_id",
@@ -48,6 +48,7 @@ pub const ALLOWED_METADATA_KEYS: [&str; 19] = [
     "output_tokens",
     "total_tokens",
     "byte_size",
+    "pending_bytes",
     "app_version",
 ];
 
