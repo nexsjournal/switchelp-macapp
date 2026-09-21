@@ -361,7 +361,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
         <dt>{t('codex.configDir')}</dt><dd className="text-mono break-anywhere">{selected.configRoot}</dd>
         <dt>{t('codex.configFile')}</dt><dd className="text-mono break-anywhere">{selected.configFile}</dd>
         <dt>CLI</dt><dd className="text-mono break-anywhere">{selected.cliPath ?? t('codex.notDetected')}</dd>
-        <dt>{t('codex.compatibility')}</dt><dd>{t(`compat.${selected.compatibility}`)}{selected.blockedReasonKey ? ` · ${selected.blockedReasonKey}` : ''}</dd>
+        <dt>{t('codex.compatibility')}</dt><dd>{t(`compat.${selected.compatibility}`)}{selected.blockedReasonKey ? ` · ${t(selected.blockedReasonKey)}` : ''}</dd>
       </dl>}
       <ul className={styles.versions} aria-label={t('codex.versions')}>
         <li>

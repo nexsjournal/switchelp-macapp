@@ -29,7 +29,7 @@ const SOURCE_PREFIXES = new Set([
   'update',
 ]);
 /** Rust 侧只会以 messageKey 形式给出这些前缀的键。 */
-const CORE_PREFIXES = new Set(['action', 'compat', 'credential', 'error', 'group', 'host', 'probe', 'reason', 'stage', 'warning']);
+const CORE_PREFIXES = new Set(['action', 'capability', 'compat', 'credential', 'error', 'group', 'host', 'instance', 'probe', 'reason', 'stage', 'warning']);
 // 扩展板块的错误前缀同样以 `error.` 开头，所以不需要单独列出。
 
 /**

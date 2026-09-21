@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Newspaper, Plus, RefreshCw, Rss, Trash2, TriangleAlert } from 'lucide-react';
+import { ExternalLink, Eye, EyeOff, Newspaper, Plus, RefreshCw, Rss, Trash2, TriangleAlert } from 'lucide-react';
 import type { ContentStatus, FeedItem, FeedSource, FeedSourceDraft, RefreshReport } from '@/contracts/types';
 import { type DesktopClient, toCoreError } from '@/desktop/client';
+import { Dialog } from '@/components/Dialog';
 import { EmptyState } from '@/components/EmptyState';
 import { SegmentedTabs } from '@/components/SegmentedTabs';
 import { showToast } from '@/components/Toast';
@@ -35,6 +36,69 @@ function relative(seconds: number, locale: string): string {
 }
 
 /**
+ * 「设置 GitHub 令牌」弹窗。
+ *
+ * 从前这个入口是一个 `window.prompt`：WKWebView 要实现 `WKUIDelegate` 的输入面板才会显示，
+ * 而 wry 没有实现，于是真机上它不弹任何界面、直接返回 null——用户点了按钮什么都不会发生。
+ * 令牌是敏感值，所以输入框、显隐按钮与提示文案的写法照供应商表单里的密钥字段来。
+ *
+ * 提交空值＝清除（原代码里 `value.trim() || null` 就是这个语义）；已配置时底栏另有
+ * 一个显式的「清除令牌」，省得人靠猜「留空」才知道怎么移除。
+ */
+function TokenDialog({ client, configured, onSaved, onClose }: {
+  client: DesktopClient;
+  /** 当前是否已配置：只决定要不要给出「清除令牌」那条路径。 */
+  configured: boolean;
+  onSaved: (configured: boolean) => void;
+  onClose: () => void;
+}) {
+  const [token, setToken] = useState('');
+  const [visible, setVisible] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (value: string | null) => {
+    setBusy(true);
+    try {
+      const next = await client.setContentGithubToken(value);
+      onSaved(next);
+      showToast(next ? t('content.token.saved') : t('content.token.cleared'));
+      onClose();
+    } catch (cause) {
+      // 失败不关弹窗：人还在这里，改一下就能重试。
+      const core = toCoreError(cause);
+      showToast(core.safeDetails[0] ?? t(core.messageKey));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog width="narrow" title={t('content.token.title')} busy={busy} onClose={onClose}
+      footer={<footer className="form-footer">
+        <div className="actions">
+          {configured && <button type="button" onClick={() => void submit(null)} disabled={busy}>{t('content.token.clear')}</button>}
+        </div>
+        <div className="actions">
+          <button type="button" onClick={onClose} disabled={busy}>{t('action.cancel')}</button>
+          <button className="primary" type="button" disabled={busy} onClick={() => void submit(token.trim() || null)}>
+            {busy ? t('key.saving') : t('action.save')}
+          </button>
+        </div>
+      </footer>}>
+      <div className="form-fields">
+        <label><span className="field-label">{t('content.token.label')}</span>
+          <span className={styles.secret}>
+            <input type={visible ? 'text' : 'password'} value={token} maxLength={4096} spellCheck={false}
+              autoComplete="new-password" aria-label={t('content.token.label')} className={styles.secretInput}
+              placeholder={t('content.token.prompt')} autoFocus
+              onChange={event => setToken(event.target.value)} />
+            <button type="button" className="icon-button" aria-label={visible ? t('key.hide') : t('key.reveal')}
+              onClick={() => setVisible(current => !current)}>{visible ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+          </span></label>
+      </div>
+    </Dialog>
+  );
+}
+
+/**
  * 内容中心（设计 P-C1）。
  *
  * 与参考产品的根本差别：**没有云端聚合**，本机直接抓公开源。因此这一页的重点是
@@ -62,6 +126,7 @@ export function ContentPage({ client }: { client: DesktopClient }) {
   const [draftUrl, setDraftUrl] = useState('');
   const [draftKind, setDraftKind] = useState<FeedSourceDraft['kind']>('rss');
   const [tokenConfigured, setTokenConfigured] = useState(false);
+  const [tokenDialog, setTokenDialog] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -169,19 +234,6 @@ export function ContentPage({ client }: { client: DesktopClient }) {
       await client.deleteFeedSource(source.id);
       await load();
       showToast(t('content.sources.removed', { label: source.label }));
-    } catch (cause) {
-      const core = toCoreError(cause);
-      showToast(core.safeDetails[0] ?? t(core.messageKey));
-    }
-  };
-
-  const setToken = async () => {
-    const value = window.prompt(t('content.token.prompt'));
-    if (value === null) return;
-    try {
-      const configured = await client.setContentGithubToken(value.trim() || null);
-      setTokenConfigured(configured);
-      showToast(configured ? t('content.token.saved') : t('content.token.cleared'));
     } catch (cause) {
       const core = toCoreError(cause);
       showToast(core.safeDetails[0] ?? t(core.messageKey));
@@ -354,7 +406,7 @@ export function ContentPage({ client }: { client: DesktopClient }) {
             </div>
             <p className={styles.note}>{t('content.token.body')}</p>
             <div className="actions">
-              <button type="button" onClick={() => void setToken()}>
+              <button type="button" onClick={() => setTokenDialog(true)}>
                 {tokenConfigured ? t('content.token.update') : t('content.token.set')}
               </button>
               {tokenConfigured && (
@@ -418,6 +470,9 @@ export function ContentPage({ client }: { client: DesktopClient }) {
           )}
         </>
       )}
+
+      {tokenDialog && <TokenDialog client={client} configured={tokenConfigured}
+        onSaved={setTokenConfigured} onClose={() => setTokenDialog(false)} />}
     </div>
   );
 }

@@ -68,3 +68,9 @@
 .grow input { width: 100%; }
 .spin { animation: content-spin 900ms linear infinite; }
 @keyframes content-spin { to { transform: rotate(360deg); } }
+
+/* 令牌弹窗的输入框：与供应商表单的密钥字段同一套做法（输入框 + 显隐按钮压在右侧，
+   输入框留出按钮的位置）。同样要压过全局输入框规则，所以类名写两遍。 */
+.secret { position: relative; display: block; }
+.secret .secretInput.secretInput { padding-right: 48px; }
+.secret button { position: absolute; right: 4px; top: 4px; }

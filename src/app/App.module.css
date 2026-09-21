@@ -6,7 +6,15 @@
  * 主内容自适应；真正需要收成抽屉的是 200% 这一档，见下面的媒体查询。
  */
 .shell { display: flex; height: 100%; position: relative; }
-.sidebar { width: var(--sidebar-width); flex-shrink: 0; background: var(--bg-sidebar); border-right: 1px solid var(--border-subtle); padding: 32px 16px 24px; display: flex; flex-direction: column; }
+.sidebar { width: var(--sidebar-width); flex-shrink: 0; background: var(--bg-sidebar); border-right: 1px solid var(--border-subtle); padding: 32px 16px 24px; display: flex; flex-direction: column; overflow-y: auto; }
+/*
+ * 矮窗（960×640 与 1280×720 都够低）下侧栏内容比窗口高。窗口是 `overflow: hidden` 的，
+ * 侧栏自己以前既不滚、也不许把内容撑出去，于是 flex 把「设置」入口从声明的 44px 压到
+ * 22px（低于 32px 的点击目标下限），版本行被整个推出窗口——出去了就再也够不着。
+ * 让各块按声明取高、侧栏自己滚：尺寸不再被压缩，够不着的内容滚一下就能看到。
+ * 焦点环不会被这个滚动容器裁掉：按钮四周有侧栏自己的 16px 横向内边距兜着。
+ */
+.sidebar > * { flex-shrink: 0; }
 /*
  * 一行 flex：徽标 + 文字列。`align-items: center` 让徽标与**整列**居中——副标题换成更新按钮
  * 之后这一列还是两行，徽标就仍和这一块居中。把按钮挂到这一列外面（或让它多占高度），
@@ -200,6 +208,9 @@
    悬停反馈由内层输入框自己的规则负责。 */
 .providerSearch { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: var(--control-height);
   border: 1px solid var(--border-field); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-muted); }
+/* 图标是固定尺寸的，不该跟着 flex 收缩：实测它被压成 14.68×16，而规范要求弹性行里的图标
+   必须 `flex-shrink: 0`（`02-icons-type-and-copy.md`）。形状由输入框决定，图标不参与分配。 */
+.providerSearch > svg { flex-shrink: 0; }
 /*
  * 类名写两遍把权重提到 0,2,1：`.providerSearch input` 只有 0,1,1，与全局的
  * `input:not([type='checkbox'])` 打平，而全局样式在打包顺序上更靠后——平手它赢。
