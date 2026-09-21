@@ -179,7 +179,7 @@ fn read_many(
     commit: &str,
     paths: &[String],
 ) -> Result<Vec<Vec<u8>>, CoreError> {
-    let workers = paths.len().min(READ_CONCURRENCY).max(1);
+    let workers = paths.len().clamp(1, READ_CONCURRENCY);
     if workers == 1 {
         return paths
             .iter()
@@ -330,7 +330,11 @@ pub fn hydrate(
         .collect();
     let bodies = read_many(fetcher, repo, commit, &wanted)?;
     let mut bodies = bodies.into_iter();
-    for file in skill.files.iter_mut().filter(|file| file.path != "SKILL.md") {
+    for file in skill
+        .files
+        .iter_mut()
+        .filter(|file| file.path != "SKILL.md")
+    {
         let Some(bytes) = bodies.next() else { break };
         file.text = String::from_utf8_lossy(&bytes).into_owned();
         file.bytes = bytes.len() as u64;
@@ -484,7 +488,10 @@ impl RepoFetcher for GithubFetcher {
             .filter_map(|node| {
                 let path = node.get("path").and_then(|value| value.as_str())?;
                 // tree 里的每个 blob 都带 size；缺了就按 0 记，装的时候以实际写入为准。
-                let size = node.get("size").and_then(|value| value.as_u64()).unwrap_or(0);
+                let size = node
+                    .get("size")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0);
                 Some(RepoBlob {
                     path: path.to_owned(),
                     size,
@@ -646,11 +653,18 @@ mod tests {
         assert_eq!(demo.document.id, "demo");
         assert_eq!(demo.source_path, "skills/demo");
         assert_eq!(
-            demo.files.iter().map(|file| file.path.as_str()).collect::<Vec<_>>(),
+            demo.files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
             vec!["SKILL.md", "references/notes.md"],
         );
         let sibling = &demo.files[1];
-        assert_eq!(sibling.bytes, "笔记".len() as u64, "大小来自 tree，不必读正文");
+        assert_eq!(
+            sibling.bytes,
+            "笔记".len() as u64,
+            "大小来自 tree，不必读正文"
+        );
         assert!(sibling.text.is_empty(), "目录阶段不该下载同目录文件的正文");
 
         // 选中这个技能时才把正文读回来。

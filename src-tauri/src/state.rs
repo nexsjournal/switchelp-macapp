@@ -66,8 +66,6 @@ pub struct DesktopState {
     vault: Arc<dyn SecretVault>,
 }
 
-/// 资讯刷新间隔在设置表里的键。
-
 fn now_unix() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -76,6 +74,11 @@ fn now_unix() -> i64 {
 }
 
 impl DesktopState {
+    /// 应用装配点：启动时把各个服务一次装齐。
+    ///
+    /// 参数多是这个位置的固有形态（每个板块一个依赖），所以显式放行那条 lint：
+    /// 把其中几个塞进 `StartupParts` 只会让「谁装配谁」更难读，而不是更好读。
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         workspace: Arc<WorkspaceService>,
         apply: Arc<ApplyService>,
