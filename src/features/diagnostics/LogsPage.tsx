@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Download, Info, RefreshCw, Save, ScrollText, ShieldCheck, Trash2, XCircle } from 'lucide-react';
 import type { DiagnosticEvent, LogLevel } from '@/contracts/types';
 import { type DesktopClient, type DiagnosticsPreview, toCoreError } from '@/desktop/client';
+import { CheckCell, CheckCells } from '@/components/CheckCell';
 import { Dialog } from '@/components/Dialog';
 import { showToast } from '@/components/Toast';
 import { EmptyState } from '@/components/EmptyState';
@@ -198,18 +199,23 @@ export function LogsPage({ client }: { client: DesktopClient }) {
         </div>
       </div>
 
+      {/*
+       * 范围用带描边的勾选单元格，而不是「原生勾选框 + 一行文字」：这是一次真正的多选，
+       * 两个动作（生成预览 / 保存到本地）都吃这个集合，形状与模型编辑器里的能力声明
+       * 保持一致（同一个 CheckCell 组件，也就同一个对勾）。
+       */}
       <div className={styles.scopes}>
-        {CATEGORIES.map(scope => <label key={scope} className="check-label">
-          <input type="checkbox" checked={selectedScopes.includes(scope)}
-            onChange={event => {
-              setSelectedScopes(list => event.target.checked ? [...list, scope] : list.filter(item => item !== scope));
+        <CheckCells>
+          {CATEGORIES.map(scope => <CheckCell key={scope} label={scope} hint={t('logs.scopeHint', { scope })}
+            checked={selectedScopes.includes(scope)}
+            onChange={next => {
+              setSelectedScopes(list => next ? [...list, scope] : list.filter(item => item !== scope));
               // 范围变了，之前预览过的清单不再代表将要导出的内容：作废预览，
               // 否则「保存到本地」会导出与预览清单不一致的包。
               setPreview(null);
               setSavedPath('');
-            }} />
-          {scope}
-        </label>)}
+            }} />)}
+        </CheckCells>
       </div>
 
       {preview && <div className={styles.preview}>

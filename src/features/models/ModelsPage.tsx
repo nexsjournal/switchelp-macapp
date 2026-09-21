@@ -6,7 +6,7 @@ import { Dialog } from '@/components/Dialog';
 import { EmptyState } from '@/components/EmptyState';
 import { showToast } from '@/components/Toast';
 import { RowMenu } from '@/components/RowMenu';
-import { hostStateKeys, hostStateVariant, modelDraft } from './policy';
+import { type ConnectionState, catalogVariant, connectionKeys, connectionVariant, modelDraft } from './policy';
 import styles from './ModelsPage.module.css';
 
 import { currentLocale, t } from '@/i18n';
@@ -54,6 +54,13 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
   const [busy, setBusy] = useState('');
   const [confirm, setConfirm] = useState<{ title: string; body: string; label: string; danger?: boolean; run: () => Promise<void> } | null>(null);
   const [probe, setProbe] = useState<{ model: Model; stages: { stageKey: string; status: string; messageKey: string; elapsedMs?: number | null }[] } | null>(null);
+  /**
+   * 每个模型最近一次「测试」的结果，用来在列表里给一个连接状态点。
+   *
+   * 只活在本次会话里：探测结果是**当时**的事实（Key 可能刚换、上游可能刚挂），
+   * 持久化下来只会让用户对着一个过期的绿点下判断。没测过就是中性。
+   */
+  const [connection, setConnection] = useState<Record<string, ConnectionState>>({});
 
   // 换供应商就丢掉上一家的勾选：批量条会照旧报「已选 N 个」，但那些模型已经不在屏幕上，
   // 「批量删除」于是可能删掉用户看不见的行。
@@ -150,6 +157,9 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
       { providerId: model.providerId, modelId: model.id, credentialId: active.id },
       { includeGenerate: false },
     );
+    // 有失败阶段就是失败；全通过或跳过（上游没有 /models 之类）算通过。
+    const failed = report.stages.some(stage => stage.status === 'failed');
+    setConnection(current => ({ ...current, [model.id]: failed ? 'failed' : 'passed' }));
     setProbe({ model, stages: report.stages });
   });
 
@@ -213,7 +223,7 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
               {sortHeader('name', t('models.columnModel'))}
               {!providerScope && sortHeader('provider', t('editor.provider'))}
               {sortHeader('context', t('models.columnLimits'))}
-              <th scope="col">{t('models.columnState')}</th>
+              <th scope="col">{t('models.columnConnection')}</th>
               <th scope="col"><span className="visually-hidden">{t('common.actions')}</span></th>
             </tr></thead>
             <tbody>{visible.map(model => <tr key={model.id} className={selected.includes(model.id) ? styles.selectedRow : undefined}>
@@ -223,10 +233,25 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
                     checked={selected.includes(model.id)} onChange={() => toggleOne(model.id)} />
                 </span>
               </td>
-              <td><strong>{model.displayName}</strong><span className={`${styles.line} text-mono break-anywhere`}>{model.upstreamId}</span></td>
+              <td>
+                {/* 是否加进了 Codex 目录：绿点＝已加入。它不是问题状态，所以未加入不做成红色。 */}
+                <span className={styles.modelName}>
+                  <span className={`${styles.catalogDot} ${styles[catalogVariant(model.inCatalog) || 'neutral']}`}
+                    role="img" aria-label={t(model.inCatalog ? 'models.catalogIn' : 'models.catalogOut')}
+                    title={t(model.inCatalog ? 'models.catalogIn' : 'models.catalogOut')} />
+                  <strong>{model.displayName}</strong>
+                </span>
+                <span className={`${styles.line} text-mono break-anywhere`}>{model.upstreamId}</span>
+              </td>
               {!providerScope && <td>{providerName(model.providerId)}</td>}
               <td className="text-mono">{model.policy.contextLimit?.toLocaleString() ?? t('common.undeclared')}<span className={styles.line}>{model.policy.outputLimit?.toLocaleString() ?? t('common.undeclared')}</span></td>
-              <td><span className={`badge ${hostStateVariant(model.hostState)}`}>{t(hostStateKeys[model.hostState])}</span></td>
+              <td>{(() => {
+                const state = connection[model.id] ?? 'untested';
+                return <span className={styles.connection}>
+                  <span className={`${styles.statusDot} ${styles[connectionVariant(state) || 'neutral']}`} aria-hidden="true" />
+                  <span className="text-muted">{t(connectionKeys[state])}</span>
+                </span>;
+              })()}</td>
               <td><div className={styles.rowActions}>
                 <button onClick={() => onEditModel(model)} aria-label={t('models.editAria', { name: model.displayName })}>{t('common.edit')}</button>
                 <button onClick={() => void probeModel(model)} disabled={busy === 'probe'} aria-label={t('models.testAria', { name: model.displayName })}>{t('common.test')}</button>

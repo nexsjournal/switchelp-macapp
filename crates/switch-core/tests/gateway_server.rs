@@ -451,6 +451,42 @@ fn chat_upstream_is_translated_into_responses_events() {
     assert_eq!(upstream_body["stream"], true);
 }
 
+/// 回归：Codex 把开发者指令放在 `input` 里（role 为 `developer`，实测 0.155 有 1.3 万字符），
+/// 而 chat 上游只认 system/user/assistant/tool。原样转发会被上游 400，用户在宿主里看到的
+/// 只是「上游拒绝了请求」，无从知道是哪一处翻译漏了。
+#[test]
+fn codex_developer_instructions_never_reach_a_chat_upstream() {
+    let harness = Harness::start(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+    );
+    let token = harness.token.expose().to_owned();
+    let mut body = harness.request_body();
+    body["input"] = json!([
+        {"type": "message", "role": "developer", "content": [
+            {"type": "input_text", "text": "开发者指令"}]},
+        {"type": "message", "role": "user", "content": [
+            {"type": "input_text", "text": "你好"}]},
+    ]);
+
+    let (status, _) = harness.post("responses", Some(&token), &body);
+
+    assert_eq!(status, 200);
+    let upstream = harness.upstream.last_body();
+    let roles: Vec<&str> = upstream["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|message| message["role"].as_str().unwrap())
+        .collect();
+    assert_eq!(roles, vec!["system", "user"], "上游不得收到 developer 角色");
+    assert_eq!(
+        upstream["messages"][0]["content"], "你是编码助手\n\n开发者指令",
+        "两条系统级内容合并成一条 system"
+    );
+}
+
 /// 上游把错误当成流里的数据帧发出来（限流、内容过滤、内部错误）。
 ///
 /// 回归：翻译器只认 `choices`/`delta`，这种帧过去被当成「没有内容」继续，

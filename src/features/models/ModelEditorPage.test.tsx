@@ -78,24 +78,43 @@ test('没动过思考那一节时，已保存的「开关式」声明原样保�
   expect(saveModel.mock.calls[0]![0]!.policy.reasoning.control).toBe('toggle');
 });
 
-test('推理档位：加号添加、点一下设为默认，保存后进策略', async () => {
+test('推理档位：从 Codex 支持的集合里勾选，再挑一个作默认', async () => {
   const user = userEvent.setup();
   const saveModel = vi.fn().mockResolvedValue(model);
   renderEditor({ saveModel });
 
-  // 已保存的档位是 low / high，默认 low；再加一个 minimal 并把它设为默认。
-  for (const level of ['minimal', 'high']) {
-    await user.click(screen.getByRole('button', { name: '添加档位' }));
-    await user.type(screen.getByLabelText('添加档位'), `${level}{Enter}`);
-  }
-  await user.click(screen.getByRole('button', { name: 'minimal' }));
+  // 已保存的档位是 low / high，默认 low。勾不是手输——集合来自 Codex 的档位枚举。
+  expect(screen.getByRole('checkbox', { name: '低' })).toBeChecked();
+  expect(screen.getByRole('checkbox', { name: '高' })).toBeChecked();
+  expect(screen.getByRole('checkbox', { name: '中' })).not.toBeChecked();
+  expect(screen.queryByLabelText('添加档位')).not.toBeInTheDocument();
+
+  // 勾上「中」，再把它设为默认。
+  await user.click(screen.getByRole('checkbox', { name: '中' }));
+  await user.click(screen.getByRole('button', { name: '中' }));
   await user.click(screen.getByRole('button', { name: '保存' }));
 
   const reasoning = saveModel.mock.calls[0]![0]!.policy.reasoning;
-  // 重复的档位不会加第二遍。
-  expect(reasoning.allowedValues).toEqual(['low', 'high', 'minimal']);
-  expect(reasoning.defaultValue).toBe('minimal');
+  // 集合按档位从低到高写进策略，不按点击顺序。
+  expect(reasoning.allowedValues).toEqual(['low', 'medium', 'high']);
+  expect(reasoning.defaultValue).toBe('medium');
   expect(reasoning.mappingId).toBe('reasoning.effort.v1');
+});
+
+test('已保存的档位不在集合里时原样保留，不因为界面上没这一项就丢掉', async () => {
+  const user = userEvent.setup();
+  const saveModel = vi.fn().mockResolvedValue(model);
+  // 上游自己扩展的档位：不在 Codex 的集合里，但它已经被声明过。
+  const custom = { ...model, policy: { ...model.policy,
+    reasoning: { ...model.policy.reasoning, allowedValues: ['low', 'deep'], defaultValue: 'deep' } } };
+  render(<ModelEditorPage client={testClient({ saveModel })} providers={[provider]} model={custom}
+    onSaved={() => {}} onCancel={() => {}} />);
+
+  expect(screen.getByRole('checkbox', { name: 'deep' })).toBeChecked();
+  await user.click(screen.getByRole('button', { name: '保存' }));
+
+  expect(saveModel.mock.calls[0]![0]!.policy.reasoning.allowedValues).toEqual(['low', 'deep']);
+  expect(saveModel.mock.calls[0]![0]!.policy.reasoning.defaultValue).toBe('deep');
 });
 
 test('有未保存修改时取消要确认，避免一次点击丢掉填写', async () => {

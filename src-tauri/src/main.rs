@@ -7,13 +7,19 @@ use std::sync::Arc;
 use switch_core::{
     application::{ApplyService, GatewayLayout, SystemClock, WorkspaceService},
     codex::{backup::BackupStore, config::AUTH_HELPER_INSTANCE},
+    content::ContentService,
     credentials::{SecretVault, SystemVault},
     diagnostics::DiagnosticLog,
     domain::ids::InstanceId,
     gateway::{
         self, helper_path, install_auth_helper, Gateway, GatewayConfig, GatewayRouter, GatewayToken,
     },
-    storage::{OperationStore, Repository, SqliteOperationStore, SqliteRepository},
+    plugins::{GithubFetcher, PluginService},
+    storage::{
+        HubStore, OperationStore, Repository, SqliteHubStore, SqliteOperationStore,
+        SqliteRepository,
+    },
+    toolhub::{catalog::ToolCatalog, ToolHubService},
 };
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
@@ -187,6 +193,9 @@ fn open_host_app() {
 
 fn main() {
     tauri::Builder::default()
+        // 应用内更新：检查、下载、验签、替换应用包。更新源与公钥在 tauri.conf.json 的
+        // `plugins.updater` 里，机制与发布步骤见 docs/architecture/06-updates.md。
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let mut directory = app.path().app_data_dir()?;
             // 开发验证使用隔离目录，发行包不读取此覆盖变量。
@@ -241,7 +250,13 @@ fn main() {
             }
             // 网关与界面共用一份诊断日志：网关写，界面读。
             let diagnostics = Arc::new(DiagnosticLog::default());
-            let gateway = start_gateway(&directory, repository, vault, router, diagnostics.clone());
+            let gateway = start_gateway(
+                &directory,
+                repository.clone(),
+                vault.clone(),
+                router,
+                diagnostics.clone(),
+            );
             if let Err(error) = &gateway {
                 // 端口被占用时不能假装在跑：状态里保留原因，界面显示“网关未启动”。
                 eprintln!(
@@ -267,15 +282,93 @@ fn main() {
                 eprintln!("Switchelp 托盘未创建：{error}");
             }
             let home = app.path().home_dir()?;
+
+            // 扩展板块：同一个元数据库文件，独立连接（与操作记录同样的理由）。
+            let hub: Arc<dyn HubStore> = Arc::new(SqliteHubStore::open(&db_path)?);
+            // 清单加载失败不阻止启动，但工具管理板块会如实显示不可用。
+            let catalog = ToolCatalog::embedded().map(|catalog| {
+                Arc::new(ToolHubService::new(
+                    catalog,
+                    switch_core::platform::Platform::current(),
+                    home.clone(),
+                    hub.clone(),
+                ))
+            });
+            if let Err(error) = &catalog {
+                eprintln!(
+                    "Switchelp 工具清单不可用：{} {:?}",
+                    error.message_key, error.safe_details
+                );
+            }
+            // 插件目录来自公开仓库：只读 GET，令牌可缺省。
+            let fetcher = Arc::new(GithubFetcher::new(
+                // 令牌在状态里按需读取；这里先给一份初始化用的。
+                None,
+                switch_core::content::DEFAULT_USER_AGENT.to_owned(),
+            ));
+            let plugins = Arc::new(PluginService::new(
+                hub.clone(),
+                repository.clone(),
+                catalog.clone().unwrap_or_else(|_| {
+                    // 清单不可用时用一个空清单，插件板块会在解析目标时报「不支持」。
+                    Arc::new(ToolHubService::new(
+                        ToolCatalog::parse(r#"{"schemaVersion":1,"tools":[{"id":"placeholder","names":{},"category":"utility","description":"清单不可用","command":"none","readiness":{"versionArgs":["--version"],"okExit":0,"cacheSeconds":3600},"paths":{"macos":["/nonexistent"]}}]}"#).expect("占位清单固定合法"),
+                        switch_core::platform::Platform::current(),
+                        home.clone(),
+                        hub.clone(),
+                    ))
+                }),
+                fetcher,
+            ));
+
+            // 首次运行时写入预置订阅源（已有源不动）。
+            let content = ContentService::new(
+                hub.clone(),
+                Arc::new(switch_core::content::HttpFeedFetcher::new()),
+                None,
+            );
+            if let Err(error) = content.ensure_defaults(switch_core::time_now()) {
+                eprintln!("Switchelp 订阅源初始化失败：{error}");
+            }
+
             app.manage(Arc::new(DesktopState::new(
                 workspace,
                 apply,
                 home,
                 directory.clone(),
-                StartupParts { gateway, bridge },
+                StartupParts {
+                    gateway,
+                    bridge,
+                    catalog,
+                },
                 diagnostics,
                 backups,
+                hub.clone(),
+                plugins,
+                vault,
             )));
+
+            // 定时刷新资讯。只在应用运行时发生，界面在订阅源页直说这一点。
+            // 每 5 分钟醒一次，是否真的抓由每个源的到期时间决定；抓取本身放到
+            // blocking 线程，ureq 是阻塞客户端，不能在 async 上下文里直接跑。
+            let refresher = hub.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    // 每 5 分钟醒一次；是否真的抓由每个源的到期时间决定（本地 06:00 / 18:00）。
+                    // 醒得比计划时刻密，是为了让「应用刚打开时已经过点了」这种情况立即补上。
+                    tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                    let store = refresher.clone();
+                    let _ = tauri::async_runtime::spawn_blocking(move || {
+                        let service = ContentService::new(
+                            store,
+                            Arc::new(switch_core::content::HttpFeedFetcher::new()),
+                            None,
+                        );
+                        let _ = service.refresh(None, false, switch_core::time_now());
+                    })
+                    .await;
+                }
+            });
             Ok(())
         })
         // 关闭窗口隐藏到托盘而不是退出：托盘菜单里的「退出 Switchelp」才是出口。
@@ -323,12 +416,36 @@ fn main() {
             commands::models_discover,
             commands::platform_info,
             commands::update_check,
+            commands::update_install,
+            commands::update_take_result,
+            commands::update_open_release_page,
             commands::backups_list,
             commands::backups_create,
             commands::backups_preview,
             commands::backups_restore,
             commands::probes_start,
             commands::probes_cancel,
+            commands::tools_state,
+            commands::tools_probe,
+            commands::tools_skill_targets,
+            commands::plugins_sources,
+            commands::plugins_add_source,
+            commands::plugins_remove_source,
+            commands::plugins_browse,
+            commands::plugins_preview,
+            commands::plugins_install,
+            commands::plugins_installed,
+            commands::plugins_check_updates,
+            commands::plugins_set_enabled,
+            commands::plugins_uninstall,
+            commands::content_sources,
+            commands::content_save_source,
+            commands::content_delete_source,
+            commands::content_items,
+            commands::content_refresh,
+            commands::content_status,
+            commands::content_github_token_status,
+            commands::content_set_github_token,
         ])
         .run(tauri::generate_context!())
         .expect("Switchelp 无法启动");

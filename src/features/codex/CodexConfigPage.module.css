@@ -13,9 +13,16 @@
 .empty p { font-size: var(--font-size-caption); line-height: var(--line-height-caption); margin: 4px 0 16px; max-width: 360px; }
 .row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
 .field { display: flex; flex-direction: column; gap: 8px; font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); min-width: 220px; }
-.details { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; font-size: var(--font-size-label); line-height: var(--line-height-label); margin: 0; }
+/* 事实表第一列 120px：字段名后面可能还有一枚 ⓘ（14px + 8px 间隔），
+   96px 装不下「托管配置目录」时图标会折到下一行。 */
+.details { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; font-size: var(--font-size-label); line-height: var(--line-height-label); margin: 0; }
 .details dt { color: var(--text-muted); }
 .details dd { margin: 0; }
+/* 动作行后面紧跟的说明（「还没有纳入 Codex 的模型…」）要与按钮分开：
+   两个元素都是 margin: 0，紧挨着会像是按钮的附属文字（用户原话「几乎没有间距」）。 */
+.card > .actions + .subtle { margin-top: 16px; }
+/* 说明段与事实表之间留一格：两者都是 margin: 0，紧挨着会读成一整块（几何审计记为 touching）。 */
+.card > .subtle + .details { margin-top: 16px; }
 .preview { margin: 24px 0 0; padding: 16px; background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: 8px; max-height: 260px; overflow: auto; font-size: var(--font-size-caption); line-height: var(--line-height-caption); white-space: pre-wrap; }
 .group { margin-top: 24px; }
 .group > h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }

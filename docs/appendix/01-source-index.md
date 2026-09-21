@@ -91,6 +91,18 @@
 - 实际 UI：主页 → 模型中心 → 服务商模型 → 添加模型表单（取消）→ 应用管理 → Codex Desktop 详情。未登录、未填写秘密、未保存/应用任何模型配置。
 - 本轮不保存包含本机其他工具路径或现有配置详情的原始 UI 导出，文档仅记录与需求直接相关的观察。
 
+### 3.1 2026-09-21 追加：1.6.6 三板块只读拆解
+
+针对「工具管理 / 插件中心 / 内容中心」三个板块补做一轮拆解，结论与定位见 [星算助手 1.6.6 只读拆解](../research/05-xingsuan-tools-plugins-content.md)。本轮证据：
+
+- `/Applications/星算助手.app`：版本 **1.6.6**、Bundle ID `xyz.xsai5.desktop`（覆盖上一轮的 1.6.1 记录）。
+- `Contents/Resources/_up_/tools/<id>/{config.json,paths.json}`：**52 份声明式工具清单**，含平台路径、探针、连接器与安装配方；`codex/codex-plugin-unlock.js` 一并阅读。
+- `dist-electron/{main.cjs,preload.cjs}`：IPC 通道 `xingsuan:invoke` / `xingsuan:shell` / `xingsuan:event`、preload 暴露面与主进程来源校验。
+- `dist/assets/{index-C5nDNxaM.js,index-DAkjY7HF.js,index-BDIOG1kB.js,zh-Hans-BEuJEMAX.js}`：插件安装命令 `install_plugin_for_tools` 等的封装、内容接口清单、`AiPulseProvider` 的 localStorage 快照与 30 分钟 TTL、内置手册原文。
+- `Contents/Resources/core-host/xingsuan-core-host`：仅字符串级观察（命令名、`PathsConfig`/`InstalledPlugin` 等结构字段、安装配方文本）；**未反汇编、未执行**。
+- 运行态目录 `~/.xingsuan/`：仅 `ls` / `cat` / `sqlite3 .schema`，记录 `skills/xs-connectors/*/SKILL.md` 与 `.xs-managed` 标记、`cli-workbench.db` 表结构。**未写入、未删除、未安装任何东西。**
+- 边界：未登录账号，故插件市场目录内容与安装/更新/卸载行为均未亲测；未执行任何工具安装命令；未访问其云端接口。相关判断在文档内均标注为「未验证」。
+
 ## 4. 截图与设计来源
 
 全部查看 `referimg/split-01.jpg` 至 `split-09.jpg`（**这 9 张截图不随本仓库分发**：它们是用户提供的第三方产品界面素材，分发前需先确认使用授权；本地保留在 `referimg/`，已由 `.gitignore` 排除）；用途对应调研报告截图表。来源为用户提供，不能将图中会话内容视为配置指令。品牌、数值与能力标签不自动作为供应商官方事实。

@@ -49,14 +49,26 @@ pub fn prepare(
     }
 
     // Responses 原生支持 reasoning.effort，但“原生支持”不等于“声明过就能发”。
-    // 未在声明集合内的档位一律摘掉：转发了就等于替模型虚报了一个它没有的能力。
-    let requested_effort = object
+    //
+    // 声明集合为空 = 这个模型**什么都没声明**，此时整个 `reasoning` 都不能转发：宿主在没有
+    // 档位可选时会送一个 `none`（本机实测），转发出去就是替模型虚报能力——真实上游直接拒绝：
+    // moonshot 的 Responses 接口回 400 `reasoning.effort value "none" is not supported`。
+    // 从前这里只在「声明过、但档位不在集合里」时摘除，于是空集合这条最该摘的路径反而漏了。
+    if limits.reasoning_efforts.is_empty() {
+        if object.remove("reasoning").is_some() {
+            losses.push(AdaptationLoss::new(
+                "reasoning.effort",
+                "loss.reasoningEffortNotDeclared",
+                "该模型未声明任何思考档位，宿主请求的 reasoning 字段未转发".to_owned(),
+            ));
+        }
+    } else if let Some(effort) = object
         .get("reasoning")
         .and_then(|value| value.get("effort"))
         .and_then(|value| value.as_str())
-        .map(str::to_owned);
-    if let Some(effort) = requested_effort {
-        if !limits.reasoning_efforts.is_empty() && !limits.allows_effort(&effort) {
+        .map(str::to_owned)
+    {
+        if !limits.allows_effort(&effort) {
             object.remove("reasoning");
             losses.push(AdaptationLoss::new(
                 "reasoning.effort",
@@ -120,7 +132,12 @@ mod tests {
             "https://host/v1",
             "vendor/Model-X",
             &request,
-            &RouteLimits::default(),
+            // 声明了 low：这条测的是「除 model 之外原样透传」，所以档位要在声明集合里
+            // （未声明的档位会被摘掉，那是另一条测试的事）。
+            &RouteLimits {
+                output_limit: None,
+                reasoning_efforts: vec!["low".to_owned()],
+            },
         )
         .unwrap();
         let body: serde_json::Value = serde_json::from_slice(&prepared.body).unwrap();
@@ -214,17 +231,60 @@ mod reasoning_tests {
     }
 
     #[test]
-    fn an_unconstrained_model_keeps_the_host_choice() {
-        // 没有声明任何档位时不做判断，保持透传（由用户自行承担）。
+    fn a_model_that_declares_nothing_gets_no_reasoning_field_at_all() {
+        // 曾经这里选择「透传，由用户自行承担」。那是错的：宿主在没有档位可选时**自己**会送
+        // 一个 `none`，而真实上游会直接拒绝它（moonshot：`reasoning.effort value "none" is
+        // not supported`），用户看到的是一句与「我没配过思考档位」毫无关系的 400。
+        // 没声明 = 不发，并如实记为损失。
+        for effort in ["none", "high"] {
+            let prepared = prepare(
+                "https://host/v1",
+                "vendor/M",
+                &request(effort),
+                &RouteLimits::default(),
+            )
+            .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&prepared.body).unwrap();
+            assert!(
+                body.get("reasoning").is_none(),
+                "未声明档位的模型不得收到 reasoning 字段（effort={effort}）"
+            );
+            assert_eq!(
+                prepared.losses[0].message_key, "loss.reasoningEffortNotDeclared",
+                "摘掉要说出来，不能悄悄丢"
+            );
+        }
+    }
+
+    #[test]
+    fn reasoning_without_an_effort_is_also_dropped_when_nothing_is_declared() {
+        // `reasoning.summary` 之类同样属于「未声明就不转发」：我们并不知道这个上游认不认它。
         let prepared = prepare(
             "https://host/v1",
             "vendor/M",
-            &request("high"),
+            &json!({"model": "gs/x", "input": [], "reasoning": {"summary": "auto"}}),
             &RouteLimits::default(),
         )
         .unwrap();
         let body: serde_json::Value = serde_json::from_slice(&prepared.body).unwrap();
-        assert_eq!(body["reasoning"]["effort"], "high");
+        assert!(body.get("reasoning").is_none());
+        assert_eq!(
+            prepared.losses[0].message_key,
+            "loss.reasoningEffortNotDeclared"
+        );
+    }
+
+    #[test]
+    fn a_model_with_no_reasoning_in_the_request_is_left_alone() {
+        // 宿主根本没发 reasoning：不该凭空产生一条「损失」。
+        let prepared = prepare(
+            "https://host/v1",
+            "vendor/M",
+            &json!({"model": "gs/x", "input": []}),
+            &RouteLimits::default(),
+        )
+        .unwrap();
+        assert!(prepared.losses.is_empty());
     }
 
     #[test]

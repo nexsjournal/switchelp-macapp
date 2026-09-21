@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Activity, ArrowRight, Boxes, CircleHelp, KeyRound, Plus, Server, Settings2, ShieldCheck } from 'lucide-react';
+import { Activity, ArrowRight, Boxes, Circle, CircleCheck, CircleHelp, KeyRound, Plus, Server, Settings2, ShieldCheck } from 'lucide-react';
 import type { Credential, Model, Provider } from '@/contracts/types';
 import type { AppliedSummary, GatewayReport } from '@/desktop/client';
 import { EmptyState } from '@/components/EmptyState';
@@ -74,6 +74,25 @@ export function OverviewPage({ providers, models, credentialsByProvider, gateway
 
   const loading = codexState(summary, gateway);
 
+  /** 每一步的完成判据都必须是可核实的观察值，不是估算：没有「大概完成」这种状态。 */
+  const providersWithKey = providers.filter(provider => (credentialsByProvider[provider.id] ?? []).length > 0).length;
+  const catalogCount = models.filter(model => model.inCatalog).length;
+  const applyDetail = summary?.stage === 'verified' ? t('overview.stepApplyVerified')
+    : pendingCount > 0 ? t('overview.stepApplyPending', { count: pendingCount })
+    : t('overview.stepApplyNone');
+  const steps: { titleKey: string; detail: string; done: boolean; page: 'providers' | 'codexConfig' | 'settings' }[] = [
+    { titleKey: 'overview.stepProviders', done: providers.length > 0, page: 'providers',
+      detail: providers.length ? t('overview.stepProvidersDetail', { count: providers.length }) : t('overview.stepProvidersEmpty') },
+    // 有 Key 不等于验证过：这一步只说「填了」，验证结果在下面供应商那一栏里。
+    { titleKey: 'overview.stepKeys', done: providers.length > 0 && providersWithKey === providers.length, page: 'providers',
+      detail: t('overview.stepKeysDetail', { ready: providersWithKey, total: providers.length }) },
+    { titleKey: 'overview.stepModels', done: models.length > 0, page: 'providers',
+      detail: models.length ? t('overview.stepModelsDetail', { count: models.length, catalog: catalogCount }) : t('overview.stepModelsEmpty') },
+    { titleKey: 'overview.stepApply', done: summary?.stage === 'verified', page: 'codexConfig', detail: applyDetail },
+    { titleKey: 'overview.stepGateway', done: Boolean(gateway?.running), page: 'settings',
+      detail: gateway?.running ? t('overview.stepGatewayRunning', { port: gateway.port ?? '—' }) : t('overview.stepGatewayStopped') },
+  ];
+
   if (!providers.length) {
     return <section className={styles.card}><EmptyState icon={Server} title={t('empty.addFirstProviderTitle')}
       description={t('overview.addFirstProviderBody')}
@@ -81,6 +100,35 @@ export function OverviewPage({ providers, models, credentialsByProvider, gateway
   }
 
   return <div className={styles.page}>
+    {/*
+     * 接入进度：这一页最先要回答的是「我弄了哪些、还差哪些」。
+     * 五步各自带一个可核实的判据（供应商数量、Key、模型、最近一次成功应用、网关进程），
+     * 不是估算出来的进度条。未完成的那一步整块可点，直接跳到能处理它的页面。
+     */}
+    <section className={styles.card}>
+      <div className={styles.cardHeader}>
+        <h2>{t('overview.readiness')}</h2>
+        <span className="text-muted">{t('overview.readinessSummary', { done: steps.filter(step => step.done).length, total: steps.length })}</span>
+      </div>
+      <ol className={styles.steps}>
+        {steps.map(step => {
+          const Inner = <>
+            <span className={`${styles.stepMark} ${step.done ? styles.stepDone : styles.stepTodo}`} aria-hidden="true">
+              {step.done ? <CircleCheck size={16} /> : <Circle size={16} />}
+            </span>
+            <span className={styles.stepTitle}>{t(step.titleKey)}</span>
+            <span className={styles.stepDetail}>{step.detail}</span>
+          </>;
+          return <li key={step.titleKey}>
+            {step.done
+              ? <div className={styles.step}>{Inner}</div>
+              : <button type="button" className={styles.step} aria-label={t('overview.stepTodo', { step: t(step.titleKey) })}
+                  onClick={() => onNavigate(step.page)}>{Inner}</button>}
+          </li>;
+        })}
+      </ol>
+    </section>
+
     <div className={styles.grid}>
       <section className={styles.card}>
         <div className={styles.cardHeader}><h2>{t('codex.inspectTitle')}</h2>

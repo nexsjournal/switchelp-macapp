@@ -1,0 +1,94 @@
+.page { display: grid; gap: 24px; align-content: start; }
+.card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.header h2 { margin: 0; font-size: var(--font-size-card-title); font-weight: 600; line-height: var(--line-height-card-title); }
+.hint { margin: 6px 0 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.empty { padding: 32px; text-align: center; color: var(--text-muted); font-size: var(--font-size-label); }
+
+.searchRow { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding: 0 12px; height: var(--control-height); border: 1px solid var(--border-field); border-radius: var(--radius-sm); background: var(--bg-input); }
+.searchRow svg { color: var(--text-muted); flex: none; }
+/* 权重提到 0,2,1：`.searchRow input` 与全局 `input:not([type='checkbox'])` 平手时全局赢，
+   输入框会带上自己的边框与白底，在外层容器里套出第二个框（实测过）。 */
+.searchRow.searchRow input { flex: 1; min-width: 0; height: auto; border: 0; background: transparent; color: var(--text-primary); font-size: var(--font-size-label); }
+.searchRow input:focus { outline: none; }
+
+/* 状态说明：默认折叠。展开后是「徽章 → 一句话」，让「已安装 / 未验证」不再靠猜。 */
+.legend { margin-top: 12px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+.legend > summary { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); cursor: pointer; }
+.legend > summary:hover { color: var(--text-primary); }
+.legend dl { margin: 12px 0 0; display: grid; gap: 8px; }
+.legend dl > div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; align-items: baseline; }
+.legend dt { display: flex; }
+.legend dd { margin: 0; color: var(--text-muted); }
+
+.list { list-style: none; margin: 16px 0 0; padding: 0; }
+.row { border-top: 1px solid var(--border-subtle); }
+.row:first-child { border-top: 0; }
+/*
+ * 行内五列：展开箭头、单字底纹、名称与事实、状态徽章、探测时间。后两列不换行。
+ *
+ * hover 底色由 `::before` 画：它不是这一行的内容，而是一块比内容左右各宽 12px、
+ * 上下各内收 2px 的底。用户原话：「hover 感觉背景直接挨住内容了，是不是要有个间距」——
+ * 所以底色必须包住内容，而不是从内容边上开始。
+ * 用伪元素而不是「负外边距 + 内边距」：后者会让每一行都比父容器宽 24px，
+ * 页面几何审计会把这类外扩一律记成 overflow（12 处），噪声盖住真问题。
+ * 里层的 `.toggle` 要显式关掉全局 `button:hover` 的底色，否则同一行会叠两层 hover。
+ */
+.head { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 12px 0; }
+.head::before { content: ''; position: absolute; inset: 2px -12px; border-radius: var(--radius-sm); background: transparent; transition: background var(--motion-hover); }
+.head:hover::before { background: var(--bg-hover); }
+/* 内容要压在这块底之上：伪元素是 absolute，网格子项默认在同一层但顺序在后。 */
+.head > * { position: relative; }
+.toggle { display: grid; grid-template-columns: 16px 32px minmax(0, 1fr); gap: 12px; align-items: center; min-width: 0; background: none; border: 0; padding: 0; color: inherit; text-align: left; cursor: pointer; }
+.toggle:hover:not(:disabled) { background: none; }
+.toggle:hover .name { color: var(--accent); }
+.chevron, .chevronOpen { color: var(--text-muted); transition: transform 120ms ease; }
+.chevronOpen { transform: rotate(180deg); }
+/* 单字底纹：与供应商列表同一套语言（东家字母块），不发第三方 logo。 */
+.tile { width: 32px; height: 32px; display: grid; place-items: center; border-radius: var(--radius-sm);
+  background: var(--bg-elevated); border: 1px solid var(--border-subtle); color: var(--text-secondary);
+  font-size: var(--font-size-label); font-weight: 500; }
+.identity { display: grid; gap: 2px; min-width: 0; }
+.nameLine { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.name { font-size: var(--font-size-label); line-height: var(--line-height-label); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.category { flex: none; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+/* 具体事实（路径 + 版本）：等宽、可截断，展开之前就能读。 */
+.fact { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.probedAt { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); white-space: nowrap; }
+
+/*
+ * 展开后的详情。
+ *
+ * 左边那条竖线是「这段属于上面那一行」的唯一线索：一整页里同时只有一行展开，
+ * 而行的分隔线只有 1px、浅色主题下几乎看不见（用户就是在这里迷路的：
+ * 「展开后我都看不到它下面是怎么区分分隔的」）。竖线之外，节与节之间还各有一条横线，
+ * 于是「事实 / 用法 / 探针原文 / 动作」四段的边界不靠留白去猜。
+ */
+.detail { display: grid; gap: 20px; margin: 0 0 16px 72px; padding: 12px 0 20px 20px;
+  border-left: 2px solid var(--border-subtle); }
+.description { margin: 0; font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); }
+/* 事实表：字段名一列、值一列，值一律等宽以便对齐路径。 */
+.facts { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px 16px; margin: 0; padding: 16px 20px;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-input);
+  font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+.facts dt { color: var(--text-muted); }
+.facts dd { margin: 0; color: var(--text-secondary); }
+.notes { list-style: none; margin: 0; padding: 12px 16px; display: grid; gap: 6px; border-radius: var(--radius-sm); background: var(--status-warning-bg); color: var(--status-warning); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+/* 一个小节＝一条上方横线 + 标题 + 内容。 */
+.block { display: grid; gap: 12px; padding-top: 20px; border-top: 1px solid var(--border-subtle); }
+.block h3 { margin: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); font-weight: 500; }
+.block h4 { margin: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); font-weight: 500; }
+.commands { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
+.block pre { margin: 0; padding: 12px 16px; border-radius: var(--radius-sm); background: var(--bg-input); border: 1px solid var(--border-subtle); color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-code); white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow: auto; }
+.detailActions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 20px; border-top: 1px solid var(--border-subtle); }
+.spin { animation: tools-spin 900ms linear infinite; }
+@keyframes tools-spin { to { transform: rotate(360deg); } }
+.footer { margin: 20px 0 0; padding-top: 16px; border-top: 1px solid var(--border-subtle); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+
+/* 窄窗：把探测时间收起来（它是最不关键的一列），避免名称被挤成省略号。 */
+@media (max-width: 1080px) {
+  .probedAt { display: none; }
+  .head { grid-template-columns: minmax(0, 1fr) auto; }
+  /* 窄窗里详情不再缩进：72px 的缩进会把路径挤成两行。 */
+  .detail { margin-left: 0; }
+}

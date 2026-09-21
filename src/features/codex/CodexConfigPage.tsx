@@ -4,6 +4,7 @@ import type { ApplyPlan, ApplyStage, CodexInstance, Model } from '@/contracts/ty
 import { isCoreError, type AppliedSummary, type ApplyStatus, type CoexistState, type DesktopClient, type InspectResult, toCoreError } from '@/desktop/client';
 
 import { Dialog } from '@/components/Dialog';
+import { FieldHelp } from '@/components/FieldHelp';
 import { ApplyConfirmDialog } from './ApplyConfirmDialog';
 import { newIdempotencyKey } from './idempotency';
 import { showToast } from '@/components/Toast';
@@ -324,10 +325,14 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
               ? coexist.bridgePath
               : coexist.bridgeDetail && (() => { const label = t(coexist.bridgeDetail!); return label === coexist.bridgeDetail ? coexist.bridgeDetail : label; })()}
           </dd>
-          <dt>{t('codex.coexistManagedHome')}</dt>
+          {/*
+           * 「托管 profile 是什么、跟原生配置什么关系」原本是卡片下半段的一整段说明。
+           * 它解释的是**这一个字段**，所以跟着这个字段走（ⓘ），而不是让整张卡片为它变长——
+           * 用户原话：这张卡「字有点太多了」。
+           */}
+          <dt><span className="field-label">{t('codex.coexistManagedHome')}<FieldHelp text={t('codex.coexistResyncNote')} /></span></dt>
           <dd className="text-mono break-anywhere">{coexist.managedHome}</dd>
         </dl>
-        <p className={styles.subtle}>{t('codex.coexistResyncNote')}</p>
         {/* 事实行：宿主到底有没有跑在 bridge 上。意图与事实分开说，不给含糊话。 */}
         {coexist.enabled && <p className={styles.subtle}>
           {coexist.hostUnderBridge === true ? t('codex.coexistFactRunning')

@@ -1,0 +1,431 @@
+{
+  "schemaVersion": 1,
+  "tools": [
+    {
+      "id": "codex",
+      "names": { "zh-Hans": "Codex CLI", "en": "Codex CLI" },
+      "category": "cliCode",
+      "website": "https://github.com/openai/codex",
+      "docs": "https://github.com/openai/codex",
+      "command": "codex",
+      "configDir": "~/.codex",
+      "configFile": "~/.codex/config.toml",
+      "requireConfigFile": false,
+      "modelConfig": true,
+      "skillsRoot": "~/.codex/skills",
+      "description": "OpenAI 的编码 agent CLI。本工具的供应商与模型配置最终写进它的 config.toml。",
+      "readiness": {
+        "versionArgs": ["--version"],
+        "okExit": 0,
+        "cacheSeconds": 300,
+        "staticAny": ["~/.codex/config.toml"]
+      },
+      "agentUsage": {
+        "tags": ["编码 agent", "CLI"],
+        "nonInteractive": ["codex exec \"<任务>\"", "codex --help"]
+      },
+      "paths": {
+        "macos": [
+          "/opt/homebrew/bin/codex",
+          "/usr/local/bin/codex",
+          "~/.npm-global/bin/codex",
+          "~/.local/bin/codex",
+          "~/.bun/bin/codex",
+          "~/Library/pnpm/codex"
+        ],
+        "windows": [
+          "%APPDATA%/npm/codex.cmd",
+          "%USERPROFILE%/.local/bin/codex.exe",
+          "%LOCALAPPDATA%/pnpm/codex.exe"
+        ],
+        "linux": [
+          "/usr/local/bin/codex",
+          "/usr/bin/codex",
+          "~/.npm-global/bin/codex",
+          "~/.local/bin/codex"
+        ]
+      }
+    },
+    {
+      "id": "claude-code",
+      "names": { "zh-Hans": "Claude Code", "en": "Claude Code" },
+      "category": "cliCode",
+      "website": "https://claude.com/product/claude-code",
+      "docs": "https://docs.claude.com/en/docs/claude-code",
+      "command": "claude",
+      "configDir": "~/.claude",
+      "configFile": "~/.claude/settings.json",
+      "requireConfigFile": false,
+      "modelConfig": true,
+      "skillsRoot": "~/.claude/skills",
+      "description": "Anthropic 的编码 agent CLI。本工具只做检测与技能安装，不改它的模型配置。",
+      "readiness": {
+        "versionArgs": ["--version"],
+        "okExit": 0,
+        "cacheSeconds": 300,
+        "staticAny": ["~/.claude/settings.json"]
+      },
+      "agentUsage": {
+        "tags": ["编码 agent", "CLI"],
+        "nonInteractive": ["claude -p \"<任务>\"", "claude --help"]
+      },
+      "paths": {
+        "macos": [
+          "/opt/homebrew/bin/claude",
+          "/usr/local/bin/claude",
+          "~/.npm-global/bin/claude",
+          "~/.local/bin/claude",
+          "~/.claude/local/claude"
+        ],
+        "windows": [
+          "%APPDATA%/npm/claude.cmd",
+          "%USERPROFILE%/.local/bin/claude.exe"
+        ],
+        "linux": [
+          "/usr/local/bin/claude",
+          "~/.npm-global/bin/claude",
+          "~/.local/bin/claude"
+        ]
+      }
+    },
+    {
+      "id": "gemini-cli",
+      "names": { "zh-Hans": "Gemini CLI", "en": "Gemini CLI" },
+      "category": "cliCode",
+      "website": "https://github.com/google-gemini/gemini-cli",
+      "docs": "https://github.com/google-gemini/gemini-cli",
+      "command": "gemini",
+      "configDir": "~/.gemini",
+      "configFile": "~/.gemini/settings.json",
+      "requireConfigFile": false,
+      "modelConfig": true,
+      "description": "Google 的编码 agent CLI。",
+      "readiness": {
+        "versionArgs": ["--version"],
+        "okExit": 0,
+        "cacheSeconds": 300
+      },
+      "agentUsage": {
+        "tags": ["编码 agent", "CLI"],
+        "nonInteractive": ["gemini -p \"<任务>\""]
+      },
+      "paths": {
+        "macos": [
+          "/opt/homebrew/bin/gemini",
+          "~/.npm-global/bin/gemini",
+          "~/.local/bin/gemini"
+        ],
+        "windows": ["%APPDATA%/npm/gemini.cmd"],
+        "linux": ["/usr/local/bin/gemini", "~/.npm-global/bin/gemini"]
+      }
+    },
+    {
+      "id": "qwen-code",
+      "names": { "zh-Hans": "Qwen Code", "en": "Qwen Code" },
+      "category": "cliCode",
+      "website": "https://github.com/QwenLM/qwen-code",
+      "docs": "https://github.com/QwenLM/qwen-code",
+      "command": "qwen",
+      "configDir": "~/.qwen",
+      "configFile": "~/.qwen/settings.json",
+      "requireConfigFile": false,
+      "modelConfig": true,
+      "description": "通义千问的编码 agent CLI。",
+      "readiness": {
+        "versionArgs": ["--version"],
+        "okExit": 0,
+        "cacheSeconds": 300
+      },
+      "agentUsage": { "tags": ["编码 agent", "CLI"], "nonInteractive": [] },
+      "paths": {
+        "macos": ["/opt/homebrew/bin/qwen", "~/.npm-global/bin/qwen", "~/.local/bin/qwen"],
+        "windows": ["%APPDATA%/npm/qwen.cmd"],
+        "linux": ["/usr/local/bin/qwen", "~/.npm-global/bin/qwen"]
+      }
+    },
+    {
+      "id": "aider",
+      "names": { "zh-Hans": "Aider", "en": "Aider" },
+      "category": "cliCode",
+      "website": "https://aider.chat/",
+      "docs": "https://aider.chat/docs/",
+      "command": "aider",
+      "requireConfigFile": false,
+      "modelConfig": true,
+      "description": "在终端里结对改代码的 agent，按 diff 提交到 git。",
+      "readiness": {
+        "versionArgs": ["--version"],
+        "okExit": 0,
+        "cacheSeconds": 300
+      },
+      "agentUsage": { "tags": ["编码 agent", "Python"], "nonInteractive": [] },
+      "paths": {
+        "macos": ["/opt/homebrew/bin/aider", "~/.local/bin/aider"],
+        "windows": ["%USERPROFILE%/.local/bin/aider.exe"],
+        "linux": ["/usr/local/bin/aider", "~/.local/bin/aider"]
+      }
+    },
+    {
+      "id": "crush",
+      "names": { "zh-Hans": "Crush", "en": "Crush" },
+      "category": "cliCode",
+      "website": "https://github.com/charmbracelet/crush",
+      "docs": "https://github.com/charmbracelet/crush",
+      "command": "crush",
+      "requireConfigFile": false,
+      "modelConfig": true,
+      "description": "Charm 出的终端编码 agent，多模型可切。",
+      "readiness": { "versionArgs": ["--version"], "okExit": 0, "cacheSeconds": 300 },
+      "agentUsage": { "tags": ["编码 agent", "CLI"], "nonInteractive": [] },
+      "paths": {
+        "macos": ["/opt/homebrew/bin/crush", "~/.local/bin/crush"],
+        "windows": ["%USERPROFILE%/.local/bin/crush.exe"],
+        "linux": ["/usr/local/bin/crush", "~/.local/bin/crush"]
+      }
+    },
+    {
+      "id": "goose",
+      "names": { "zh-Hans": "Goose", "en": "Goose" },
+      "category": "cliCode",
+      "website": "https://block.github.io/goose/",
+      "docs": "https://block.github.io/goose/docs/getting-started/installation",
+      "command": "goose",
+      "requireConfigFile": false,
+      "modelConfig": true,
+      "description": "Block 开源的本地 agent，可接多家模型服务。",
+      "readiness": { "versionArgs": ["--version"], "okExit": 0, "cacheSeconds": 300 },
+      "agentUsage": { "tags": ["编码 agent", "CLI"], "nonInteractive": [] },
+      "paths": {
+        "macos": ["/opt/homebrew/bin/goose", "~/.local/bin/goose"],
+        "windows": ["%USERPROFILE%/.local/bin/goose.exe"],
+        "linux": ["/usr/local/bin/goose", "~/.local/bin/goose"]
+      }
+    },
+    {
+      "id": "opencode",
+      "names": { "zh-Hans": "OpenCode", "en": "OpenCode" },
+      "category": "cliCode",
+      "website": "https://opencode.ai/",
+      "docs": "https://opencode.ai/docs/",
+      "command": "opencode",
+      "configDir": "~/.config/opencode",
+      "configFile": "~/.config/opencode/opencode.json",
+      "requireConfigFile": false,
+      "modelConfig": true,
+      "description": "开源终端编码 agent，配置走 opencode.json。",
+      "readiness": { "versionArgs": ["--version"], "okExit": 0, "cacheSeconds": 300 },
+      "agentUsage": { "tags": ["编码 agent", "CLI"], "nonInteractive": [] },
+      "paths": {
+        "macos": ["/opt/homebrew/bin/opencode", "~/.local/bin/opencode"],
+        "windows": ["%USERPROFILE%/.local/bin/opencode.exe"],
+        "linux": ["/usr/local/bin/opencode", "~/.local/bin/opencode"]
+      }
+    },
+    {
+      "id": "openclaw",
+      "names": { "zh-Hans": "OpenClaw", "en": "OpenClaw" },
+      "category": "cliCode",
+      "website": "https://github.com/openclaw/openclaw",
+      "command": "openclaw",
+      "configFile": "~/.openclaw/openclaw.json",
+      "requireConfigFile": false,
+      "modelConfig": true,
+      "description": "开源 agent 运行时，带 MCP 网关与技能目录。",
+      "readiness": { "versionArgs": ["--version"], "okExit": 0, "cacheSeconds": 300 },
+      "agentUsage": { "tags": ["编码 agent", "CLI"], "nonInteractive": [] },
+      "paths": {
+        "macos": ["/opt/homebrew/bin/openclaw", "~/.npm-global/bin/openclaw", "~/.local/bin/openclaw"],
+        "windows": ["%APPDATA%/npm/openclaw.cmd"],
+        "linux": ["/usr/local/bin/openclaw", "~/.npm-global/bin/openclaw"]
+      }
+    },
+    {
+      "id": "hermes",
+      "names": { "zh-Hans": "Hermes", "en": "Hermes" },
+      "category": "cliCode",
+      "website": "https://github.com/NousResearch/hermes",
+      "command": "hermes",
+      "requireConfigFile": false,
+      "modelConfig": true,
+      "description": "Nous Research 的 agent 运行时。",
+      "readiness": { "versionArgs": ["--version"], "okExit": 0, "cacheSeconds": 300 },
+      "agentUsage": { "tags": ["编码 agent", "CLI"], "nonInteractive": [] },
+      "paths": {
+        "macos": ["/opt/homebrew/bin/hermes", "~/.local/bin/hermes"],
+        "windows": ["%USERPROFILE%/.local/bin/hermes.exe"],
+        "linux": ["/usr/local/bin/hermes", "~/.local/bin/hermes"]
+      }
+    },
+    {
+      "id": "github-cli",
+      "names": { "zh-Hans": "GitHub CLI", "en": "GitHub CLI" },
+      "category": "utility",
+      "website": "https://cli.github.com/",
+      "docs": "https://cli.github.com/manual/",
+      "command": "gh",
+      "requireConfigFile": false,
+      "modelConfig": false,
+      "description": "官方 GitHub 命令行。它用 GitHub 自己的身份认证，没有模型可选。",
+      "readiness": {
+        "versionArgs": ["--version"],
+        "okExit": 0,
+        "cacheSeconds": 300,
+        "staticAny": ["~/.config/gh/hosts.yml"]
+      },
+      "authCheck": {
+        "args": ["auth", "status"],
+        "okExit": 0,
+        "needsLoginPatterns": ["not logged into", "未登录", "authentication"]
+      },
+      "agentUsage": {
+        "tags": ["代码托管", "GitHub"],
+        "nonInteractive": [
+          "gh repo clone <owner/repo>",
+          "gh pr create --fill",
+          "gh issue list",
+          "gh api <endpoint>"
+        ]
+      },
+      "paths": {
+        "macos": ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"],
+        "windows": ["%PROGRAMFILES%/GitHub CLI/gh.exe"],
+        "linux": ["/usr/bin/gh", "/usr/local/bin/gh"]
+      }
+    },
+    {
+      "id": "ffmpeg",
+      "names": { "zh-Hans": "FFmpeg", "en": "FFmpeg" },
+      "category": "utility",
+      "website": "https://ffmpeg.org/",
+      "docs": "https://ffmpeg.org/documentation.html",
+      "command": "ffmpeg",
+      "requireConfigFile": false,
+      "modelConfig": false,
+      "description": "音视频转码工具。装上之后 agent 才能处理视频、音频与抽帧。",
+      "readiness": { "versionArgs": ["-version"], "okExit": 0, "cacheSeconds": 3600 },
+      "agentUsage": {
+        "tags": ["音视频"],
+        "nonInteractive": ["ffmpeg -i in.mp4 out.gif", "ffmpeg -i in.mp4 -vf fps=1 out_%03d.png"]
+      },
+      "paths": {
+        "macos": ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"],
+        "windows": ["%PROGRAMFILES%/ffmpeg/bin/ffmpeg.exe"],
+        "linux": ["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+      }
+    },
+    {
+      "id": "yt-dlp",
+      "names": { "zh-Hans": "yt-dlp", "en": "yt-dlp" },
+      "category": "utility",
+      "website": "https://github.com/yt-dlp/yt-dlp",
+      "docs": "https://github.com/yt-dlp/yt-dlp#readme",
+      "command": "yt-dlp",
+      "requireConfigFile": false,
+      "modelConfig": false,
+      "description": "视频下载器，支持大量站点与字幕轨道。",
+      "readiness": { "versionArgs": ["--version"], "okExit": 0, "cacheSeconds": 3600 },
+      "agentUsage": {
+        "tags": ["下载", "音视频"],
+        "nonInteractive": ["yt-dlp -x --audio-format mp3 <url>", "yt-dlp --write-auto-subs --skip-download <url>"]
+      },
+      "paths": {
+        "macos": ["/opt/homebrew/bin/yt-dlp", "/usr/local/bin/yt-dlp", "~/.local/bin/yt-dlp"],
+        "windows": ["%USERPROFILE%/.local/bin/yt-dlp.exe"],
+        "linux": ["/usr/local/bin/yt-dlp", "~/.local/bin/yt-dlp"]
+      }
+    },
+    {
+      "id": "whisper",
+      "names": { "zh-Hans": "Whisper", "en": "Whisper" },
+      "category": "utility",
+      "website": "https://github.com/openai/whisper",
+      "docs": "https://github.com/openai/whisper#readme",
+      "command": "whisper",
+      "requireConfigFile": false,
+      "modelConfig": false,
+      "description": "本地语音转写。需要 Python 环境，首次运行会下载模型权重。",
+      "readiness": { "versionArgs": ["--help"], "okExit": 0, "cacheSeconds": 3600 },
+      "agentUsage": { "tags": ["语音", "本地模型"], "nonInteractive": ["whisper audio.mp3 --language zh"] },
+      "paths": {
+        "macos": ["/opt/homebrew/bin/whisper", "~/.local/bin/whisper"],
+        "windows": ["%USERPROFILE%/.local/bin/whisper.exe"],
+        "linux": ["/usr/local/bin/whisper", "~/.local/bin/whisper"]
+      }
+    },
+    {
+      "id": "exiftool",
+      "names": { "zh-Hans": "ExifTool", "en": "ExifTool" },
+      "category": "utility",
+      "website": "https://exiftool.org/",
+      "docs": "https://exiftool.org/",
+      "command": "exiftool",
+      "requireConfigFile": false,
+      "modelConfig": false,
+      "description": "读写图片与视频的元数据，也常用于批量改名与清理隐私信息。",
+      "readiness": { "versionArgs": ["-ver"], "okExit": 0, "cacheSeconds": 3600 },
+      "agentUsage": {
+        "tags": ["元数据"],
+        "nonInteractive": ["exiftool image.jpg", "exiftool -all= -overwrite_original image.jpg"]
+      },
+      "paths": {
+        "macos": ["/opt/homebrew/bin/exiftool", "/usr/local/bin/exiftool"],
+        "windows": ["%PROGRAMFILES%/ExifTool/exiftool.exe"],
+        "linux": ["/usr/bin/exiftool", "/usr/local/bin/exiftool"]
+      }
+    },
+    {
+      "id": "node",
+      "names": { "zh-Hans": "Node.js", "en": "Node.js" },
+      "category": "runtime",
+      "website": "https://nodejs.org/",
+      "docs": "https://nodejs.org/docs/latest/api/",
+      "command": "node",
+      "requireConfigFile": false,
+      "modelConfig": false,
+      "description": "绝大多数 CLI agent 与技能包靠 npm 分发，缺它上面一半工具装不上。",
+      "readiness": { "versionArgs": ["--version"], "okExit": 0, "cacheSeconds": 3600 },
+      "agentUsage": { "tags": ["运行时"], "nonInteractive": [] },
+      "paths": {
+        "macos": ["/opt/homebrew/bin/node", "/usr/local/bin/node"],
+        "windows": ["%PROGRAMFILES%/nodejs/node.exe"],
+        "linux": ["/usr/bin/node", "/usr/local/bin/node"]
+      }
+    },
+    {
+      "id": "uv",
+      "names": { "zh-Hans": "uv", "en": "uv" },
+      "category": "runtime",
+      "website": "https://docs.astral.sh/uv/",
+      "docs": "https://docs.astral.sh/uv/",
+      "command": "uv",
+      "requireConfigFile": false,
+      "modelConfig": false,
+      "description": "Rust 写的 Python 包与虚拟环境管理器，装 Python 类工具比 pip 快得多。",
+      "readiness": { "versionArgs": ["--version"], "okExit": 0, "cacheSeconds": 3600 },
+      "agentUsage": { "tags": ["运行时", "Python"], "nonInteractive": ["uv tool install <pkg>", "uvx <pkg>"] },
+      "paths": {
+        "macos": ["/opt/homebrew/bin/uv", "~/.local/bin/uv", "~/.cargo/bin/uv"],
+        "windows": ["%USERPROFILE%/.local/bin/uv.exe"],
+        "linux": ["/usr/local/bin/uv", "~/.local/bin/uv"]
+      }
+    },
+    {
+      "id": "ripgrep",
+      "names": { "zh-Hans": "ripgrep", "en": "ripgrep" },
+      "category": "utility",
+      "website": "https://github.com/BurntSushi/ripgrep",
+      "docs": "https://github.com/BurntSushi/ripgrep/blob/master/GUIDE.md",
+      "command": "rg",
+      "requireConfigFile": false,
+      "modelConfig": false,
+      "description": "快速全文搜索。多数编码 agent 内部优先用它做代码检索。",
+      "readiness": { "versionArgs": ["--version"], "okExit": 0, "cacheSeconds": 3600 },
+      "agentUsage": { "tags": ["搜索"], "nonInteractive": ["rg -n \"<pattern>\" --type rust"] },
+      "paths": {
+        "macos": ["/opt/homebrew/bin/rg", "/usr/local/bin/rg", "~/.local/bin/rg"],
+        "windows": ["%USERPROFILE%/.local/bin/rg.exe"],
+        "linux": ["/usr/bin/rg", "/usr/local/bin/rg"]
+      }
+    }
+  ]
+}

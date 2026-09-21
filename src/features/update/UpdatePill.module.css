@@ -1,0 +1,26 @@
+/*
+ * 更新按钮。
+ *
+ * 视觉是**内层那颗小胶囊**（12px 字 / 18px 行高，和它顶掉的副标题同一档字阶）；
+ * 点击区就是按钮盒子本身，高 32（规范：≥32×32）。多出来的 12px 由 `.brandUpdate` 的
+ * 负下边距抵掉，不参与排版——见 App.module.css 里的换算说明。
+ *
+ * 胶囊贴盒子**顶部**（`align-items: flex-start`）而不是居中：它要落在副标题那一行上；
+ * 居中会让它比副标题低 6px，看起来「位置偏下」。
+ *
+ * 底用 --accent、字用 --accent-fg：tokens 里唯一验证过对比度的「accent 当底」组合。
+ * 外层必须显式覆盖全局 button 的那套（40px 高、方角、灰底）——不写的那条会被全局接管。
+ */
+.pill {
+  display: inline-flex; align-items: flex-start; justify-content: flex-start;
+  height: auto; min-height: var(--control-height-compact); max-width: 100%;
+  padding: 0; border: 0; border-radius: var(--radius-pill); background: transparent;
+}
+.pill:hover:not(:disabled) { background: transparent; }
+.label {
+  display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 1px 8px; border-radius: var(--radius-pill);
+  background: var(--accent); color: var(--accent-fg);
+  font-size: var(--font-size-caption); line-height: var(--line-height-caption); font-weight: 500;
+}
+.pill:hover:not(:disabled) .label { background: var(--accent-strong); }

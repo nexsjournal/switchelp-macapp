@@ -1,13 +1,45 @@
 .page { display: grid; gap: 24px; }
-.grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 24px; align-items: start; }
-.card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
+/*
+ * 双列卡片等高。以前是 `align-items: start`，两张卡按各自内容高度塌下来，
+ * 于是「当前配置」与「连接状态」的底边差着几十像素（用户点名的就是这个「不工整」）。
+ * 等高之后靠 `.cardActions` 的 `margin-top: auto` 把最后一行压到卡片底部，
+ * 两边都从顶部开始读，多出来的空间落在中间。
+ */
+.grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 24px; align-items: stretch; }
+.card { min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
+
+/* ---- 接入进度 ---- */
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+/*
+ * 每一格＝一个可核实的判据。`li` 与里面的格子都要显式撑满：
+ * grid 只会把 `li` 拉伸到行高，`li` 里的按钮不跟着长，于是文字多的那一格会比旁边高、
+ * 旁边几格则在底部空出十几像素（实测 110 vs 92，用户看到的就是「没有等分」）。
+ */
+.steps li { display: flex; }
+/*
+ * 未完成的那一格是 `button`，全局 `button` 带 `justify-content: center`：不加这一条，
+ * 网格唯一的轨道会在按钮里居中，整格内容（图标、标题、说明）一起往右缩进十几像素——
+ * 与「已完成」（渲染成 div）的几格并排，一眼就是没对齐（用户点名的就是这个）。
+ * 写 `minmax(0, 1fr)` 让轨道自己占满，align/justify-items 再把内容左对齐。
+ */
+.step { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; justify-items: start; align-content: start;
+  gap: 6px; width: 100%; height: auto; padding: 12px 16px; text-align: left;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-input); white-space: normal; }
+button.step:hover:not(:disabled) { border-color: var(--accent-border); background: var(--accent-subtle); }
+.stepMark { display: flex; }
+.stepDone { color: var(--status-success); }
+.stepTodo { color: var(--text-muted); }
+.stepTitle { font-size: var(--font-size-label); line-height: var(--line-height-label); font-weight: 500; color: var(--text-primary); }
+.stepDetail { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 /* 标题块贴行顶：同一行里的按钮更高时，居中会把标题带下去（修正量见 tokens.css）。 */
 .card > .cardHeader:first-child { margin-top: calc(-1 * var(--card-title-optical-trim)); }
 .card > .cardHeader:first-child > :first-child { align-self: flex-start; }
 .cardHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .cardHeader h2 { margin: 0; font-size: var(--font-size-card-title); font-weight: 600; line-height: var(--line-height-card-title); display: flex; align-items: center; gap: 8px; }
 .cardHeader > svg { color: var(--text-muted); }
-.cardActions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 24px; }
+/* 动作行钉到卡片底部：等高之后多出来的空间落在中间，两列的最后一行就对齐了。 */
+.cardActions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto; padding-top: 24px; }
 .muted { color: var(--text-muted); font-size: var(--font-size-label); line-height: var(--line-height-label); margin: 0; display: flex; align-items: center; gap: 8px; }
 .note { display: flex; gap: 8px; align-items: flex-start; margin: 16px 0 0; padding: 12px 16px; border-radius: 8px; background: var(--bg-input);
   color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
@@ -49,8 +81,15 @@
 .pending li { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 .pendingName { font-weight: 500; }
 
-.applyBar { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-  padding: 16px 16px; border: 1px solid var(--accent-border); border-radius: 10px; background: var(--bg-elevated); font-size: var(--font-size-label); line-height: var(--line-height-label); }
+/*
+ * 概览页自己的待应用行。
+ *
+ * 以前是 `position: sticky; bottom: 0` + 卡片样式：实测它和上面那张卡片**垂直重叠 6px**
+ * （sticky 贴底时压住上一块的下沿），而且和「网关页那一条」是两套长相。
+ * 现在两边统一：普通行 + 底边分割线，不吸底、不做卡片。
+ */
+.applyBar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 0 0 16px; border-bottom: 1px solid var(--border-subtle); font-size: var(--font-size-label); line-height: var(--line-height-label); }
 .applyBar > span { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }
 
 .empty { display: flex; flex-direction: column; align-items: center; padding: 48px 24px; text-align: center; color: var(--text-muted);

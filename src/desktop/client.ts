@@ -8,13 +8,28 @@ import type {
   ApplyPlan,
   ApplyStage,
   CodexInstance,
+  ContentStatus,
   CoreError,
   Credential,
   DiagnosticEvent,
+  FeedItem,
+  FeedSource,
+  FeedSourceDraft,
+  InstallPreview,
+  InstallReport,
+  InstallRequest,
   Model,
   OperationEvent,
+  PluginSource,
   ProbeResult,
   Provider,
+  RefreshReport,
+  RepoCatalog,
+  SkillRecord,
+  SkillTarget,
+  ToolState,
+  UninstallOutcome,
+  UpdateInfo,
 } from '@/contracts/types';
 
 import { t } from '@/i18n';
@@ -159,9 +174,18 @@ export interface UpdateReport {
   current: string;
   latest: string | null;
   hasUpdate: boolean;
+  /** 新版本的发布说明（Markdown）。可能缺省。 */
+  notes: string | null;
   releaseUrl: string | null;
   publishedAt: string | null;
   error: string | null;
+}
+
+/** 更新包下载进度。`total` 为空表示上游没给长度，进度条退化成不确定态。 */
+export interface UpdateProgress {
+  phase: 'download' | 'install';
+  downloaded: number;
+  total: number | null;
 }
 
 /** 平台与窗口策略。 */
@@ -191,8 +215,19 @@ export interface DesktopClient {
   previewBackup(backupId: string): Promise<string>;
   /** 恢复：会先把当前文件再备份一次，因此恢复本身可回退。 */
   restoreBackup(backupId: string): Promise<string>;
-  /** 检查更新：只查询公开 Release，不下载不安装。 */
+  /** 检查更新：只读一次更新源，不下载不安装。 */
   checkUpdate(): Promise<UpdateReport>;
+  /**
+   * 下载并安装更新。**成功时不会返回**：装完应用立刻重启，窗口随之消失。
+   * 所以调用方只需要处理失败；进度通过 `onUpdateProgress` 订阅。
+   */
+  installUpdate(): Promise<void>;
+  /** 订阅下载进度，返回取消订阅函数。 */
+  onUpdateProgress(listener: (progress: UpdateProgress) => void): Promise<() => void>;
+  /** 取出「刚更新完」的版本号（只出现一次），没有则 null。 */
+  takeUpdateResult(): Promise<string | null>;
+  /** 用系统浏览器打开发布页。仅允许本仓库的地址。 */
+  openReleasePage(url: string): Promise<void>;
 
   /** 平台与窗口策略。界面据此设置 data-platform 与窗口相关变量。 */
   platformInfo(): Promise<PlatformReport>;
@@ -268,6 +303,49 @@ export interface DesktopClient {
   exportDiagnostics(request: DiagnosticsRequest): Promise<{ savedPath: string }>;
   /** 清空本工具自己的诊断事件；不影响 Codex 历史。返回清掉的条数。 */
   clearDiagnostics(): Promise<number>;
+  /* ---- 工具管理 ---- */
+
+  /**
+   * 工具清单与状态。`refresh = false` 时复用未过期的探测结论，因此普通页面加载
+   * 不会每次都拉起十几个子进程。
+   */
+  listTools(options?: { refresh?: boolean; locale?: string }): Promise<ToolState[]>;
+  /** 强制重探一个工具。 */
+  probeTool(toolId: string, locale?: string): Promise<ToolState>;
+  /** 支持安装技能的目标工具及其技能根目录。 */
+  listSkillTargets(): Promise<SkillTarget[]>;
+
+  /* ---- 插件中心 ---- */
+
+  listPluginSources(): Promise<PluginSource[]>;
+  addPluginSource(repo: string): Promise<PluginSource[]>;
+  removePluginSource(repo: string): Promise<PluginSource[]>;
+  /** 浏览一个来源的技能目录。这一步会联网，失败原因原样返回。 */
+  browsePluginRepo(repo: string): Promise<RepoCatalog>;
+  /** 生成安装计划。**不写文件**，界面据此展示将写入什么、哪里会冲突。 */
+  previewPluginInstall(request: InstallRequest): Promise<InstallPreview>;
+  installPlugin(request: InstallRequest): Promise<InstallReport>;
+  listInstalledSkills(): Promise<SkillRecord[]>;
+  checkSkillUpdates(): Promise<UpdateInfo[]>;
+  /** 启用 / 禁用。实现是给技能目录改名，界面必须说明这一点。 */
+  setSkillEnabled(skillId: string, targetTool: string, enabled: boolean): Promise<SkillRecord>;
+  /** 卸载。改过的文件会保留并如实返回。 */
+  uninstallSkill(skillId: string, targets: string[]): Promise<UninstallOutcome[]>;
+
+  /* ---- 内容中心 ---- */
+
+  listFeedSources(): Promise<FeedSource[]>;
+  saveFeedSource(draft: FeedSourceDraft): Promise<FeedSource>;
+  deleteFeedSource(sourceId: string): Promise<void>;
+  listFeedItems(filter: { sourceId?: string; lang?: string; limit?: number; offset?: number }): Promise<FeedItem[]>;
+  /** 抓取。指定 `sourceId` 只刷那一个；`force` 忽略到期时间。 */
+  refreshContent(options?: { sourceId?: string; force?: boolean }): Promise<RefreshReport>;
+  contentStatus(): Promise<ContentStatus>;
+  /** 返回实际生效的间隔（已夹到允许区间内）。 */
+  /** GitHub 令牌是否已配置。**不返回令牌本身**。 */
+  contentGithubTokenStatus(): Promise<boolean>;
+  setContentGithubToken(token: string | null): Promise<boolean>;
+
 }
 
 /** 错误归一化：后端 CoreError 与前端未知错误都收敛成同一形状。 */

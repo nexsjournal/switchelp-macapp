@@ -35,6 +35,7 @@
 | 项 | 处理要求 |
 | --- | --- |
 | system / developer 指令 | 按适配器能力保留；降级合并必须标记 degraded |
+| developer 角色（chat 上游） | chat 没有这个角色：`input` 里的 `developer` 消息与顶层 `instructions` 合成**一条**开头的 system 消息。原样转发会被只认 system/user/assistant/tool 的上游 400（moonshot 实测 `role 'developer' is not allowed`，宿主侧只看到 `error.upstreamRejected`）；拆成两条 system 又违反「system 必须在首位」。合成本身不记损失，只有该消息原本排在对话之后、位置被提前时才记 `input.developer` |
 | 多轮 tool call 与 output | 保持 call_id 对应、顺序和角色，不拼成普通聊天文字 |
 | parallel tool calls | 仅在全链路通过测试时声明；否则拒绝或使用预先公开策略 |
 | custom / freeform 工具 | 不是普通 function；有专用映射才允许，尤其 apply_patch |

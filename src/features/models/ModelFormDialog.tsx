@@ -9,7 +9,7 @@ import { Switch } from '@/components/Switch';
 import { LevelChips } from './LevelChips';
 import {
   DISCOVERY_DEFAULT_LIMITS, EDITABLE_INPUT_KINDS, capabilityState, defaultPolicy, inputBlocked, inputLabel,
-  parseTokens, policyFromCapability, reasoningKeptKey, type CapabilityState,
+  parseTokens, policyFromCapability, reasoningKeptKey, reasoningLevelPresets, type CapabilityState,
 } from './policy';
 import styles from './ModelFormDialog.module.css';
 
@@ -170,7 +170,7 @@ export function ModelFormDialog({ client, providerId, model, onSaved, onClose }:
             <p className="field-hint">{t('editor.abilityTriState')}</p>
 
             <h4 className={styles.groupTitle}>{t('editor.levelsTitle')}<FieldHelp text={t('editor.reasoningHint')} /></h4>
-            <LevelChips levels={ability.levels} defaultLevel={ability.defaultLevel} busy={busy}
+            <LevelChips levels={ability.levels} defaultLevel={ability.defaultLevel} presets={reasoningLevelPresets()} busy={busy}
               onChange={next => { setAbility(current => ({ ...current, ...next })); setReasoningTouched(true); }} />
             <p className="field-hint">{keptReasoning ? t(keptReasoning) : t('editor.reasoningLevelsHint')}</p>
 

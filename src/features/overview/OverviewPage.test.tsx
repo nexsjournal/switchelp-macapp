@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { OverviewPage } from './OverviewPage';
 import { provider } from '../../../tests/helpers/client';
 
@@ -47,7 +47,9 @@ test('已发布配置显示默认路由与后续请求使用的 Key，并说明�
   expect(screen.getAllByText('代码模型').length).toBeGreaterThan(0);
   expect(screen.getByText(/日常 ••••4f2a/)).toBeInTheDocument();
   expect(screen.getByText(/不代表 Codex 每个会话正在使用的模型/)).toBeInTheDocument();
-  expect(screen.getByText('已核验加载')).toBeInTheDocument();
+  // 同一句话也出现在顶部的接入进度里（那是同一事实的两处口径），所以限定到状态卡里断言。
+  const statusCard = screen.getByRole('heading', { name: '连接状态' }).closest('section')!;
+  expect(within(statusCard).getByText('已核验加载')).toBeInTheDocument();
 });
 
 test('网关未启动时状态卡显示原因，并提供诊断入口', () => {

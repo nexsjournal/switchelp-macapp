@@ -46,7 +46,14 @@ button.icon-button { width: var(--icon-button-size); height: var(--icon-button-s
 /* 行内按钮也是控件文本：14/20。以前写成 12px，比主按钮小一档，同一行里两种字号。 */
 button.text-button { background: transparent; border-color: transparent; color: var(--text-secondary); padding: 0; height: var(--control-height-compact); font-size: var(--font-size-control); line-height: var(--line-height-control); }
 button.danger { color: var(--status-danger); }
-input:not([type='checkbox']), select, textarea { width: 100%; min-width: 0; height: var(--control-height); border: 1px solid var(--border-control); border-radius: var(--radius-sm); background: var(--bg-input); padding: 0 12px; font-size: var(--font-size-control); line-height: var(--line-height-control); }
+/*
+ * 表单控件的描边分两档：静息态 `--border-field`（弱），悬停时抬到 `--border-control`。
+ * 从前静息态就是 `--border-control`，一页六七个下拉并排时边框连成一片、显得吵
+ * （用户原话：「未选择的默认样式的边框有点太明显了」）。两档都过 3:1 的控件边界要求，
+ * 取值与实测见 tokens.css。焦点不在这里抬强度：焦点由下面统一的 :focus-visible 焦点环表达。
+ */
+input:not([type='checkbox']), select, textarea { width: 100%; min-width: 0; height: var(--control-height); border: 1px solid var(--border-field); border-radius: var(--radius-sm); background: var(--bg-input); padding: 0 12px; font-size: var(--font-size-control); line-height: var(--line-height-control); transition: border-color var(--motion-hover); }
+input:not([type='checkbox']):hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) { border-color: var(--border-control); }
 /*
  * 下拉箭头自绘：各平台原生箭头位置与形状都不同（macOS 双箭头贴右边缘、
  * Windows 单箭头），自绘才能在两个平台都留出同样的右边距。
@@ -70,8 +77,19 @@ textarea { height: auto; padding: 8px 12px; resize: vertical; }
  * 表格的 `.checkHit`），点击区由那一层负责。以前这里用「透明边框 + 负外边距」把
  * 勾选框自己撑到 32px，代价是负边距把标签文字吸到框上（8px 的间距只剩 1px），
  * 还让方框整体左移 7px、戳到卡片内容线以外——间距与对齐全被这一个 hack 破坏了。
+ *
+ * 方框和对勾都是自绘的，全项目只有这一个形状。以前用 `accent-color` 交给引擎画，
+ * 结果同一个界面里出现两种对勾：原生那枚是细折线、直角收尾，而组件里的图标一律是
+ * Lucide 的圆头圆角（用户原话：「勾选的对号图标好像是直角的，和其他的图标不一样」）。
+ * 自绘之后两套主题、所有页面（列表勾选、能力声明、诊断范围）共用同一个对勾。
+ * 对勾的颜色不能写在这里：它必须跟着主题变，所以是 `--checkbox-tick`（见 tokens.css）。
  */
-input[type='checkbox'] { accent-color: var(--text-primary); width: 18px; height: 18px; margin: 0; flex-shrink: 0; }
+input[type='checkbox'] { appearance: none; -webkit-appearance: none; width: 18px; height: 18px; margin: 0; flex-shrink: 0;
+  border: 1px solid var(--border-field); border-radius: var(--radius-xs); background: var(--bg-input); transition: border-color var(--motion-hover); }
+input[type='checkbox']:hover:not(:disabled) { border-color: var(--border-control); }
+input[type='checkbox']:checked { background-color: var(--text-primary); border-color: var(--text-primary);
+  background-image: var(--checkbox-tick); background-repeat: no-repeat; background-position: center; background-size: 12px 12px; }
+input[type='checkbox']:disabled { cursor: not-allowed; }
 
 /*
  * 勾选行：方框 + 说明文字，整行可点，行高不短于 32（点击区要求）。
@@ -100,7 +118,12 @@ input[type='checkbox'] { accent-color: var(--text-primary); width: 18px; height:
    分组说明一律用 `.field-hint`（12px），不再用这里的 11px 小字——
    一页里出现四五种字号，读的人只会觉得乱。 */
 .form-fields > .form-section:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
-.form-fields .field-label { display: flex; align-items: baseline; gap: 8px; }
+/*
+ * 「字段名 + ⓘ」。**不限定在表单里**：它是一条通用写法，只写在 `.form-fields` 下面时，
+ * 出了表单（例如共存卡片那种 `<dl>`）就退化成行内元素，ⓘ 会贴着最后一个字（实测间隙 0，
+ * 用户原话「icon 和前面的文字挨得太近」）。间距在这里给一次，别让每个调用点自己补。
+ */
+.field-label { display: flex; align-items: baseline; gap: 8px; }
 /*
  * 底栏。表单型弹窗把它交给 Dialog 的 footer 槽，于是它天然在滚动区之外，
  * 既不会盖住最后一个字段，也不会跟着内容滚走。

@@ -5,6 +5,7 @@
 //! - migration 单调递增，升级失败即回滚，不对旧库做部分迁移。
 //! - 操作记录让中断的配置事务可判定、可恢复，而不是“重新对齐全部供应商”。
 
+pub mod hub;
 pub mod journal;
 pub mod migration;
 pub mod operation;
@@ -12,6 +13,7 @@ pub mod repository;
 pub mod snapshot;
 pub mod sqlite;
 
+pub use hub::{HubStore, InMemoryHubStore, SqliteHubStore};
 pub use journal::{JournalEntry, JournalStage, JournalStore};
 pub use migration::{run_migrations, SchemaVersion, CURRENT_SCHEMA_VERSION};
 pub use operation::{MemoryOperationStore, OperationKind, OperationState, OperationStore};

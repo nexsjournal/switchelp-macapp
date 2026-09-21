@@ -47,7 +47,7 @@ test('备份与更新是真实控制，不是占位说明', async () => {
 test('更新查询失败时不显示成“已是最新”', async () => {
   const user = userEvent.setup();
   const checkUpdate = vi.fn().mockResolvedValue({ current: '0.1.0', latest: null, hasUpdate: false,
-    releaseUrl: null, publishedAt: null, error: '无法查询发布信息：timeout' });
+    notes: null, releaseUrl: null, publishedAt: null, error: '无法查询发布信息：timeout' });
   renderWithToasts(<SettingsPage client={testClient({ checkUpdate })} gateway={gateway} onNavigate={() => {}} onReopenOnboarding={() => {}} />);
 
   await user.click(await screen.findByRole('button', { name: '检查更新' }));
@@ -57,17 +57,21 @@ test('更新查询失败时不显示成“已是最新”', async () => {
   expect(screen.queryByText(/已是最新（/)).not.toBeInTheDocument();
 });
 
-test('有新版本时显示版本号与发布页，并说明不会自动安装', async () => {
+test('有新版本时指向侧栏的更新入口，发布页走系统浏览器', async () => {
   const user = userEvent.setup();
   const checkUpdate = vi.fn().mockResolvedValue({ current: '0.1.0', latest: '0.2.0', hasUpdate: true,
-    releaseUrl: 'https://example.test/releases/v0.2.0', publishedAt: '2026-09-18T00:00:00Z', error: null });
-  renderWithToasts(<SettingsPage client={testClient({ checkUpdate })} gateway={gateway} onNavigate={() => {}} onReopenOnboarding={() => {}} />);
+    notes: null, releaseUrl: 'https://example.test/releases/v0.2.0', publishedAt: '2026-09-18T00:00:00Z', error: null });
+  // 设置页不装更新（那在侧栏），这里只确认它把用户指对了地方，并把「打不开浏览器」如实报出来。
+  const openReleasePage = vi.fn().mockRejectedValue({ code: 'INTERNAL', messageKey: 'error.updateInstallFailed',
+    safeDetails: ['无法打开浏览器'], retryable: true, recoveryActions: [] });
+  renderWithToasts(<SettingsPage client={testClient({ checkUpdate, openReleasePage })} gateway={gateway} onNavigate={() => {}} onReopenOnboarding={() => {}} />);
 
   await user.click(await screen.findByRole('button', { name: '检查更新' }));
 
   expect(await screen.findByText(/有新版本 0.2.0/)).toBeInTheDocument();
-  expect(screen.getByText(/不自动下载安装/)).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: '打开发布页' })).toHaveAttribute('href', 'https://example.test/releases/v0.2.0');
+  expect(screen.getByText(/点侧栏左上角的更新按钮/)).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '打开发布页' }));
+  expect(openReleasePage).toHaveBeenCalledWith('https://example.test/releases/v0.2.0');
 });
 
 test('备份列表标注可能含密钥，恢复要走确认', async () => {
@@ -88,7 +92,7 @@ test('备份列表标注可能含密钥，恢复要走确认', async () => {
 
   await user.click(within(dialog).getByRole('button', { name: '恢复这份备份' }));
   expect(restoreBackup).toHaveBeenCalledWith('b_1');
-  expect(await screen.findByText(/事务记录未回退/)).toBeInTheDocument();
+  expect(await screen.findByText(/操作记录未回退/)).toBeInTheDocument();
 });
 
 test('危险操作的入口会跳到对应页面执行', async () => {

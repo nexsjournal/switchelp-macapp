@@ -258,7 +258,7 @@ test('实例检测失败要能看到原因，而不是只显示空态', async ()
   expect(screen.getByText('未检测到 Codex')).toBeInTheDocument();
 });
 
-test('提交进行中不能取消：写入不可安全中断', async () => {
+test('提交进行中不能取消：写入已经开始，完成前不能取消', async () => {
   let releaseCommit: () => void = () => {};
   const user = await openCodexPage({
     detectInstances: vi.fn().mockResolvedValue([instance]),
@@ -272,7 +272,7 @@ test('提交进行中不能取消：写入不可安全中断', async () => {
   await user.click(await screen.findByRole('button', { name: '应用并重新加载' }));
 
   expect(screen.getByRole('button', { name: '取消' })).toBeDisabled();
-  expect(screen.getAllByText(/写入不可安全中断/).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/写入已经开始，完成前不能取消/).length).toBeGreaterThan(0);
   releaseCommit();
 });
 
@@ -370,7 +370,7 @@ describe('共存模式', () => {
       restartHost,
     });
 
-    await user.click(await screen.findByRole('button', { name: '关闭并重启宿主' }));
+    await user.click(await screen.findByRole('button', { name: '关闭并重启 Codex' }));
     expect(setCoexist).toHaveBeenCalledWith(instance.id, false);
     expect(restartHost).toHaveBeenCalledWith(instance.id);
   });
@@ -388,7 +388,7 @@ describe('共存模式', () => {
       detectInstances: vi.fn().mockResolvedValue([instance]),
       coexistStatus: vi.fn().mockResolvedValue({ ...coexistOff, enabled: true, hostUnderBridge: null }),
     });
-    expect(await screen.findByText(/无法确认宿主是否以共存模式运行/)).toBeInTheDocument();
+    expect(await screen.findByText(/无法确认当前这个 Codex 是否以共存模式运行/)).toBeInTheDocument();
   });
 
   test('不具备接管前提时禁用开关并说明原因', async () => {

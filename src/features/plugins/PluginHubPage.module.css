@@ -1,0 +1,87 @@
+.page { display: grid; gap: 20px; align-content: start; }
+/* 与全站卡片一致：四边 24（见 ContentPage 里的说明）。 */
+.card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: var(--card-padding); }
+.empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: var(--font-size-label); }
+
+/* 安装结果条：部分是成功、部分是跳过时，三行都要显示出来。 */
+.report { display: grid; gap: 10px; padding: 16px 20px; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); }
+.report > strong { font-size: var(--font-size-label); line-height: var(--line-height-label); }
+.report ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+.report li { display: flex; align-items: flex-start; gap: 8px; }
+.report li svg { margin-top: 3px; flex: none; }
+.reportOk { color: var(--status-success); }
+.reportWarn { color: var(--status-warning); }
+.reportBad { color: var(--status-danger); }
+.report > button { justify-self: start; }
+
+.sourceRow { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.sourcePicker { display: grid; gap: 8px; min-width: 240px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
+.sourcePicker select { height: var(--control-height); padding: 0 10px; border: 1px solid var(--border-field); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-primary); font-size: var(--font-size-label); }
+.addSource { display: flex; align-items: center; gap: 8px; }
+.addSource input { width: 260px; height: var(--control-height); padding: 0 12px; border: 1px solid var(--border-field); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-primary); font-size: var(--font-size-label); }
+.removeSource { color: var(--status-danger); }
+.commit { margin: 12px 0 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+
+.marketLayout { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.listColumn { display: grid; gap: 12px; min-width: 0; }
+.search { height: var(--control-height); padding: 0 12px; border: 1px solid var(--border-field); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-primary); font-size: var(--font-size-label); }
+.skillList { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 60vh; overflow: auto; }
+/* 卡片按钮是三行内容（名字 / 已装标记 / 描述）。全局 `button` 带固定高度 40 与
+   justify-content: center，两条都会咬人：不改 height，grid 行被压扁后三行互相重叠
+   （实测 skillName 与 installedTag 叠 6px）；不声明对齐，单列 track 会在按钮里居中。
+   这类「自己没声明的属性被全局规则接管」是 CSS Module 覆盖全局样式最容易漏的一条。 */
+/*
+ * 列表项：与网关页左侧的供应商列表同一套（`App.module.css` 的 `.providerItem`）——
+ * 未选中也是一张有底、有描边的卡片，悬停加深，选中换成选中底 + 强调色描边。
+ * 从前未选中是「透明底 + 透明描边」，一列里只有被选中的那一项看着像元素，
+ * 其余几项像纯文字（用户原话：「未选中的插件选项样式没做吧，看看网关页左边供应商的样式」）。
+ * 选择器带 `.skillList` 前缀是为了压过上面那条 `button` 规则，不再用 `!important`。
+ */
+.skillList button { width: 100%; height: auto; display: grid; gap: 4px; padding: 16px;
+  justify-content: stretch; justify-items: stretch; align-content: start;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  background: var(--bg-surface); color: inherit; text-align: left; cursor: pointer; }
+.skillList button:hover:not(:disabled) { background: var(--bg-hover); }
+.skillList .selected, .skillList .selected:hover:not(:disabled) { background: var(--bg-selected); border-color: var(--accent-border); }
+/* 选中底色会把弱文字压到 4.5 以下（实测 4.14），选中行里的说明提级为次级色——
+   与网关页供应商列表的 `.providerItem.selected` 同一条处理。 */
+.skillList .selected .skillDescription { color: var(--text-secondary); }
+/* 名称与「已装」标记同一行：标记不能被长名字挤到下一行去。 */
+.skillName { font-size: var(--font-size-label); line-height: var(--line-height-label); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.installedTag { justify-self: start; padding: 1px 8px; border-radius: var(--radius-pill); background: var(--status-success-bg); color: var(--status-success); font-size: var(--font-size-caption); line-height: 18px; }
+.skillDescription { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.detailColumn { display: grid; gap: 12px; min-width: 0; padding: var(--card-padding); border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); }
+.detailTitle { margin: 0; font-size: var(--font-size-card-title); line-height: var(--line-height-card-title); font-weight: 600; }
+.detailPath, .detailDescription { margin: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.detailDescription { font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); }
+.requires { margin: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
+.caution { margin: 4px 0 0; padding: 10px 14px; border-radius: var(--radius-sm); background: var(--status-warning-bg); color: var(--status-warning); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+.warnNote { margin: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--status-warning); }
+.disclosure { justify-self: start; }
+.markdown { margin: 0; padding: 14px 16px; max-height: 320px; overflow: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-code); white-space: pre-wrap; }
+.fileList { margin: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.targets { display: grid; gap: 10px; margin: 0; padding: 16px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+.targets legend { padding: 0 6px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
+.targetRoot { font-family: var(--font-mono); font-size: var(--font-size-caption); color: var(--text-muted); }
+
+.installedHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.installedHeader h2 { margin: 0; font-size: var(--font-size-card-title); line-height: var(--line-height-card-title); font-weight: 600; }
+.installedList { list-style: none; margin: 0; padding: 0; }
+.installedList > li { border-top: 1px solid var(--border-subtle); }
+.installedList > li:first-child { border-top: 0; }
+.installedRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 14px 0; }
+.installedMain { display: grid; gap: 4px; min-width: 0; }
+.installedMeta { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.installedActions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.note { margin: 16px 0 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+
+.plan { display: grid; gap: 6px; padding: 14px 0; border-top: 1px solid var(--border-subtle); }
+.plan:first-child { border-top: 0; padding-top: 0; }
+.planHead { margin: 0; display: flex; align-items: center; gap: 8px; font-size: var(--font-size-label); line-height: var(--line-height-label); }
+.planAction { padding: 1px 8px; border-radius: var(--radius-pill); background: var(--bg-elevated); color: var(--text-secondary); font-size: var(--font-size-caption); line-height: 18px; }
+.planDir, .planFiles { margin: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.conflictChoices { display: flex; gap: 20px; flex-wrap: wrap; }
+.uninstallFiles { list-style: none; margin: 0; padding: 0 0 8px; display: grid; gap: 4px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
+.spin { animation: plugin-spin 900ms linear infinite; }
+@keyframes plugin-spin { to { transform: rotate(360deg); } }

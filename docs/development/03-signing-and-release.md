@@ -96,6 +96,32 @@ xcrun stapler validate target/release/bundle/dmg/Switchelp_*.dmg             # �
 
 `spctl` 显示 **accepted** 才代表别人下载后双击就能打开。
 
+## 3.5 更新包的签名（应用内更新的第二套签名）
+
+应用内更新还要一套**独立于 Apple 的**签名：更新包（`Switchelp.app.tar.gz`）由 minisign 私钥签，
+应用用它内置的公钥验。密钥只生成一次，生成后**公钥固化在每个已发布的包里**——
+换密钥等于让所有老用户再也收不到更新（他们手里的公钥只认旧私钥）。
+
+```bash
+# 只做一次；私钥不进仓库
+mkdir -p ~/.config/switchelp
+pnpm exec tauri signer generate --ci -w ~/.config/switchelp/updater.key -p ""
+chmod 600 ~/.config/switchelp/updater.key
+```
+
+生成后把 `~/.config/switchelp/updater.key.pub` 的内容填进 `src-tauri/tauri.conf.json` 的
+`plugins.updater.pubkey`。本机出包时带上私钥：
+
+```bash
+export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.config/switchelp/updater.key)"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+pnpm exec tauri build --bundles app,dmg
+```
+
+产物多出 `Switchelp.app.tar.gz` 与 `Switchelp.app.tar.gz.sig`，由
+`scripts/make-latest-json.mjs` 组装成 `latest.json` 一起上传。完整发布步骤、失败面与验收见
+[应用内更新](../architecture/06-updates.md)。
+
 ## 4. GitHub Actions 需要的 secrets
 
 [release.yml](../../.github/workflows/release.yml) 已经写好：macOS 与 Windows 各自在原生 runner 上构建，

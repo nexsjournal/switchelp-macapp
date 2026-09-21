@@ -44,7 +44,10 @@
  * 会被这条规则改成 display: block（方框不再居中，表头与行的勾选框差 14px）
  * 并套上 11px 字号。给第二行一个自己的类，规则就只命中它该命中的东西。
  */
-.tableWrap .line { display: block; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+/* 第二行（上游 ID / 供应商）与上一行的名字之间留 2px：
+   两行都是行高 20/18 的紧排版，完全贴住会读成一整行（几何审计一直把它记成 touching）。
+   2px 是设计文档允许的「光学微调」例外，不是间距节奏。 */
+.tableWrap .line { display: block; margin-top: 2px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 /* 操作列按内容收窄：自动布局会把剩余宽度摊给所有列，操作列会宽过数据列。 */
 .tableWrap th:last-child, .tableWrap td:last-child { width: 1%; white-space: nowrap; }
 .checkCell { width: 1%; }
@@ -83,3 +86,18 @@
 .stages li.passed > span:first-of-type { color: var(--status-success); }
 .stages li.failed > span:first-of-type { color: var(--status-danger); }
 .stages li.skipped > span:first-of-type { color: var(--text-muted); }
+
+/*
+ * 模型行里的两个状态点。
+ *
+ * 语义色只从 token 里取：`--status-*` 是**文字**色（要在浅色底上过 AA），
+ * `--status-*-dot` 是**填充**色（点、条这类非文本元素，要求 3:1 且更醒目）。
+ * 浅色主题下这两档必须分开——同一个深绿当点用，看起来就是「暗沉」。
+ */
+.modelName { display: flex; align-items: center; gap: 8px; }
+.catalogDot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--border-control); }
+.catalogDot.success { background: var(--status-success-dot); }
+.connection { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.statusDot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--border-control); }
+.statusDot.success { background: var(--status-success-dot); }
+.statusDot.danger { background: var(--status-danger-dot); }

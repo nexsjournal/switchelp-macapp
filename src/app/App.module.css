@@ -7,15 +7,42 @@
  */
 .shell { display: flex; height: 100%; position: relative; }
 .sidebar { width: var(--sidebar-width); flex-shrink: 0; background: var(--bg-sidebar); border-right: 1px solid var(--border-subtle); padding: 32px 16px 24px; display: flex; flex-direction: column; }
+/*
+ * 一行 flex：徽标 + 文字列。`align-items: center` 让徽标与**整列**居中——副标题换成更新按钮
+ * 之后这一列还是两行，徽标就仍和这一块居中。把按钮挂到这一列外面（或让它多占高度），
+ * 徽标就只跟名字那一行居中，看起来「徽标和按钮没对齐」（用户报的就是这个）。
+ *
+ * 拖拽面放在整块上：`deep` 不会吃掉按钮的点击——Tauri 的 drag.js 里 BUTTON 属于
+ * CLICKABLE_TAGS，鼠标落在按钮上时拖动判定直接返回 false（见 §6.1 的说明）。
+ */
 .brand { display: flex; align-items: center; gap: 12px; padding: 0 8px 48px; }
 .brandIcon { width: 36px; height: 36px; flex-shrink: 0; display: grid; place-items: center; background: var(--text-primary); color: var(--bg-canvas); border-radius: 10px; }
 /* 文本块允许收缩，才能在窄侧栏里省略号截断，而不是把 logo 挤扁。 */
 .brand > div:last-child { min-width: 0; }
 /* 品牌文字回到字阶上的「区域标题」一档：19px 不在字阶里。 */
 .brand strong { display: block; font-size: var(--font-size-section-title); line-height: var(--line-height-section-title); letter-spacing: -.7px; }
-/* 行高显式给值：继承正文的 22 会让 11px 的副标题上方多出一大截行距，两行看着离得远。 */
-.brand span { display: block; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/*
+ * 副标题**用自己的类名**，不用 `.brand span` 这种结构选择器：结构选择器会把后来加进
+ * 品牌块的每一个 span 都算进来（更新胶囊内层的文字就被它按「12px 灰字」上过色，
+ * 压在强调色底上对比度只剩 1.05）。行高显式给值：继承正文的 22 会让 11px 的副标题
+ * 上方多出一大截行距，两行看着离得远。
+ */
+.brandSubtitle { display: block; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/*
+ * 更新胶囊占的正是副标题那一行：在名字下方 2px（与副标题同一个位置），不要另加左缩进——
+ * 它已经在文字列里，左边自然与名字对齐。
+ *
+ * `margin-bottom: -12px` 是这里唯一的一笔换算，写清楚它的来由：胶囊的**点击区**必须是 32 高
+ * （规范：≥32×32），而它占的那一行只有 20 高，多出来的 12px 挂在下面。这 12px 不是可见内容的
+ * 一部分，不能参与排版——所以要抵掉，否则文字列高 60、徽标按 60 居中，看起来就偏下了。
+ */
+/* `display: flex` 而不是 block：block 会给里面的行内级按钮加一条 strut 行盒，
+   把胶囊再往下推 2px（实测名字底到胶囊顶 4px，而副标题在 2px）。flex 没有这条行盒。 */
+.brandUpdate { display: flex; margin-top: 2px; margin-bottom: -12px; max-width: 100%; }
 .sidebar nav { display: grid; gap: 8px; }
+/* 分组标签：只做视觉分段。它不进 tab 顺序、不可点，所以用 aria-hidden 标出来。 */
+.navGroup { margin: 12px 0 -2px; padding: 0 16px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); letter-spacing: 0.02em; }
+.sidebar nav .navGroup:first-child { margin-top: 0; }
 .sidebar nav button { justify-content: flex-start; border: 1px solid transparent; height: 44px; padding: 0 16px; background: transparent; color: var(--text-secondary); border-radius: var(--radius-nav); }
 .sidebar nav button:hover { background: var(--bg-hover); color: var(--text-primary); }
 /* 当前页用强调色淡底 + 强调色文字：灰阶下“选中”太不显眼。 */
@@ -104,9 +131,10 @@
 .providerName span { display: block; color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); margin-top: 4px; }
 .providerStatus { display: flex; align-items: center; gap: 8px; }
 .statusLabel { color: var(--text-secondary); font-size: var(--font-size-caption); line-height: var(--line-height-caption); white-space: nowrap; }
-.statusDot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--border-control); }
-.statusDot.success { background: var(--status-success); }
-.statusDot.warning { background: var(--status-warning); }
+/* 点用**填充档**（--status-*-dot）：文字档在浅色主题下是深色，当点用会显得发黑。 */
+.statusDot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--border-control); }
+.statusDot.success { background: var(--status-success-dot); }
+.statusDot.warning { background: var(--status-warning-dot); }
 .dot.online { background: var(--status-success); }
 .dot.offline { background: var(--status-warning); }
 .details { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 16px 12px; font-size: var(--font-size-label); line-height: var(--line-height-label); margin: 0 0 32px; padding-bottom: 24px; border-bottom: 1px solid var(--border-subtle); }
@@ -164,9 +192,19 @@
   .pageHeader { flex-direction: column; align-items: flex-start; gap: 12px; }
 }
 
-/* 供应商列表上方的搜索框：形状照模型页的搜索框，同一件事在两页不该长得不一样。 */
+/* 供应商列表上方的搜索框：形状照模型页的搜索框，同一件事在两页不该长得不一样。
+   描边用静息态那一档（`--border-field`），不是 `--border-control`——后者是悬停档。
+   这一处是上次「全局统一表单描边」时漏掉的第四个搜索框（工具管理 / 插件中心 /
+   内容中心那三个已经改过），漏掉的表现是同一件事在四个页面有强有弱。
+   不额外加 `:hover` 抬描边：另外三个手写搜索框都没有这个行为，同一件事不该有两种反应，
+   悬停反馈由内层输入框自己的规则负责。 */
 .providerSearch { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: var(--control-height);
-  border: 1px solid var(--border-control); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-muted); }
-.providerSearch input { border: 0; background: transparent; padding: 0; height: auto; }
-.providerSearch input:focus-visible { outline: none; }
+  border: 1px solid var(--border-field); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-muted); }
+/*
+ * 类名写两遍把权重提到 0,2,1：`.providerSearch input` 只有 0,1,1，与全局的
+ * `input:not([type='checkbox'])` 打平，而全局样式在打包顺序上更靠后——平手它赢。
+ * 实测后果：输入框被套上 40 高、1px 边框、白色底，于是外框里面又出现一个框。
+ */
+.providerSearch.providerSearch input { border: 0; background: transparent; padding: 0; height: auto; }
+.providerSearch.providerSearch input:focus-visible { outline: none; }
 .providerSearch:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 2px; }

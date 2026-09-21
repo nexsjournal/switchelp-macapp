@@ -4,7 +4,7 @@
  * 状态色只承载状态语义（docs/design/01-foundations.md）。
  */
 .switch { position: relative; flex-shrink: 0; width: 36px; height: 20px; padding: 0; border-radius: var(--radius-pill);
-  border: 1px solid var(--border-control); background: var(--bg-input); transition: background var(--motion-hover), border-color var(--motion-hover); }
+  border: 1px solid var(--border-field); background: var(--bg-input); transition: background var(--motion-hover), border-color var(--motion-hover); }
 .switch.small { width: 32px; height: 18px; }
 .switch.on { background: var(--accent); border-color: transparent; }
 .knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;

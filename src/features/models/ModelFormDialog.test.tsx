@@ -76,22 +76,22 @@ test('高级配置默认折叠；文本锁定，链路不支持的输入不可�
   expect(screen.getByRole('checkbox', { name: '图片' })).toBeEnabled();
 });
 
-test('推理档位：加两个档位后写进策略，默认取第一个', async () => {
+test('推理档位：勾两个档位后写进策略，默认取最低的那一档', async () => {
   const user = userEvent.setup();
   const saveModel = vi.fn().mockResolvedValue({});
   render(<ModelFormDialog client={testClient({ saveModel })} providerId="p_test" onSaved={() => {}} onClose={() => {}} />);
 
   screen.getByText('高级配置').closest('details')!.querySelector('summary')!.click();
   await user.type(screen.getByLabelText('模型 ID'), 'vendor/manual');
-  for (const level of ['low', 'high']) {
-    await user.click(screen.getByRole('button', { name: '添加档位' }));
-    await user.type(screen.getByLabelText('添加档位'), `${level}{Enter}`);
-  }
+  // 先勾「高」再勾「低」：落进策略的顺序按档位从低到高，不按点击顺序。
+  await user.click(screen.getByRole('checkbox', { name: '高' }));
+  await user.click(screen.getByRole('checkbox', { name: '低' }));
   await user.click(screen.getByRole('button', { name: '保存' }));
 
   const reasoning = saveModel.mock.calls[0]![0]!.policy.reasoning;
   expect(reasoning.allowedValues).toEqual(['low', 'high']);
-  expect(reasoning.defaultValue).toBe('low');
+  // 默认是「已经定下的那个」：第一个档位勾上时它就成了默认，再加别的档位不会把它改掉。
+  expect(reasoning.defaultValue).toBe('high');
   expect(reasoning.mappingId).toBe('reasoning.effort.v1');
 });
 

@@ -1,0 +1,59 @@
+/*
+ * 分段切换器：外层一个胶囊容器，里面每个选项是胶囊按钮。
+ * 选中态用侧栏导航那套（accent 淡底 + accent 字 + accent 边），
+ * 全应用「这里是当前的」只有一种画法。
+ */
+.tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  /* 宽度贴内容：它常被放在 grid 页面容器里，默认的 stretch 会把胶囊拉满整行，
+     看着像一个空输入框。flex 父级下 fit-content 与 inline-flex 等价，两种父级都对。 */
+  width: fit-content;
+  max-width: 100%;
+  /* 3px 内边距 + 32 的控件高度 + 2px 边框 = 40，与标准控件等高。 */
+  padding: 3px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--bg-input);
+}
+
+.tabs button {
+  /* 全局 button 是 justify-content: center 且圆角 8px；这里显式写全，
+     否则胶囊会被全局圆角切成「上下两种圆角」的样子。 */
+  height: var(--control-height-compact);
+  padding: 0 14px;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-label);
+  line-height: var(--line-height-label);
+  font-weight: 400;
+}
+
+.tabs button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+
+.tabs button.active,
+.tabs button.active:hover:not(:disabled) {
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* 计数徽章：数字小、衬在选项文字后面，不改选项本身的高度。 */
+.count {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: var(--font-size-caption);
+  line-height: 18px;
+  font-weight: 400;
+  text-align: center;
+}
+.tabs button.active .count { background: var(--bg-surface); color: var(--accent); }

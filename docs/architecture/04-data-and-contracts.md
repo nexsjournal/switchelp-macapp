@@ -71,6 +71,21 @@ interface ReasoningPolicy {
 
 `display_name` 是**目录里真正显示的那个名字**，因此默认带供应商前缀（`供应商/模型名`，规则与幂等性见 `domain::model::qualified_display_name`）：Codex 的模型菜单是一份扁平列表，原生模型与各供应商的模型同处一列，不带来源就分不出同名模型属于谁。前缀由核心统一补齐——发现值、保存模型、供应商改名三条写入路径都经过它；供应商改名后旧前缀就地替换而不是叠加。用户显式改过名字则原样使用，不再补前缀。
 
+### 1.1 扩展板块的表（v4）
+
+工具管理 / 插件中心 / 内容中心共用 `storage/hub.rs` 的 `HubStore`（独立于实体仓库的连接，
+与 `OperationStore` 同样的理由）。四张表都存 JSON 载荷 + 少量索引列：索引列负责排序、过滤与唯一性。
+
+| 表 | 主键 | 索引列 | 说明 |
+| --- | --- | --- | --- |
+| `tool_probe_cache` | `tool_id` | `probed_at` | 工具探测结论的缓存。**「未验证」的结论不缓存**，因为它会随着用户刚刚装好而失效 |
+| `installed_skills` | (`skill_id`, `target_tool`) | `installed_at` | 我们写进目标技能目录的归属记录。同一个技能装到两个工具是两条记录，可各自停用与卸载 |
+| `feed_sources` | `id` | `enabled`、`next_fetch_at` | 订阅源与它的抓取状态（ETag、连续失败次数、下次抓取时间） |
+| `feed_items` | `url` | `published_at`、(`source_id`, `published_at`) | 资讯条目快照。`first_seen_at` 只在首次写入时记，之后刷新不覆盖 |
+
+技能文件本身不进数据库——正文就在磁盘上，库里只存归属指针与文件指纹（`installed_skills.payload.files`）。
+`.switchelp-managed` 归属清单写在目标目录里，是卸载与冲突判定的唯一依据。
+
 ## 3. 唯一性与约束
 
 - UUID/ULID 作为内部 ID；展示名允许重复，但列表同时展示 endpoint/供应商信息。
@@ -106,6 +121,20 @@ interface ReasoningPolicy {
 | `apply.status` | operationId | 当前阶段、证据、恢复动作 |
 | `restore.plan` / `restore.execute` | instanceId、targetRevision | 同样先计划后执行 |
 | `diagnostics.export` | scopes、redactionPreviewHash | 用户选择位置的脱敏包 |
+| `tools.list` / `tools.probe` | refresh、locale / toolId | 工具状态；只读探测，不改任何文件 |
+| `tools.skillTargets` | — | 支持安装技能的工具及其技能根目录 |
+| `plugins.sources` / `.addSource` / `.removeSource` | repo | 来源清单（预置 + 用户添加） |
+| `plugins.browse` | repo（`owner/repo[@ref]`） | 该仓库的技能目录，钉在解析出的提交上 |
+| `plugins.preview` | repo、技能目录、目标工具 | 安装计划：将写入哪些文件、哪里会冲突。**不写文件** |
+| `plugins.install` | 同上 + 冲突处置 | 逐目标独立执行；部分完成与失败原因如实返回 |
+| `plugins.installed` / `.checkUpdates` | — | 已装记录与可更新项 |
+| `plugins.setEnabled` | skillId、targetTool、enabled | 目录改名（加/去 `.disabled` 后缀）并更新记录 |
+| `plugins.uninstall` | skillId、targets | 按归属清单逐文件核对指纹后删除；改过的文件保留 |
+| `content.sources` / `.saveSource` / `.deleteSource` | draft（只含用户可改字段） | 订阅源；ETag 与退避状态属于服务端事实，不接受回传 |
+| `content.items` | sourceId、lang、limit、offset | 本地快照，不联网 |
+| `content.refresh` | sourceId?、force | 抓取；单轮有时间预算，未轮到的源如实列出 |
+| `content.status` / `.setInterval` | — / seconds | 抓取状态与刷新间隔 |
+| `content.githubTokenStatus` / `.setGithubToken` | — / token? | 令牌只进系统凭据库，任何读取接口都不返回令牌本身 |
 
 不提供 `run_shell(command)` 或任意 `write_file(path,content)` 给 renderer。链接打开只允许经过校验的 http/https；文件定位只使用核心已登记的路径。
 
@@ -148,6 +177,6 @@ interface OperationEvent {
 
 ## 7. 数据迁移与导入
 
-数据库 migration 单调递增，每次升级前备份；升级失败回滚应用启动，不对旧库重复部分迁移。目录 schema 与 DB schema 分别版本化。稳定运行快照要保留其编译器版本。
+数据库 migration 单调递增，每次升级前备份；升级失败回滚应用启动，不对旧库重复部分迁移。当前版本为 **v4**（v4 新增扩展板块的四张表）。升级路径有测试守着（`tests/sqlite_repository.rs`）；**该测试模拟「从 v1 升级」时会显式删掉 v3/v4 才有的表**——新增表时必须同步补进那段 DROP 列表，否则模拟出来的不是 v1 库，测试会以「表已存在」的假失败报警。目录 schema 与 DB schema 分别版本化。稳定运行快照要保留其编译器版本。
 
 P0 导出默认仅配置元数据和无秘密模板；导入先预览新增/覆盖/冲突，不允许导入任意可执行 auth.command 或安装路径。P1 加密导出采用审查过的 AEAD + 密码 KDF 格式，含版本、参数、随机 salt/nonce 和完整性校验；不自创加密算法。

@@ -1,0 +1,70 @@
+.page { display: grid; gap: 20px; align-content: start; }
+/* 四边都是 24（--card-padding）：以前是 20/24，第一行内容距顶 21、距左 25，看着就不齐。 */
+.card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: var(--card-padding); }
+.empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: var(--font-size-label); }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.header h2 { margin: 0; font-size: var(--font-size-card-title); line-height: var(--line-height-card-title); font-weight: 600; }
+/* 上下都要留白：说明文字后面常紧跟一组按钮（GitHub 令牌卡），
+   只给 margin-top 时说明与按钮之间是 0 间距。 */
+.note { margin: 8px 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+
+/* 状态行：抓取失败必须是琥珀色，与「一切正常」明显不同。 */
+.statusBar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+.statusOk { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
+.statusWarn { display: inline-flex; align-items: center; gap: 6px; color: var(--status-warning); }
+.failureList { list-style: none; margin: 0; padding: 12px 16px; display: grid; gap: 6px; border-radius: var(--radius-sm); background: var(--status-warning-bg); color: var(--status-warning); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+.failureList li { display: flex; align-items: flex-start; gap: 8px; }
+.failureList li svg { margin-top: 3px; flex: none; }
+.failureHint { color: var(--text-secondary); }
+.report { display: grid; gap: 6px; padding: 14px 20px; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
+.report > strong { font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-primary); }
+.report > button { justify-self: start; }
+
+.itemList { list-style: none; margin: 0; padding: 0; }
+.itemList > li { border-top: 1px solid var(--border-subtle); }
+.itemList > li:first-child { border-top: 0; }
+/*
+ * 新闻行。三处都是被全局 `button` 规则咬过的：不写 height 会被压成 40（内容 44 被挤掉 4），
+ * 不关掉 `button:hover` 的无内边距底色，hover 会贴着文字铺一整条（用户原话「这块的 hover 样式也有问题」）。
+ * 与工具管理列表同一套做法：底色交给 `::before`，左右各外扩 12px、上下各内收 2px。
+ */
+.itemRow { position: relative; width: 100%; height: auto; display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 12px; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+.itemRow::before { content: ''; position: absolute; inset: 2px -12px; border-radius: var(--radius-sm); background: transparent; transition: background var(--motion-hover); }
+.itemRow:hover::before { background: var(--bg-hover); }
+.itemRow:hover:not(:disabled) { background: none; }
+.itemRow > * { position: relative; }
+.itemRow:hover .itemTitle { color: var(--accent); }
+.itemTitle { font-size: var(--font-size-label); line-height: var(--line-height-label); }
+.itemMeta { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.more { margin-top: 16px; }
+
+.repoGrid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+/* height: auto 与 justify-* 同样是为了绕开全局 button 的固定高度与居中对齐：
+   仓库卡片是多行内容，被全局规则接管会压扁行、并把单列 track 居中。
+   同一行内等高交给 grid 容器的默认 stretch。 */
+.repoCard { width: 100%; height: auto; min-height: 100%; display: grid; gap: 6px; padding: 16px;
+  justify-content: stretch; justify-items: stretch; align-content: start;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); color: inherit; text-align: left; cursor: pointer; }
+.repoCard:hover { border-color: var(--accent-border); }
+.repoName { font-family: var(--font-mono); font-size: var(--font-size-label); line-height: var(--line-height-label); }
+.repoStars { font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--status-warning); }
+.repoSummary { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+.schedule { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
+.addRow select, .addRow input { height: var(--control-height); padding: 0 10px; border: 1px solid var(--border-field); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-primary); font-size: var(--font-size-label); }
+.sourceList { list-style: none; margin: 12px 0 0; padding: 0; }
+.sourceList > li { border-top: 1px solid var(--border-subtle); }
+.sourceList > li:first-child { border-top: 0; }
+.sourceRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 14px 12px; }
+.sourceMain { display: grid; gap: 4px; min-width: 0; }
+.sourceLabel { display: inline-flex; align-items: center; gap: 8px; font-size: var(--font-size-label); line-height: var(--line-height-label); font-weight: 500; }
+.builtinTag { padding: 1px 8px; border-radius: var(--radius-pill); background: var(--bg-elevated); color: var(--text-muted); font-size: var(--font-size-caption); line-height: 18px; font-weight: 400; }
+.sourceUrl { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
+.sourceMeta { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.sourceActions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.addRow { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.addRow label { display: grid; gap: 8px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
+.grow { flex: 1 1 220px; min-width: 200px; }
+.grow input { width: 100%; }
+.spin { animation: content-spin 900ms linear infinite; }
+@keyframes content-spin { to { transform: rotate(360deg); } }

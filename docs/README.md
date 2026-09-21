@@ -25,16 +25,21 @@
 | [Codex 可行性](research/02-codex-feasibility.md) | 菜单接入、字段边界、证据等级与验证门槛 |
 | [桌面壳选型复审](research/03-desktop-shell-decision.md) | 星算助手迁移反馈、Tauri/Electron 对比、内嵌浏览器边界与切换条件 |
 | [DSH Desktop 补充调研](research/04-dsh-reference.md) | Electron 实际用法、本地界面与网站浏览器的区别、窗口/平台/恢复设计 |
+| [星算助手三板块拆解](research/05-xingsuan-tools-plugins-content.md) | 1.6.6 的工具管理 / 插件中心 / 内容中心怎么实现：清单 schema、云端端点、本地落盘与边界 |
 | [总体架构](architecture/01-system-architecture.md) | 技术选型、模块、进程和架构决策 |
 | [配置与应用事务](architecture/02-configuration-lifecycle.md) | 配置优先级、差异预览、原子写入、回滚、冲突 |
 | [网关与协议](architecture/03-gateway-and-protocols.md) | 路由、流式响应、工具调用、输出限制、重试 |
 | [数据与接口](architecture/04-data-and-contracts.md) | 实体、关系、IPC、事件和错误契约 |
 | [安全与跨平台](architecture/05-security-and-platforms.md) | Keychain、Windows 凭据、进程、安装与更新 |
+| [应用内更新](architecture/06-updates.md) | 侧栏更新按钮、更新源与清单、两套签名、失败面、发布步骤与验收；**已实现** |
+| [更新弹窗版面审计](audits/2026-09-21-update-dialog-design-conformance.md) | 两套主题 + 最小窗口实测：第一版五处版面问题与修法、复测数字、未验证项 |
 | [视觉系统](design/01-foundations.md) | 色彩、布局、间距、尺寸、动效与主题 |
 | [图标、字体与文案](design/02-icons-type-and-copy.md) | Lucide 映射、字阶、品牌图标、状态文案 |
 | [组件规范](design/03-components.md) | 基础组件与业务组件的状态和交互 |
 | [页面与流程](design/04-pages-and-flows.md) | 页面结构、线框、操作、校验、空态与异常 |
 | [模板与交互规则](design/05-patterns-and-accessibility.md) | 页面模板、系统交互、键盘与无障碍 |
+| [工具管理、插件中心与内容中心](design/06-tool-hub-plugin-hub-and-content-center.md) | 三个新板块的范围、页面、数据模型、抓取策略、安全约束与分批验收；**批次 A + C 已实现** |
+| [扩展板块设计规范审计](audits/2026-09-21-extension-pages-design-conformance.md) | 三轮实测：几何/对比度/点击目标/键盘、配色「更清爽」的取值依据、三处版面重做 |
 | [开发计划](development/01-implementation-plan.md) | 分期、任务、依赖、产物与工期估算 |
 | [测试与发布](development/02-testing-and-release.md) | 兼容实验、协议测试、双平台验收与发布门禁 |
 | [证据索引](appendix/01-source-index.md) | 仓库 SHA、源码定位、本地证据与调研边界 |
@@ -46,6 +51,9 @@
 - 追加固定 DSH Desktop 快照，阅读桌面壳、视图、导航、preload、平台与恢复代码；修订桌面壳边界，未运行该项目。
 - 查看 `referimg/` 中全部 9 张截图；只提取界面结构，不将截图中的会话内容和供应商凭据写入文档。
 - 只读查看已安装星算助手的模型中心、添加模型表单和 Codex 工具配置；检查安装包中的程序结构与相关前端调用。
+- 2026-09-21 追加只读拆解本机星算助手 **1.6.6**：工具清单（52 份 `paths.json`/`config.json`）、插件安装的 IPC 与落盘形态（`SKILL.md` + 归属标记）、内容中心的云端端点与 localStorage 快照策略。未登录账号、未执行任何安装命令、未改动被检查的文件。见 [三板块拆解](research/05-xingsuan-tools-plugins-content.md)。
+- 2026-09-21 实现扩展板块的**批次 A（工具管理只读 + 插件中心）与批次 C（内容中心）**：随包工具清单与探测、技能的公开源安装与按清单卸载、RSS 与 GitHub 搜索的本地快照与退避抓取。批次 B（替用户安装第三方工具）按设计文档决定 1 未做。
+- 2026-09-21 追加界面两轮：侧栏分组与页签统一（分段控件）、待应用入口从「跨页吸底」改为「网关页页头下方一条」、工具管理页重做、配色一轮「更清爽」（浅色蓝/绿与深色灰阶，全部按 AA 实测算出）。
 - 核对官方配置文档、上游 schema，以及本机 Codex 二进制生成的 app-server schema。
 - 输出需求、技术、设计、实施、验收和证据文档。未创建应用工程，未切换模型、调用供应商 API、读取完整密钥或修改现有 Codex 配置。
 

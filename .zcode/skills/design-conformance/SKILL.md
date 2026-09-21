@@ -27,10 +27,15 @@ description: 用实测数据（而不是凭印象）核对 Switchelp 的界面�
 2. 视觉夹具在 `http://localhost:5173/visual.html`，用合成数据渲染真实界面，不碰真配置。
    - `?view=onboarding` 走首次接入向导
    - `?view=codex` 直接进 Codex 配置页
+   - `?view=settings` 直接进设置页（其余页面见 `src/dev/visual-fixture.tsx` 的 `initialPage`）
    - 主题用夹具的 `?theme=light|dark`
    - **注意**：只在 query 上变化的 `goto` 可能不触发重新加载（同文档导航），主题参数
      会看起来没生效。可靠做法是直接写 `document.documentElement.dataset.theme`——样式
      完全由这个属性驱动，两种主题都能量。
+   - **设置页是例外**：它挂载时会 `applyTheme(readThemePreference())`，把 `?theme=` 的值
+     覆盖回 localStorage 里存的偏好。要量浅色的设置页，先写
+     `localStorage.setItem('gptswitch.theme','light')` 再加载（量完恢复原值）；
+     否则会拿到「页面其实是深色」的假数据。
 3. 浏览器操作用 `browser-use:control-browser` 技能（`mcp__node_repl__js`）。
 4. **切主题之后必须等过渡走完再测量**。`--motion-hover` 是 100ms、抽屉 180ms，背景色是
    过渡属性：在过渡中间读 `getComputedStyle` 会拿到插值中的颜色，于是同一个页面的对比度
@@ -81,6 +86,11 @@ overflow 裁掉）。
 `--text-muted` 放在 `--bg-surface` 上合格、放在 `--bg-selected` 上就不合格。
 
 判定线：正文 4.5:1；≥24px 或 ≥18.66px 且粗体 3:1（WCAG AA）。
+
+**一条已登记的例外**：表单控件的**静息态**描边（`--border-field`，深色 2.24 / 浅色 2.31）低于
+「需要识别的控件边界 3:1」，这是 2026-09-21 的产品决定，理由与复查方式写在
+[docs/development/02-testing-and-release.md](../../../docs/development/02-testing-and-release.md) 的
+可访问性一节。它低于线，但**按例外处理，不要报成不合格项**；悬停（4.27 / 4.42）与焦点环照旧要在线上。
 
 点击目标：规范要求图标点击区 ≥32×32、紧凑控件高 32、标准 40。
 
