@@ -17,6 +17,15 @@ use switch_core::{
     gateway::Gateway,
 };
 
+/// 启动时的两个「可能失败」的装配结果。
+///
+/// 放在一个结构里而不是给 `new` 加参数：这两件事的失败都不致命（状态里保留原因、
+/// 界面照实显示），把它们并成一个入参也让调用点的意图更清楚——启动装配有哪些可选项。
+pub struct StartupParts {
+    pub gateway: Result<Arc<Gateway>, CoreError>,
+    pub bridge: Result<PathBuf, CoreError>,
+}
+
 /// 一次进程生命周期内共享的壳状态。
 pub struct DesktopState {
     pub workspace: Arc<WorkspaceService>,
@@ -30,6 +39,9 @@ pub struct DesktopState {
     /// 界面必须看到“网关没起来”，而不是看到一个空状态。
     gateway: Option<Arc<Gateway>>,
     gateway_error: Option<String>,
+    /// 随包分发的 bridge 有没有装好。失败原因单独保留：共存模式必须能如实说出
+    /// 「为什么打不开」，而不是显示一个点了没反应的开关。
+    bridge: Result<PathBuf, String>,
     /// 与网关共享的诊断日志：网关写、界面读。
     diagnostics: Arc<DiagnosticLog>,
     /// 连接与模型探测。持可取消集合，跨命令保持同一个实例。
@@ -51,11 +63,11 @@ impl DesktopState {
         apply: Arc<ApplyService>,
         home: PathBuf,
         app_data_dir: PathBuf,
-        gateway: Result<Arc<Gateway>, CoreError>,
+        parts: StartupParts,
         diagnostics: Arc<DiagnosticLog>,
         backups: Arc<BackupStore>,
     ) -> Self {
-        let (gateway, gateway_error) = match gateway {
+        let (gateway, gateway_error) = match parts.gateway {
             Ok(gateway) => (Some(gateway), None),
             Err(error) => (
                 None,
@@ -68,6 +80,13 @@ impl DesktopState {
                 ),
             ),
         };
+        let bridge = parts.bridge.map_err(|error| {
+            error
+                .safe_details
+                .first()
+                .cloned()
+                .unwrap_or_else(|| error.message_key.clone())
+        });
         Self {
             workspace,
             apply,
@@ -76,10 +95,16 @@ impl DesktopState {
             instances: Mutex::new(Vec::new()),
             gateway,
             gateway_error,
+            bridge,
             diagnostics,
             probes: Arc::new(Probes::new()),
             backups,
         }
+    }
+
+    /// 应用数据目录。托管 profile、bridge 与备份都在这儿。
+    pub fn app_data_dir(&self) -> PathBuf {
+        self.app_data_dir.clone()
     }
 
     /// 诊断包输出目录。
@@ -105,6 +130,11 @@ impl DesktopState {
 
     pub fn gateway_error(&self) -> Option<&str> {
         self.gateway_error.as_deref()
+    }
+
+    /// 已安装的 bridge 路径；没装成时给出原因。
+    pub fn bridge(&self) -> Result<&PathBuf, &str> {
+        self.bridge.as_ref().map_err(String::as_str)
     }
 
     /// 只读检测可用实例。显式路径优先，其余走平台候选。

@@ -7,7 +7,7 @@ use crate::domain::error::CoreError;
 use serde::{Deserialize, Serialize};
 
 /// 当前期望的 schema 版本。
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 /// 一次 migration 步骤。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,11 +19,23 @@ pub struct SchemaVersion {
 }
 
 /// 内置 migration 序列。追加新版本时只能往后加，不能改写历史步骤。
-pub const MIGRATIONS: [SchemaVersion; 1] = [SchemaVersion {
-    from: 0,
-    to: 1,
-    description: "初始实体表：providers / credentials / models / revisions / operations",
-}];
+pub const MIGRATIONS: [SchemaVersion; 3] = [
+    SchemaVersion {
+        from: 0,
+        to: 1,
+        description: "初始实体表：providers / credentials / models / revisions / operations",
+    },
+    SchemaVersion {
+        from: 1,
+        to: 2,
+        description: "模型显示名补上供应商前缀：扁平菜单里跨供应商的同名模型要能区分",
+    },
+    SchemaVersion {
+        from: 2,
+        to: 3,
+        description: "应用设置表：共存模式（Bridge）之类的应用级开关",
+    },
+];
 
 /// 依次应用 migration，返回最终版本。
 ///
@@ -68,7 +80,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(version, CURRENT_SCHEMA_VERSION);
-        assert_eq!(applied, vec![1]);
+        assert_eq!(applied, vec![1, 2, 3]);
     }
 
     #[test]

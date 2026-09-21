@@ -46,15 +46,18 @@
 - 受约束的同供应商 Key 故障切换；不跨供应商自动发送内容。
 - 批量模型编辑、配置模板、加密导入导出、托盘快捷启用。
 - Anthropic Messages 等独立协议适配，按真实工具测试逐个开放。
-- 官方订阅模型与自定义模型同一菜单共存的 Desktop Bridge：**2026-09-20 已选定为当前实现路线**，不再是待选项。硬约束是「菜单里能选」与「请求真能路由」必须一起上——原生 slug 走本机网关会被按别名准入的网关拒绝，先出菜单就成了「能选、一发就失败」，比不做更糟。
-  已实测的接入点：桌面端用 `CODEX_CLI_PATH` 指向的 CLI 顶替内置 codex（`app.asar` 内 `fi({rawValue: e.CODEX_CLI_PATH}) ?? di({...resourcesPath, 'codex'})`），注入用 `open --env`（不改签名包），宿主与被注入的 CLI 走 stdio 上的 app-server。探针已确认宿主真的会调用它：argv `-c features.code_mode_host=true app-server --analytics-default-enabled -c plugins…enabled=true`，400 条 JSON-RPC 事件、0 报错。
-  **不做分组**：扁平排列、原生在前即可；顺序由目录条目的 `priority` 决定（条目字段里没有分组字段）。
+- 官方订阅模型与自定义模型同一菜单共存的 Desktop Bridge：**已实现**（`crates/bridge` + `codex/coexist.rs`，装配与验收见 [测试与发布](development/02-testing-and-release.md) 的共存模式一节）。硬约束是「菜单里能选」与「请求真能路由」必须一起上——原生 slug 走本机网关会被按别名准入的网关拒绝，先出菜单就成了「能选、一发就失败」，比不做更糟。
+  接入点：桌面端用 `CODEX_CLI_PATH` 指向的 CLI 顶替内置 codex（`app.asar` 内 `fi({rawValue: e.CODEX_CLI_PATH}) ?? di({...resourcesPath, 'codex'})`），注入用 `open --env`（不改签名包），宿主与被注入的 CLI 走 stdio 上的 app-server。探针已确认宿主真的会调用它：argv `-c features.code_mode_host=true app-server --analytics-default-enabled -c plugins…enabled=true`，400 条 JSON-RPC 事件、0 报错。
+  实现形态：bridge 起两根 codex（原生那根读用户真实的 `~/.codex`，托管那根读应用数据目录里的第二个 `CODEX_HOME`），合并 `model/list` 与 `thread/list`，并按线程把会话钉在对应那根上。**不做分组**：扁平排列、原生在前。
+  已知边界（都写在界面上，不靠用户猜）：① 只在 macOS 装配完整；② 共存靠「我们启动宿主时注入环境」生效，用户自己从 Dock 重开 Codex 会回到纯原生，界面照实显示并可一键重启回到共存；③ 托管 profile 的底子（插件、项目信任等）是开启时复制的一份快照，之后原生配置的改动要用「从原生配置重新同步」手动带过去。
 - macOS Intel 支持，以目标 Codex 可用版本为前提；Windows ARM64 单独评估。
 - 在宿主确实传递相应附件时，加入显式 PDF 转换/图像降级策略。
 
 ### 当前不做
 
-官方账号轮换、OAuth 订阅导入、语音栏、GPT-Live、子智能体调度、会话迁移/删除、插件市场、远程控制、局域网网关、云同步、平台充值与价格商城。参考产品存在这些功能，不构成本项目范围。
+官方账号轮换、OAuth 订阅导入、语音栏、GPT-Live、子智能体调度、会话迁移/删除、远程控制、局域网网关、云同步、平台充值与价格商城。参考产品存在这些功能，不构成本项目范围。
+
+「插件市场」原列在此处，含义是**云端目录 + 账号体系 + 人工运营内容**，这一条继续不做。2026-09-21 起新增一个不同性质的范围提案：从**公开源**（GitHub 仓库）安装 `SKILL.md` 技能到本机 agent 工作台、只读展示本机已装工具与 CLI、以及抓取公开 RSS 与 GitHub 搜索 API 做本地资讯快照。详见 [工具管理、插件中心与内容中心](design/06-tool-hub-plugin-hub-and-content-center.md)，**该文档处于待确认状态，未确认前不作为需求生效**。
 
 当前范围未包含内嵌浏览器；供应商官网、帮助等链接默认交给系统浏览器。若后续明确需要高频内嵌控制台、多标签、独立网页登录会话，应在 G1 前按 [桌面壳复审](research/03-desktop-shell-decision.md) 调整技术选型、验收和工期。模型的图像/视频/PDF 能力配置不等于本工具需要内置浏览器。
 

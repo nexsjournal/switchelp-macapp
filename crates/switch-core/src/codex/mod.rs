@@ -4,6 +4,7 @@
 
 pub mod backup;
 pub mod catalog;
+pub mod coexist;
 pub mod config;
 pub mod detect;
 pub mod plan;

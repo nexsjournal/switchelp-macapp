@@ -10,6 +10,19 @@ export const instance: CodexInstance = { id: 'inst_test', appPath: '/Application
   desktopVersion: null, cliVersion: null, configRoot: '/tmp/gptswitch-test/.codex', configFile: '/tmp/gptswitch-test/.codex/config.toml',
   configExists: true, startupMode: 'not_running', compatibility: 'unverified', fingerprint: {}, conflictingManagers: [], blockedReasonKey: null };
 
+/** 共存模式关闭时的状态。测试要用开启状态时自己覆盖字段。 */
+export const coexistOff = {
+  enabled: false,
+  bridgeReady: true,
+  bridgeDetail: null,
+  bridgePath: '/tmp/gptswitch-test/bin/gptswitch-bridge',
+  managedHome: '/tmp/gptswitch-test/codex-home',
+  managedConfigExists: false,
+  hostUnderBridge: null,
+  ready: true,
+  blockedReason: null,
+};
+
 /** 与应用/还原无关的字段保持默认，测试只声明自己关心的差异。 */
 export function plan(changes: FieldChange[], overrides: Partial<ApplyPlan> = {}): ApplyPlan {
   return { id: 'plan_test', instanceId: 'inst_test', revisionId: 'rev_test', planHash: 'hash_test',
@@ -55,6 +68,10 @@ export function testClient(overrides: Partial<DesktopClient> = {}): DesktopClien
     startProbe: failing(),
     cancelProbe: failing(),
     inspectConfig: failing(),
+    // 共存模式默认关：绝大多数测试跑的是「替换菜单」这条老路。
+    coexistStatus: vi.fn().mockResolvedValue(coexistOff),
+    setCoexist: failing(),
+    resyncCoexist: failing(),
     planApply: failing(),
     executeApply: failing(),
     applyStatus: failing(),

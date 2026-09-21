@@ -391,6 +391,67 @@ impl Model {
     }
 }
 
+/// 供应商限定名的分隔符，形如 `qiyuan/deepseek-v4.1`。
+pub const PROVIDER_QUALIFIER: char = '/';
+
+/// 前缀自身的长度上限：前缀不能长到把模型名挤没。
+pub const PROVIDER_QUALIFIER_MAX: usize = 32;
+
+/// 目录里展示的模型名：`供应商/模型名`。
+///
+/// Codex 的模型菜单是**一份扁平列表**：原生模型与每个供应商的模型排在同一列里。
+/// 不带前缀时，两家供应商下的同名模型在菜单里长得一模一样，选错只会表现为
+/// 「请求打到了别家」，而用户没有任何线索。前缀就是这条线索。
+///
+/// 幂等：已经带当前前缀的名字原样返回，重复发现、重复保存不会叠成 `qiyuan/qiyuan/x`。
+/// 供应商名为空时不做限定——宁可少一个前缀，也不要写出 `/模型名` 这种名字。
+pub fn qualified_display_name(provider_name: &str, model_name: &str) -> String {
+    let model_name = model_name.trim();
+    let provider = provider_qualifier(provider_name);
+    if provider.is_empty() || model_name.is_empty() {
+        return model_name.to_owned();
+    }
+    let prefix = format!("{provider}{PROVIDER_QUALIFIER}");
+    if model_name.starts_with(&prefix) {
+        return model_name.to_owned();
+    }
+    let qualified: String = format!("{prefix}{model_name}");
+    if qualified.chars().count() <= Model::DISPLAY_NAME_MAX {
+        return qualified;
+    }
+    qualified.chars().take(Model::DISPLAY_NAME_MAX).collect()
+}
+
+/// 去掉一次前缀：供应商改名时用它取出模型自己的名字。
+///
+/// 前缀不匹配就原样返回——宁可少剥一层，也不要剥掉用户自己写进名字里的斜杠。
+pub fn strip_provider_qualifier<'a>(provider_name: &str, model_name: &'a str) -> &'a str {
+    let provider = provider_qualifier(provider_name);
+    if provider.is_empty() {
+        return model_name;
+    }
+    model_name
+        .strip_prefix(&format!("{provider}{PROVIDER_QUALIFIER}"))
+        .unwrap_or(model_name)
+}
+
+/// 前缀里不能出现分隔符本身或控制字符：`a/b` 会让「去掉一层前缀」变成猜谜。
+fn provider_qualifier(name: &str) -> String {
+    let cleaned: String = name
+        .trim()
+        .chars()
+        .map(|c| {
+            if c == PROVIDER_QUALIFIER || c.is_control() {
+                '-'
+            } else {
+                c
+            }
+        })
+        .take(PROVIDER_QUALIFIER_MAX)
+        .collect();
+    cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 fn validate_upstream_id(value: &str) -> Result<(), CoreError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -432,6 +493,70 @@ mod tests {
             "2026-09-18T00:00:00Z",
         )
         .unwrap()
+    }
+
+    #[test]
+    fn qualifies_display_name_with_provider() {
+        assert_eq!(
+            qualified_display_name("qiyuan", "deepseek-v4.1"),
+            "qiyuan/deepseek-v4.1"
+        );
+    }
+
+    #[test]
+    fn qualifying_is_idempotent() {
+        let once = qualified_display_name("qiyuan", "deepseek-v4.1");
+        assert_eq!(qualified_display_name("qiyuan", &once), once);
+    }
+
+    #[test]
+    fn qualifying_skips_empty_provider_or_name() {
+        assert_eq!(qualified_display_name("", "deepseek-v4.1"), "deepseek-v4.1");
+        assert_eq!(
+            qualified_display_name("   ", "deepseek-v4.1"),
+            "deepseek-v4.1"
+        );
+        assert_eq!(qualified_display_name("qiyuan", "  "), "");
+        // 上游名字里本来就有斜杠时不能被当成已有前缀。
+        assert_eq!(
+            qualified_display_name("qiyuan", "vendor/model"),
+            "qiyuan/vendor/model"
+        );
+    }
+
+    #[test]
+    fn qualifier_keeps_slashes_out_of_the_prefix() {
+        // 前缀里混进分隔符后，「去掉一层前缀」就无从判断。
+        assert_eq!(
+            qualified_display_name("a/b", "m"),
+            "a-b/m",
+            "供应商名里的斜杠要换掉"
+        );
+        assert_eq!(strip_provider_qualifier("a/b", "a-b/m"), "m");
+    }
+
+    #[test]
+    fn strips_only_the_matching_prefix() {
+        assert_eq!(
+            strip_provider_qualifier("qiyuan", "qiyuan/deepseek-v4.1"),
+            "deepseek-v4.1"
+        );
+        assert_eq!(
+            strip_provider_qualifier("qiyuan", "other/deepseek-v4.1"),
+            "other/deepseek-v4.1"
+        );
+        assert_eq!(
+            strip_provider_qualifier("", "deepseek-v4.1"),
+            "deepseek-v4.1"
+        );
+    }
+
+    #[test]
+    fn qualifying_respects_display_name_limit() {
+        let long = "x".repeat(Model::DISPLAY_NAME_MAX);
+        let qualified = qualified_display_name("qiyuan", &long);
+        assert_eq!(qualified.chars().count(), Model::DISPLAY_NAME_MAX);
+        assert!(qualified.starts_with("qiyuan/"));
     }
 
     #[test]

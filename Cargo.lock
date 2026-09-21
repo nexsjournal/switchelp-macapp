@@ -1201,6 +1201,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gptswitch-bridge"
+version = "0.2.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "gtk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

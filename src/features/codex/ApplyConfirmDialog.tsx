@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { AlertTriangle, Replace } from 'lucide-react';
+import { AlertTriangle, Layers, Replace } from 'lucide-react';
 import type { ApplyPlan, FieldChange, Model } from '@/contracts/types';
 import { Dialog } from '@/components/Dialog';
 import styles from './ApplyConfirmDialog.module.css';
@@ -71,7 +71,7 @@ function warningOf(raw: string): { label: string; detail: string } {
  * 为什么是模态：以前这块渲染在页面操作行**之下**，用户点完按钮不往下滚就看不到确认入口，
  * 于是以为操作没生效（真机上就发生过：点完「还原」又去点了「重启 Codex」）。
  */
-export function ApplyConfirmDialog({ plan, kind, busy, error, commitLabel, models, onConfirm, onClose }: {
+export function ApplyConfirmDialog({ plan, kind, busy, error, commitLabel, models, coexist, onConfirm, onClose }: {
   plan: ApplyPlan;
   kind: 'apply' | 'restore';
   busy: boolean;
@@ -79,6 +79,8 @@ export function ApplyConfirmDialog({ plan, kind, busy, error, commitLabel, model
   commitLabel: string;
   /** 用来把别名翻成人看的名字。拿不到就退回别名本身——别名也比什么都不说强。 */
   models?: Model[];
+  /** 共存模式：这次发布进的是托管 profile，菜单是**合并**而不是替换。 */
+  coexist?: boolean;
   onConfirm: () => void;
   onClose: () => void;
 }) {
@@ -96,7 +98,7 @@ export function ApplyConfirmDialog({ plan, kind, busy, error, commitLabel, model
     () => plan.catalogAliases.map(alias => models?.find(model => model.catalogAlias === alias)?.displayName ?? alias),
     [plan.catalogAliases, models],
   );
-  const replacesCatalog = kind === 'apply' && published.length > 0;
+  const replacesCatalog = kind === 'apply' && published.length > 0 && !coexist;
 
   return <Dialog width="wide" busy={busy}
     title={kind === 'apply' ? t('codex.diffTitleApply') : t('codex.diffTitleRestore')}
@@ -113,6 +115,15 @@ export function ApplyConfirmDialog({ plan, kind, busy, error, commitLabel, model
     </footer>}>
     <div className="form-fields">
       <p className="field-hint">{t('codex.targetFile')}<span className="text-mono break-anywhere">{plan.configPath}</span></p>
+      {coexist && kind === 'apply' && published.length > 0 && <div className={styles.replaces} role="note">
+        <Layers size={14} aria-hidden="true" />
+        <div>
+          <strong>{t('codex.coexistTitle')}</strong>
+          <p>{t('codex.coexistBody')}</p>
+          <p className="text-muted">{t('codex.catalogReplacesList', { count: published.length })}</p>
+          <ul>{published.map(name => <li key={name}>{name}</li>)}</ul>
+        </div>
+      </div>}
       {replacesCatalog && <div className={styles.replaces} role="note">
         <Replace size={14} aria-hidden="true" />
         <div>

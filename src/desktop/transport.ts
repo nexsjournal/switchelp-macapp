@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { ApplyPlan, CodexInstance, Credential, DiagnosticEvent, Model, ProbeResult, Provider } from '@/contracts/types';
-import type { AppliedSummary, ApplyStatus, BackupEntry, DesktopClient, GatewayReport, HostRestart, InspectResult, DiagnosticsPreview, PlatformReport, UpdateReport } from './client';
+import type { AppliedSummary, ApplyStatus, BackupEntry, CoexistState, DesktopClient, GatewayReport, HostRestart, InspectResult, DiagnosticsPreview, PlatformReport, UpdateReport } from './client';
 import type { DiscoveredModel } from './client';
 import { t } from '@/i18n';
 
@@ -63,6 +63,9 @@ export const desktopClient: DesktopClient = {
   restartHost: instanceId => call<HostRestart>('host_restart', { instanceId }),
   planRestore: instanceId => call<ApplyPlan>('restore_plan', { instanceId }),
   executeRestore: request => call<ExecuteResult>('restore_execute', { planId: request.planId, planHash: request.planHash, idempotencyKey: request.idempotencyKey }),
+  coexistStatus: instanceId => call<CoexistState>('coexist_status', { instanceId }),
+  setCoexist: (instanceId, enabled) => call<CoexistState>('coexist_set', { instanceId, enabled }),
+  resyncCoexist: instanceId => call<CoexistState>('coexist_resync', { instanceId }),
   async listDiagnostics(filter) {
     const result = await call<{ items: DiagnosticEvent[]; nextCursor: string | null }>('diagnostics_list', { level: filter?.level ?? null });
     return result;

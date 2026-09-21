@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, FileSearch, History, RefreshCw, SlidersHorizontal } from 'lucide-react';
+import { CheckCircle2, FileSearch, History, Layers, RefreshCw, SlidersHorizontal } from 'lucide-react';
 import type { ApplyPlan, ApplyStage, CodexInstance, Model } from '@/contracts/types';
-import { isCoreError, type AppliedSummary, type ApplyStatus, type DesktopClient, type InspectResult, toCoreError } from '@/desktop/client';
+import { isCoreError, type AppliedSummary, type ApplyStatus, type CoexistState, type DesktopClient, type InspectResult, toCoreError } from '@/desktop/client';
 
 import { Dialog } from '@/components/Dialog';
 import { ApplyConfirmDialog } from './ApplyConfirmDialog';
@@ -60,6 +60,8 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
   /** 核心给出的恢复动作；界面只呈现自己确实能执行的那些。 */
   const [recovery, setRecovery] = useState<string[]>([]);
   const [restartConfirm, setRestartConfirm] = useState(false);
+  /** 共存模式的状态。`enabled` 是意图，`hostUnderBridge` 是事实。 */
+  const [coexist, setCoexist] = useState<CoexistState | null>(null);
 
   const fail = useCallback((thrown: unknown, fallback: string) => {
     const normalized = toCoreError(thrown);
@@ -79,6 +81,16 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
   }, [client, fail]);
 
   useEffect(() => { void detect(); }, [detect]);
+
+  // 共存状态跟着实例走：换了实例要重新问一次，否则会显示上一个实例的答案。
+  useEffect(() => {
+    if (!instanceId) { setCoexist(null); return; }
+    let alive = true;
+    client.coexistStatus(instanceId)
+      .then(next => { if (alive) setCoexist(next); })
+      .catch(() => { if (alive) setCoexist(null); });
+    return () => { alive = false; };
+  }, [client, instanceId]);
 
   const selected = instances.find(instance => instance.id === instanceId);
   const stage = status?.events.at(-1)?.phase ?? null;
@@ -197,6 +209,38 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
     showToast(restartNotice(report, false), restartTone(report));
   });
 
+  /**
+   * 开/关共存模式。
+   *
+   * 开启之后必须再走一次「发布」：模型要写进托管 profile，宿主也得带着 bridge 起来。
+   * 所以开启成功就直接接着生成计划（差异弹窗会让用户看清这次要写什么），
+   * 关闭则要立刻重启宿主——不重启的话，正在运行的那个宿主还挂在 bridge 上。
+   */
+  const toggleCoexist = (enabled: boolean) => run(enabled ? 'coexist-on' : 'coexist-off', async () => {
+    const next = await client.setCoexist(instanceId, enabled);
+    setCoexist(next);
+    if (enabled) {
+      showToast(t('codex.coexistEnabledThenApply'), 'info');
+      await makePlan('apply');
+      return;
+    }
+    const report = await client.restartHost(instanceId).catch(() => null);
+    showToast(`${t('codex.coexistDisabledToast')} ${restartNotice(report, false)}`, restartTone(report));
+  });
+
+  /**
+   * 用当前的原生配置重建托管 profile 的底子，然后重新发布一次。
+   *
+   * 「底子」是开启共存时复制的那一份快照：用户在原生配置里加了插件/项目信任之后，
+   * 想让走我们模型的那些会话也带上，就得重新复制一次。
+   */
+  const resyncCoexist = () => run('coexist-resync', async () => {
+    const next = await client.resyncCoexist(instanceId);
+    setCoexist(next);
+    showToast(t('codex.coexistResynced'), 'info');
+    await makePlan('apply');
+  });
+
   const confirmReload = (loaded: boolean) => run('confirm', async () => {
     if (!status) return;
     setStatus(await client.confirmReload(status.operationId, loaded));
@@ -243,6 +287,60 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
       </div>
     </div>}
 
+    {/*
+      共存模式的开关放在实例卡**之前**：它决定「应用」把模型写到哪里（用户的
+      ~/.codex 还是应用数据目录里的托管 profile），而不是一个附属设置。
+    */}
+    <section className={styles.card}>
+      <div className={styles.header}>
+        <div>
+          <Layers size={18} /><h2>{t('codex.coexistHeading')}</h2>
+          {/* 语义色沿用既有约定：达成用户所要的状态用成功色，未开启保持中性。 */}
+          {coexist && <span className={`badge${coexist.enabled ? ' success' : ''}`}>
+            {coexist.enabled ? t('codex.coexistOn') : t('codex.coexistOff')}
+          </span>}
+        </div>
+        <div className={styles.actions}>
+          {coexist?.enabled && <button className="text-button" disabled={busy === 'coexist-resync' || busy === 'plan'}
+            onClick={() => void resyncCoexist()}>
+            <RefreshCw size={14} />{t('codex.coexistResync')}
+          </button>}
+          <button
+            className={coexist?.enabled ? '' : 'primary'}
+            disabled={!instanceId || !coexist || busy.startsWith('coexist-') || (!coexist.enabled && !coexist.ready)}
+            onClick={() => void toggleCoexist(!(coexist?.enabled ?? false))}>
+            {busy === 'coexist-on' ? t('codex.detecting') : busy === 'coexist-off'
+              ? t('codex.restarting')
+              : coexist?.enabled ? t('codex.coexistDisable') : t('codex.coexistEnable')}
+          </button>
+        </div>
+      </div>
+      <p className={styles.subtle}>{t('codex.coexistIntro')}</p>
+      {coexist && <>
+        <dl className={styles.details}>
+          <dt>{t('codex.coexistBridge')}</dt>
+          <dd className="text-mono break-anywhere">
+            {coexist.bridgeReady
+              ? coexist.bridgePath
+              : coexist.bridgeDetail && (() => { const label = t(coexist.bridgeDetail!); return label === coexist.bridgeDetail ? coexist.bridgeDetail : label; })()}
+          </dd>
+          <dt>{t('codex.coexistManagedHome')}</dt>
+          <dd className="text-mono break-anywhere">{coexist.managedHome}</dd>
+        </dl>
+        <p className={styles.subtle}>{t('codex.coexistResyncNote')}</p>
+        {/* 事实行：宿主到底有没有跑在 bridge 上。意图与事实分开说，不给含糊话。 */}
+        {coexist.enabled && <p className={styles.subtle}>
+          {coexist.hostUnderBridge === true ? t('codex.coexistFactRunning')
+            : coexist.hostUnderBridge === false ? t('codex.coexistFactStale')
+            : t('codex.coexistFactUnknown')}
+        </p>}
+        {!coexist.ready && coexist.blockedReason && <p className={styles.subtle}>{t('codex.coexistBlocked', {
+          // 核心给的是 messageKey；翻不出来就原样显示，绝不把 key 当成理由摆出来。
+          reason: t(coexist.blockedReason) === coexist.blockedReason ? coexist.blockedReason : t(coexist.blockedReason),
+        })}</p>}
+      </>}
+    </section>
+
     <section className={styles.card}>
       <div className={styles.header}>
         <div><SlidersHorizontal size={18} /><h2>{t('codex.instances')}</h2></div>
@@ -281,7 +379,10 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
       <div className={styles.actions} style={{ marginTop: 20 }}>
         <button onClick={loadInspect} disabled={!instanceId || busy === 'inspect'}>{t('codex.checkConfig')}</button>
         <button className="primary" onClick={() => void makePlan('apply')} disabled={!instanceId || busy === 'plan'}>{t('action.applyToCodex')}</button>
-        <button onClick={() => void makePlan('restore')} disabled={!instanceId || busy === 'plan'}><History size={16} />{t('action.restorePrevious')}</button>
+        <button onClick={() => void makePlan('restore')} disabled={!instanceId || busy === 'plan' || (coexist?.enabled ?? false)}
+          title={coexist?.enabled ? t('codex.coexistRestoreHint') : undefined}>
+          <History size={16} />{t('action.restorePrevious')}
+        </button>
         <button onClick={() => setRestartConfirm(true)} disabled={!instanceId || busy === 'restart'}><RefreshCw size={14} />{t('action.restartHost')}</button>
       </div>
       {/*
@@ -289,6 +390,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
         按钮本身不禁用：模型列表可能还没加载完，禁用会造成「明明有模型却点不动」。
       */}
       {applicableCount === 0 && <p className={styles.subtle}>{t('codex.noApplicableModels')}</p>}
+      {coexist?.enabled && <p className={styles.subtle}>{t('codex.coexistRestoreHint')}</p>}
     </section>
 
     {inspect && <section className={styles.card}>
@@ -303,7 +405,7 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
 
     {/* 差异与确认复用一个组件：待应用条走的是同一套「看得清才让写」的流程。 */}
     {draft && <ApplyConfirmDialog plan={draft.plan} kind={draft.kind} busy={busy === 'commit'} error={error}
-      commitLabel={commitLabel} models={models}
+      commitLabel={commitLabel} models={models} coexist={coexist?.enabled ?? false}
       onConfirm={() => void commit()} onClose={() => { setDraft(null); setError(''); }} />}
 
     {status && <section className={styles.card}>

@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ApplyStage, FieldChange, OperationEvent } from '@/contracts/types';
 import { App } from '@/app/App';
-import { instance, plan, testClient } from '../../../tests/helpers/client';
+import { coexistOff, instance, plan, testClient } from '../../../tests/helpers/client';
 
 /** 提示宿主：页面里也有别的 role=status（等待重载、检测状态），断言提示时必须限定范围。 */
 const notifications = () => screen.getByLabelText('通知');
@@ -328,4 +328,114 @@ test('还原不显示「替换菜单」警告——它正是把菜单还回去�
   expect(within(dialog).getByText('还原差异')).toBeInTheDocument();
   expect(within(dialog).getByText('恢复基线')).toBeInTheDocument();
   expect(screen.queryByText('Codex 的模型菜单会被替换')).not.toBeInTheDocument();
+});
+
+/**
+ * 共存模式（Bridge）的界面行为。
+ *
+ * 这里守的是三件事：开关真的调到了核心；**意图与事实分开说**（开着不等于宿主真的跑在
+ * bridge 上）；差异弹窗在共存模式下不能再说「菜单会被替换」——那句话在这里是错的。
+ */
+describe('共存模式', () => {
+  const restartHost = vi.fn().mockResolvedValue({
+    appPath: '/Applications/ChatGPT.app', quitConfirmed: true, quitForced: false, launchedConfirmed: true,
+  });
+
+  test('开启后接着发布模型，并且弹窗说的是「合并」不是「替换」', async () => {
+    const setCoexist = vi.fn().mockResolvedValue({ ...coexistOff, enabled: true });
+    const planApply = vi.fn().mockResolvedValue(plan([modelChange]));
+    const user = await openCodexPage({
+      detectInstances: vi.fn().mockResolvedValue([instance]),
+      coexistStatus: vi.fn().mockResolvedValue(coexistOff),
+      setCoexist,
+      planApply,
+      restartHost,
+    });
+
+    await user.click(await screen.findByRole('button', { name: '开启并应用' }));
+
+    expect(setCoexist).toHaveBeenCalledWith(instance.id, true);
+    // 开启之后必须再发布一次：模型要写进托管 profile。
+    expect(planApply).toHaveBeenCalled();
+    expect(await screen.findByText('菜单里会同时有官方模型和我们发布的模型')).toBeInTheDocument();
+    expect(screen.queryByText('Codex 的模型菜单会被替换')).not.toBeInTheDocument();
+  });
+
+  test('关闭共存会重启宿主：不重启，正在跑的那个还挂在 bridge 上', async () => {
+    const setCoexist = vi.fn().mockResolvedValue({ ...coexistOff, enabled: false });
+    const user = await openCodexPage({
+      detectInstances: vi.fn().mockResolvedValue([instance]),
+      coexistStatus: vi.fn().mockResolvedValue({ ...coexistOff, enabled: true, hostUnderBridge: true }),
+      setCoexist,
+      restartHost,
+    });
+
+    await user.click(await screen.findByRole('button', { name: '关闭并重启宿主' }));
+    expect(setCoexist).toHaveBeenCalledWith(instance.id, false);
+    expect(restartHost).toHaveBeenCalledWith(instance.id);
+  });
+
+  test('开关开着但宿主不是这样起来的：如实说，不冒充生效', async () => {
+    await openCodexPage({
+      detectInstances: vi.fn().mockResolvedValue([instance]),
+      coexistStatus: vi.fn().mockResolvedValue({ ...coexistOff, enabled: true, hostUnderBridge: false }),
+    });
+    expect(await screen.findByText(/不是以共存模式启动的/)).toBeInTheDocument();
+  });
+
+  test('无法确认时说「无法确认」，不说「没有」', async () => {
+    await openCodexPage({
+      detectInstances: vi.fn().mockResolvedValue([instance]),
+      coexistStatus: vi.fn().mockResolvedValue({ ...coexistOff, enabled: true, hostUnderBridge: null }),
+    });
+    expect(await screen.findByText(/无法确认宿主是否以共存模式运行/)).toBeInTheDocument();
+  });
+
+  test('不具备接管前提时禁用开关并说明原因', async () => {
+    const setCoexist = vi.fn();
+    await openCodexPage({
+      detectInstances: vi.fn().mockResolvedValue([instance]),
+      coexistStatus: vi.fn().mockResolvedValue({ ...coexistOff, ready: false, blockedReason: 'error.coexistNeedsCli' }),
+      setCoexist,
+    });
+    expect(await screen.findByText(/共存模式无法接管/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '开启并应用' }));
+    expect(setCoexist).not.toHaveBeenCalled();
+  });
+
+  test('共存模式下「还原为原生」没有可还原的内容，按钮点不动', async () => {
+    const planRestore = vi.fn();
+    await openCodexPage({
+      detectInstances: vi.fn().mockResolvedValue([instance]),
+      coexistStatus: vi.fn().mockResolvedValue({ ...coexistOff, enabled: true, hostUnderBridge: true }),
+      planRestore,
+    });
+    expect(await screen.findByText(/共存模式下原生配置没有被改动/)).toBeInTheDocument();
+    const restore = screen.getByRole('button', { name: /还原为原生/ });
+    expect(restore).toBeDisabled();
+  });
+
+  test('重新同步：把托管 profile 的底子按当前原生配置重建，然后重新发布', async () => {
+    const resyncCoexist = vi.fn().mockResolvedValue({ ...coexistOff, enabled: true, hostUnderBridge: true });
+    const planApply = vi.fn().mockResolvedValue(plan([modelChange]));
+    const user = await openCodexPage({
+      detectInstances: vi.fn().mockResolvedValue([instance]),
+      coexistStatus: vi.fn().mockResolvedValue({ ...coexistOff, enabled: true, hostUnderBridge: true }),
+      resyncCoexist,
+      planApply,
+    });
+
+    await user.click(await screen.findByRole('button', { name: /从原生配置重新同步/ }));
+    expect(resyncCoexist).toHaveBeenCalledWith(instance.id);
+    expect(planApply).toHaveBeenCalled();
+  });
+
+  test('不开共存就没有可重建的托管 profile，同步按钮不出现', async () => {
+    await openCodexPage({
+      detectInstances: vi.fn().mockResolvedValue([instance]),
+      coexistStatus: vi.fn().mockResolvedValue(coexistOff),
+    });
+    await screen.findByRole('heading', { name: /与原生模型共存/ });
+    expect(screen.queryByRole('button', { name: /从原生配置重新同步/ })).not.toBeInTheDocument();
+  });
 });

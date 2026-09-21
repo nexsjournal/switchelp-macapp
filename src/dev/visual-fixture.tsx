@@ -98,6 +98,18 @@ const status: ApplyStatus = {
   ],
 };
 
+const coexist = {
+  enabled: false,
+  bridgeReady: true,
+  bridgeDetail: null,
+  bridgePath: '/Users/me/Library/Application Support/app.gptswitch.desktop/bin/gptswitch-bridge',
+  managedHome: '/Users/me/Library/Application Support/app.gptswitch.desktop/codex-home',
+  managedConfigExists: true,
+  hostUnderBridge: null as boolean | null,
+  ready: true,
+  blockedReason: null as string | null,
+};
+
 const client: DesktopClient = {
   detectInstances: async () => [instance],
   platformInfo: async () => ({ platform: 'macos', titlebarHeight: 44, leadingReserve: 84, systemDecorations: true }),
@@ -159,6 +171,14 @@ const client: DesktopClient = {
   confirmReload: async () => ({ operationId: 'op_a', open: false, events: [...status.events, { ...status.events[3]!, sequence: 4, phase: 'verified', messageKey: 'stage.verified' }] }),
   planRestore: async () => plan,
   executeRestore: async () => ({ operationId: 'op_r' }),
+  // 走查夹具里的共存状态是可切的：走查要能看到开启/关闭两种版面。
+  coexistStatus: async () => coexist,
+  setCoexist: async (_instanceId: string, enabled: boolean) => {
+    coexist.enabled = enabled;
+    coexist.hostUnderBridge = enabled ? true : null;
+    return coexist;
+  },
+  resyncCoexist: async () => coexist,
   listDiagnostics: async () => ({ items: [], nextCursor: null }),
   previewDiagnostics: async () => ({ items: [], totalBytes: 0 }),
   exportDiagnostics: async () => ({ savedPath: '/tmp/diagnostics.json' }),

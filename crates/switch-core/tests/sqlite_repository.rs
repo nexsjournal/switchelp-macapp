@@ -179,3 +179,73 @@ fn future_schema_is_refused_and_left_intact() {
         .unwrap();
     assert_eq!(version, 999);
 }
+
+/// v1 → v2：升级时给「还是默认形状」的显示名补上供应商前缀。
+///
+/// 默认形状＝显示名与上游 ID 相同（v2 之前用户点一下「添加」就会写成这样）。
+/// 真正被用户改成别的样子的名字保持不动：迁移不替用户改主意。
+#[test]
+fn upgrading_from_v1_prefixes_default_shaped_display_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v1.sqlite");
+    let default_shaped = Model::draft(
+        ModelId::new("m_default"),
+        ProviderId::new("p"),
+        "deepseek-v4.1",
+        "deepseek-v4.1",
+        CatalogAlias::parse("gs/p/m_default").unwrap(),
+        "2026-09-18T00:00:00Z",
+    )
+    .unwrap();
+    let custom = Model::draft(
+        ModelId::new("m_custom"),
+        ProviderId::new("p"),
+        "vendor/model",
+        "我的模型",
+        CatalogAlias::parse("gs/p/m_custom").unwrap(),
+        "2026-09-18T00:00:00Z",
+    )
+    .unwrap();
+    {
+        let repo = SqliteRepository::open(&path).unwrap();
+        repo.save_provider(provider("p"), 0).unwrap();
+        repo.save_model(default_shaped, 0).unwrap();
+        repo.save_model(custom, 0).unwrap();
+    }
+    // 退回 v1：schema 版本调回去，并删掉 v3 才有的表——真实 v1 库里没有它，
+    // 留着就不是「一个 v1 库」了（迁移不该被要求容忍一个不可能存在的中间状态）。
+    {
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection.execute_batch("DROP TABLE settings;").unwrap();
+        connection.pragma_update(None, "user_version", 1).unwrap();
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 1);
+    }
+
+    let repo = SqliteRepository::open(&path).unwrap();
+    let models = repo.list_models().unwrap();
+    let by_id = |id: &str| {
+        models
+            .iter()
+            .find(|model| model.id.as_str() == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(
+        by_id("m_default").display_name,
+        "测试供应商/deepseek-v4.1",
+        "默认形状的显示名要补前缀"
+    );
+    assert_eq!(
+        by_id("m_default").display_name_layer.discovered.as_deref(),
+        Some("测试供应商/deepseek-v4.1"),
+        "发现层与生效值必须同步，否则下一次刷新会把前缀冲掉"
+    );
+    assert_eq!(
+        by_id("m_custom").display_name,
+        "我的模型",
+        "用户自己起的名字不动"
+    );
+}

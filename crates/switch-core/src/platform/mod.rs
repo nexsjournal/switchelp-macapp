@@ -56,6 +56,11 @@ pub const MACOS_TRAFFIC_LIGHT_RESERVE: u32 = 84;
 pub struct CommandSpec {
     pub program: String,
     pub args: Vec<String>,
+    /// 需要传给**被启动进程**的环境变量。为空表示不额外设置。
+    ///
+    /// macOS 上 `open` 不会继承调用方的环境，所以那里的值还要同时出现在
+    /// `--env KEY=VALUE` 参数里（见 `restart_plan_with_env`）。
+    pub env: Vec<(String, String)>,
 }
 
 /// 重启宿主要执行的命令：先退出，再打开。
@@ -81,6 +86,34 @@ pub struct RestartPlan {
 /// 它的模型菜单里。这里只构造命令，执行由 `restart_host` 负责——退出是异步的，
 /// 因此调用方**不得**据此声称宿主已经加载了新配置。
 pub fn restart_plan(platform: Platform, app_path: &str) -> RestartPlan {
+    restart_plan_with_env(platform, app_path, &[])
+}
+
+/// 同 [`restart_plan`]，但给被启动的宿主带上环境变量。
+///
+/// 共存模式靠它注入 `CODEX_CLI_PATH`（指向 bridge）。macOS 的 `open` **不继承**调用方的
+/// 环境，只能靠 `--env` 参数把变量交过去；其余平台直接在被启动进程的环境上设置。
+/// 两条路都要留：它们的生效机制不同，只做一半就会出现「参数写了、宿主没收到」。
+pub fn restart_plan_with_env(
+    platform: Platform,
+    app_path: &str,
+    env: &[(String, String)],
+) -> RestartPlan {
+    let mut plan = restart_plan_bare(platform, app_path);
+    if env.is_empty() {
+        return plan;
+    }
+    if platform == Platform::Macos {
+        for (key, value) in env {
+            plan.launch.args.push("--env".to_owned());
+            plan.launch.args.push(format!("{key}={value}"));
+        }
+    }
+    plan.launch.env = env.to_vec();
+    plan
+}
+
+fn restart_plan_bare(platform: Platform, app_path: &str) -> RestartPlan {
     let process = host_process_name(platform, app_path);
     match platform {
         // 先请应用自己退出（走 Launch Services 的路径解析），超时再发信号。
@@ -88,14 +121,17 @@ pub fn restart_plan(platform: Platform, app_path: &str) -> RestartPlan {
             quit: Some(CommandSpec {
                 program: "osascript".to_owned(),
                 args: vec!["-e".to_owned(), format!("quit app \"{app_path}\"")],
+                env: Vec::new(),
             }),
             quit_force: Some(CommandSpec {
                 program: "killall".to_owned(),
                 args: vec!["-TERM".to_owned(), process],
+                env: Vec::new(),
             }),
             launch: CommandSpec {
                 program: "open".to_owned(),
                 args: vec!["-a".to_owned(), app_path.to_owned()],
+                env: Vec::new(),
             },
         },
         // taskkill 本身就是强制的，没有「优雅」这一档；启动直接执行那个可执行文件，
@@ -105,11 +141,13 @@ pub fn restart_plan(platform: Platform, app_path: &str) -> RestartPlan {
             quit: Some(CommandSpec {
                 program: "taskkill".to_owned(),
                 args: vec!["/IM".to_owned(), exe_name(app_path), "/F".to_owned()],
+                env: Vec::new(),
             }),
             quit_force: None,
             launch: CommandSpec {
                 program: app_path.to_owned(),
                 args: Vec::new(),
+                env: Vec::new(),
             },
         },
         // 本仓库不发布 Linux 包，只保证编译与逻辑正确。
@@ -117,11 +155,13 @@ pub fn restart_plan(platform: Platform, app_path: &str) -> RestartPlan {
             quit: Some(CommandSpec {
                 program: "pkill".to_owned(),
                 args: vec!["-TERM".to_owned(), "-x".to_owned(), process],
+                env: Vec::new(),
             }),
             quit_force: None,
             launch: CommandSpec {
                 program: "xdg-open".to_owned(),
                 args: vec![app_path.to_owned()],
+                env: Vec::new(),
             },
         },
     }
@@ -346,8 +386,12 @@ impl ProcessProbe for SystemProcessProbe {
     fn spawn_detached(&self, spec: &CommandSpec) -> bool {
         // 起一个进程就走：不等它结束（`open` 会立刻返回），也不接管道——
         // 继承的管道会让子进程随我们的生命周期被收割。
-        std::process::Command::new(&spec.program)
-            .args(&spec.args)
+        let mut command = std::process::Command::new(&spec.program);
+        command.args(&spec.args);
+        for (key, value) in &spec.env {
+            command.env(key, value);
+        }
+        command
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -489,6 +533,28 @@ pub fn helper_file_name(platform: Platform) -> &'static str {
     match platform {
         Platform::Windows => "gptswitch-auth-helper.cmd",
         Platform::Macos | Platform::Linux => "gptswitch-auth-helper",
+    }
+}
+
+/// 共存模式 bridge 装到应用数据目录后的文件名。宿主把它当 codex CLI 调用。
+pub fn bridge_file_name(platform: Platform) -> &'static str {
+    match platform {
+        Platform::Windows => "gptswitch-bridge.exe",
+        Platform::Macos | Platform::Linux => "gptswitch-bridge",
+    }
+}
+
+/// 随包分发的 bridge 在包里的文件名。
+///
+/// 故意与开发时那个 bin（`gptswitch-bridge`）**不同名**：Tauri 会把 sidecar 按这个名字
+/// 拷到主可执行文件旁边，而开发时 `cargo build -p gptswitch-bridge` 的产物就在同一个
+/// 目录里。同名意味着 sidecar 的拷贝会**覆盖**开发产物——曾经真的发生过：一次
+/// `cargo build -p gptswitch` 之后，`target/debug/gptswitch-bridge` 变成了构建期的
+/// 占位件，而测试与真机探针都拿着它去跑。
+pub fn bridge_bundle_name(platform: Platform) -> &'static str {
+    match platform {
+        Platform::Windows => "gptswitch-bridge-app.exe",
+        Platform::Macos | Platform::Linux => "gptswitch-bridge-app",
     }
 }
 

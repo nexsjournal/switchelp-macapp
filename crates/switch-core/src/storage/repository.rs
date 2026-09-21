@@ -33,6 +33,11 @@ pub trait Repository: Send + Sync {
     fn get_model(&self, id: &ModelId) -> Result<Option<Model>, CoreError>;
     fn save_model(&self, model: Model, expected_version: u64) -> Result<Model, CoreError>;
     fn delete_model(&self, id: &ModelId) -> Result<(), CoreError>;
+
+    /// 读一条应用设置。键不存在返回 `None`——「没设过」与「设成了空」是两件事。
+    fn setting(&self, key: &str) -> Result<Option<String>, CoreError>;
+    /// 写一条应用设置（覆盖）。
+    fn set_setting(&self, key: &str, value: &str) -> Result<(), CoreError>;
 }
 
 /// 引用计数：某实体被多少活跃请求/续接引用。
@@ -58,6 +63,7 @@ pub struct InMemoryRepository {
     models: Mutex<HashMap<String, Model>>,
     /// alias -> model_id，保证目录 alias 全局唯一。
     aliases: Mutex<HashMap<String, String>>,
+    settings: Mutex<HashMap<String, String>>,
 }
 
 impl InMemoryRepository {
@@ -293,6 +299,18 @@ impl Repository for InMemoryRepository {
             .lock()
             .expect("锁未被污染")
             .remove(removed.catalog_alias.as_str());
+        Ok(())
+    }
+
+    fn setting(&self, key: &str) -> Result<Option<String>, CoreError> {
+        Ok(self.settings.lock().expect("锁未被污染").get(key).cloned())
+    }
+
+    fn set_setting(&self, key: &str, value: &str) -> Result<(), CoreError> {
+        self.settings
+            .lock()
+            .expect("锁未被污染")
+            .insert(key.to_owned(), value.to_owned());
         Ok(())
     }
 }

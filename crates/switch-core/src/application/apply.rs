@@ -9,6 +9,7 @@ use crate::{
     codex::{
         backup::BackupStore,
         catalog::{CatalogCompiler, CompileOptions},
+        coexist,
         config::{
             apply_managed, diff_managed, execute_restore, hash, plan_restore, write_atomic,
             FieldChange, FieldOwnership, ManagedConfig, ManagedProvider, ProviderAuth, PROVIDER_ID,
@@ -346,6 +347,72 @@ impl ApplyService {
         Ok(plan)
     }
 
+    /// 共存模式下真正被写的那份实例：配置根换成应用数据目录里的托管 home。
+    ///
+    /// 用户真实的 `~/.codex` 因此一个字节都不动——这正是共存模式相对「替换菜单」的全部
+    /// 区别：官方模型走原生那根，登录态与历史都在原地。
+    pub fn coexist_instance(&self, base: &CodexInstance) -> CodexInstance {
+        coexist::managed_instance(base, &self.layout.app_data_dir)
+    }
+
+    /// 共存模式的应用计划：目标换成托管 home，其余走同一条管线。
+    ///
+    /// 首次规划时先把用户当前的配置**复制**一份到托管 home 作为底子：插件、市场、
+    /// 项目信任这些设置是用户的 Codex 体验的一部分，共存模式没有理由把它清空。
+    /// 复制时去掉我们自己写过的路由字段——那份路由属于原生配置，不属于托管 profile。
+    pub fn plan_coexist(
+        &self,
+        base: &CodexInstance,
+        default_alias: Option<&str>,
+    ) -> Result<ApplyPlan, CoreError> {
+        self.seed_managed_config(base)?;
+        let instance = self.coexist_instance(base);
+        self.plan_apply(&instance, default_alias)
+    }
+
+    /// 托管 home 还没有配置时，从用户的配置复制一份作为底子。
+    fn seed_managed_config(&self, base: &CodexInstance) -> Result<(), CoreError> {
+        let target = coexist::managed_config_file(&self.layout.app_data_dir);
+        if target.exists() {
+            return Ok(());
+        }
+        let platform = crate::platform::Platform::current();
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|_| CoreError::internal("无法创建托管配置目录"))?;
+            // 托管 profile 与用户自己的配置同级敏感：里面有他自己的项目信任、
+            // MCP 设置等。目录与文件都按私密权限落盘，不靠「反正父目录是 0700」。
+            let _ = crate::platform::restrict(parent, crate::platform::private_dir_mode(platform));
+        }
+        let source = PathBuf::from(&base.config_file);
+        if !source.exists() {
+            // 用户还没配置过 Codex：那就从空白开始，没什么可继承的。
+            return Ok(());
+        }
+        let text = std::fs::read_to_string(&source)
+            .map_err(|_| CoreError::internal("无法读取原生配置以复制到托管 profile"))?;
+        let stripped = crate::codex::config::strip_managed_keys(&text)?;
+        std::fs::write(&target, stripped)
+            .map_err(|_| CoreError::internal("无法写入托管 profile"))?;
+        let _ = crate::platform::restrict(&target, crate::platform::private_file_mode(platform));
+        Ok(())
+    }
+
+    /// 共生模式是否已经生效这件事由调用方判断；这里只负责读意图。
+    pub fn coexist_enabled(&self) -> Result<bool, CoreError> {
+        Ok(self
+            .repository
+            .setting(coexist::SETTING_ENABLED)?
+            .as_deref()
+            == Some("1"))
+    }
+
+    /// 记录共存模式的意图（开关）。事实由宿主进程与 bridge 日志决定，不由这个值决定。
+    pub fn set_coexist_enabled(&self, enabled: bool) -> Result<(), CoreError> {
+        self.repository
+            .set_setting(coexist::SETTING_ENABLED, if enabled { "1" } else { "0" })
+    }
+
     /// 提交计划。CAS 失败或计划过期都必须拒绝，不能拿旧计划硬写。
     pub fn execute_apply(
         &self,
@@ -422,8 +489,12 @@ impl ApplyService {
         self.operations.save(state.clone())?; // 写前日志：崩溃后可根据目标摘要补记。
                                               // 写之前先备份原文件。备份失败就不写：宁可不提交，也不能在没有退路时改用户配置。
                                               // 备份**排在发布之前**：它失败时什么都没发生过，用户配置与路由都保持原样。
+                                              // 托管 home 里的配置是我们自己生成的，没有用户内容可备份；
+                                              // 把它塞进用户的备份列表，还会让「还原」页出现一个来源不明的条目。
+        let own_generated_file =
+            Path::new(&state.plan.config_path).starts_with(&self.layout.app_data_dir);
         if let Some(backups) = &self.backups {
-            if Path::new(&state.plan.config_path).exists() {
+            if !own_generated_file && Path::new(&state.plan.config_path).exists() {
                 backups.create(
                     Path::new(&state.plan.config_path),
                     self.clock.now_unix() * 1000,
