@@ -538,5 +538,110 @@
       "url": "https://www.electronjs.org/docs/latest/api/session",
       "accessed_date": "2026-09-18"
     }
+  ],
+  "e2e_probe_runs": [
+    {
+      "run_date": "2026-09-22",
+      "project_version": "0.3.0",
+      "commit": "e345bbd",
+      "operator": "manual (agent-executed), release-gate layer 3",
+      "reference": "docs/development/02-testing-and-release.md § '两层端到端验证'",
+      "environment": {
+        "os": "macOS 26.6.2 arm64",
+        "codex_binary": "/Applications/ChatGPT.app/Contents/Resources/codex",
+        "codex_cli_version": "codex-cli 0.155.0-alpha.9.2",
+        "app_binary_used": "target/debug/gptswitch (bare binary, 57 MB)",
+        "app_bundle_note": "target/debug/bundle/macos/Switchelp.app is an incomplete/unsigned build artifact (no Contents/_CodeSignature, leftover gptswitch-bridge-app.cstemp); a debug-build codesign attempt was blocked by keychain authorization in this session (SecKeyCreateSignature hangs). The bundled app was therefore NOT exercised; only the bare binary was.",
+        "isolation": "CODEX_HOME / GPTSWITCH_G0_DIR / GPTSWITCH_E2E_DIR / GPTSWITCH_TEST_DATA_DIR all pointed at /tmp paths; mock upstreams synthetic-only, no real API keys or domains"
+      },
+      "port_conflict": {
+        "port": 18765,
+        "held_by": "/Applications/Switchelp.app/Contents/MacOS/gptswitch (PID 14823), the user's own installed app, running 1h34m+",
+        "consequence": "probe-apply-pipeline.mjs and probe-full-loop.mjs could not complete; the gateway port is a hardcoded const (switch-core gateway::DEFAULT_PORT) with no env override, and the user's in-use app was deliberately NOT killed.",
+        "user_home_integrity": "The user's real ~/.codex was hashed before/after (11445 files). No session/rollout and no shell_snapshot was created by any probe; the probe threadIds do not appear anywhere under ~/.codex; a 75s idle control showed zero change. Object-level SQLite churn seen in one window (logs_2/thread_history_1/goals_1/queue_1/memories_1) is attributable to the concurrently-running ChatGPT desktop, not reproducibly to the probes (a re-run produced zero ~/.codex changes)."
+      },
+      "probes": [
+        {
+          "id": "probe-catalog",
+          "command": "node scripts/g0/probe-catalog.mjs",
+          "exit_code": 0,
+          "verdict": "passed",
+          "assertions": [
+            "model/list returned exactly 2 entries: ['gptswitch/probe-a', 'gptswitch/probe-b']",
+            "models[0].inputModalities == ['text'] (probe-a)",
+            "models[1].inputModalities == ['text','image'] (probe-b)",
+            "pagination walked with limit=1 across both pages"
+          ],
+          "key_output": "binaryVersion=codex-cli 0.155.0-alpha.9.2; result='app-server custom catalog and pagination passed; Desktop UI and routing still unverified'",
+          "artifact": ".local/g0-catalog.json"
+        },
+        {
+          "id": "probe-apply-pipeline",
+          "command": "GPTSWITCH_G0_DIR=/tmp/gptswitch-g0-apply-2026-09-22/run node scripts/g0/probe-apply-pipeline.mjs",
+          "exit_code": 1,
+          "verdict": "not_completed (blocked at step 2 of 5: mock-upstream bind)",
+          "blocked_by": "user's running Switchelp.app on 127.0.0.1:18765",
+          "stage_reached": "step 1 (real plan->CAS->atomic-write pipeline) SUCCEEDED: produced config.toml, catalogs/rev_628a4468049d2b28/models.json, bin/gptswitch-auth-helper; model=gs/3956057d-.../1fc0e93e-..., base_url=http://127.0.0.1:18765/i/inst_g0/c/rev_628a4468049d2b28/v1",
+          "raw_error": "Error: listen EADDRINUSE: address already in use 127.0.0.1:18765\n    code: 'EADDRINUSE', errno: -48, syscall: 'listen', address: '127.0.0.1', port: 18765",
+          "assertions_not_evaluated": [
+            "model/list == manifest.expectedAliases",
+            "per-model input_modalities / reasoning levels / display_name match",
+            "one upstream request per alias, carrying the instance catalog prefix",
+            "host actually invoked the auth helper (Command auth)"
+          ]
+        },
+        {
+          "id": "probe-full-loop",
+          "command": "GPTSWITCH_APP_BINARY=$PWD/target/debug/gptswitch GPTSWITCH_E2E_DIR=/tmp/gptswitch-e2e node scripts/g0/probe-full-loop.mjs",
+          "exit_code": 1,
+          "verdict": "not_completed (blocked at step 4 of 6: waitForGateway)",
+          "blocked_by": "same 18765 conflict",
+          "bare_binary_status": "The bare binary target/debug/gptswitch launched and executed startup recovery correctly; it is NOT the blocker. Failure is purely the port.",
+          "raw_error": "应用未在 30 秒内就绪；日志：Switchelp 启动恢复：operation=ff928c05-9b17-4eb0-9937-a97a3e0bc711 instance=inst_e2e applied=false\nSwitchelp 网关未启动：error.portInUse [\"无法绑定 127.0.0.1:18765：Address already in use (os error 48)。端口被占用最常见的原因是已经开着另一个 Switchelp 实例；也可能被别的程序占用——本工具不会自动换端口，因为 Codex 配置里写的就是这个地址。\"]",
+          "notes": "Observed behavior is correct-by-design: the app refuses to silently switch ports and reports a typed error.portInUse. Bundle-vs-bare-binary equivalence is UNVERIFIED (the signed bundle was never used, since it is an unsigned build artifact).",
+          "assertions_not_evaluated": [
+            "gateway serves all aliases at the published catalog revision",
+            "host model/list lists all custom models",
+            "one real turn per alias completes",
+            "upstream sees real upstream IDs (not aliases), max_tokens==4096, reasoning_effort=='low', messages>=2",
+            "auth-helper token length 64"
+          ]
+        },
+        {
+          "id": "coexist-check",
+          "command": "cargo run -q -p switch-core --example g0_apply_pipeline -- /tmp/g0-coexist && node scripts/g0/coexist-check.mjs /tmp/g0-coexist",
+          "exit_code": 1,
+          "verdict": "failed (3 of 6 assertions false-negative; reproduced identically on a second run)",
+          "root_cause": "ENVIRONMENT, not product: the machine's real ~/.codex is itself in coexistence mode (model = 'gs/767e7394-.../0bd2a770-...', model_provider='gptswitch', model_catalog_json -> installed app catalog). Its native model/list therefore ALSO returns gs/-prefixed aliases, so the probe's heuristic 'id starts with gs/ => ours' misclassifies native entries. Proof: the aliases the probe treated as ours, gs/57745d8a-.../14f3fca6-..., are exactly the user's real catalog aliases, while the probe's own managed aliases are gs/a67de8af-... (run 1) and gs/54adabcf-... (run 2) — random UUIDs that differ per seed.",
+          "assertion_lines_verbatim": [
+            "✓ initialize 通过（两根都握了手） — codexHome=/Users/example/.codex",
+            "✗ 菜单里有原生模型 0 条",
+            "✓ 菜单里有我们的模型 4 条 — gs/57745d8a-08f4-4e72-8b64-1dc95f4699be/14f3fca6-1920-4f29-b4d0-5e32ccde5397",
+            "✓ 合并后没有重复条目 — 4 条",
+            "✗ 我们的 slug 起线程落在托管那根 — ... → native（model-is-native）",
+            "✓ 托管线程拿到了 threadId",
+            "✗ 只带 threadId 的续接跟着线程走（不是靠模型猜） — → native（thread-pinned）",
+            "✓ 该错误来自 codex 本身（不经 bridge 同样如此） — {\"code\":-32600,\"message\":\"no rollout found for thread id ...\"}"
+          ],
+          "bridge_decisions_seen": "bridge log: model-list-merged managed=2 native=2 merged=4; routing thread/start why=model-is-native (correct, since the requested alias was the user's native alias); thread/resume why=thread-pinned (correct, thread-pinned routing works)",
+          "conclusion": "No product defect demonstrated. The bridge's routing was correct in both cases; the probe cannot distinguish 'ours' from 'native' on a machine already in coexistence mode. Side effect to note: the misclassification caused the probe to issue a thread/start that the bridge correctly routed to the NATIVE child (real ~/.codex); no rollout/session was persisted (the subsequent resume returned 'no rollout found'), and the threadId appears nowhere under ~/.codex."
+        }
+      ],
+      "keychain_check": {
+        "why": "probe-full-loop.mjs writes a synthetic generic-password to the login keychain (service app.gptswitch.desktop, account = seed secretRef) and deletes it in finally. Verified independently.",
+        "service": "app.gptswitch.desktop (fixed literal in probe)",
+        "account_used": "gptswitch/46bb6ff5-9903-444a-80ce-643188f310c3/117712f8-2951-44fb-a144-24fe3d14b8a4/v1/c3060821-ea34-45f5-8a82-ac784ac1329b (random UUIDs generated per seed; cannot collide with a user's real credential ref)",
+        "command": "security find-generic-password -s app.gptswitch.desktop -a <the above secretRef>",
+        "observed": "the lookup returned item-not-found (EXIT=44)",
+        "residue": "none; the 4 remaining app.gptswitch.desktop entries belong to the user's real providers (57745d8a..., 767e7394...)"
+      },
+      "summary_verdict": {
+        "probe-catalog": "passed",
+        "probe-apply-pipeline": "not_completed (EADDRINUSE 18765; pipeline stage passed)",
+        "probe-full-loop": "not_completed (error.portInUse 18765; bare binary itself works)",
+        "coexist-check": "failed (3/6 false-negative assertions, environment-caused, reproducible; bridge routing correct)",
+        "manual_layer_now_actually_run": "partially: layer-3 probes were executed and the first passed end-to-end against the real codex; two were blocked by the user's running app owning the fixed gateway port; one failed for a machine-specific environment reason. The layer is no longer unrun, but it is NOT green."
+      }
+    }
   ]
 }
