@@ -24,5 +24,11 @@ quick-xml = "0.42"
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 keyring = { version = "3.6", features = ["apple-native", "windows-native"] }
 
+# 探针超时按进程组杀子进程（见 toolhub/probe.rs 的 kill_tree）：`Child::kill` 只杀直接
+# 子进程，包装脚本拉起的那个还在占着管道。libc 本来就在依赖图里（tokio / rusqlite / keyring
+# 都经它），不新增下载面。
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3"

@@ -1,9 +1,11 @@
 //! 子进程探针：本板块唯一会执行外部程序的地方。
 //!
-//! 两条硬规则，实现里不能松：
+//! 三条硬规则，实现里不能松：
 //! 1. **程序与参数分开传**，永远不拼 shell 字符串；
 //! 2. **必须有超时**，超时就杀进程并如实记为超时——一个卡住的探针会让整页没有结论，
-//!    比返回一个「未知」更糟。
+//!    比返回一个「未知」更糟；
+//! 3. **超时要连子进程拉起的进程一起杀**（见 [`kill_tree`]）。工具常常是包装脚本，
+//!    只杀外壳等于没杀：真正干活的那个还占着我们的管道，读线程一直等 EOF。
 
 use std::{
     io::Read,
@@ -83,6 +85,12 @@ pub fn run(program: &Path, args: &[String], timeout: Duration) -> ProbeOutcome {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // 让子进程进自己的进程组：超时时要按组杀，见 kill_tree。
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
 
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -121,8 +129,7 @@ pub fn run(program: &Path, args: &[String], timeout: Duration) -> ProbeOutcome {
             Ok(Some(status)) => break status.code(),
             Ok(None) => {
                 if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    kill_tree(&mut child);
                     timed_out = true;
                     break None;
                 }
@@ -138,6 +145,31 @@ pub fn run(program: &Path, args: &[String], timeout: Duration) -> ProbeOutcome {
         stderr: stderr_handle.join().unwrap_or_default(),
         timed_out,
     }
+}
+
+/// 杀掉子进程**及其派生的进程**。
+///
+/// 只杀直接子进程是不够的：`sh -c "…"` 里 shell 常常留在原地、真正干活的是它的子进程，
+/// 而那个子进程继承着我们的 stdout/stderr 管道——它会一直占着管道不关，读线程就永远等
+/// 不到 EOF。CI 上实测：超时设 300ms，函数却等了 29.5 秒（整个 `sleep 30`），
+/// 「必须有超时」那条规则等于没生效。
+///
+/// 所以子进程在 spawn 时就进自己的进程组，这里按组杀：`kill` 的目标写成负的 pid
+/// 表示整个进程组。组可能已经空了（子进程先退出），失败按正常情况处理。
+#[cfg(unix)]
+fn kill_tree(child: &mut std::process::Child) {
+    let pid = child.id() as i32;
+    // SAFETY: 只发一个信号，参数是有效的 pid 与信号编号，没有内存访问。
+    unsafe {
+        libc::kill(-pid, libc::SIGKILL);
+    }
+    let _ = child.wait();
+}
+
+#[cfg(not(unix))]
+fn kill_tree(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// 从探针输出里取第一行有内容的文本作为版本号。
@@ -190,9 +222,17 @@ mod tests {
         #[cfg(unix)]
         {
             let started = Instant::now();
+            // 子命令写成 `sleep 30; true` 而不是 `sleep 30`：后者在 bash（macOS 的 /bin/sh）
+            // 下会被 exec 成自己，只剩一个进程；而在 dash（Ubuntu 的 /bin/sh）下 shell 会
+            // 留在原地、sleep 是它的子进程。带一个后续命令可以让两种 shell 都**不 exec**，
+            // 于是「子进程还活着并占着管道」这个条件在哪个平台都成立。
+            //
+            // 这不是为了刁难：真实的工具常常是包装脚本，超时只杀到外壳、真正干活的那个还在
+            // 往我们的管道里写，读线程就一直等下去——CI 上实测等了 29.5 秒（整个
+            // `sleep 30`），而这里量的是「必须立刻返回」。
             let outcome = run(
                 Path::new("/bin/sh"),
-                &["-c".to_owned(), "sleep 30".to_owned()],
+                &["-c".to_owned(), "sleep 30; true".to_owned()],
                 Duration::from_millis(300),
             );
             assert!(outcome.timed_out, "超时必须被如实报告");

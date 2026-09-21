@@ -3378,6 +3378,7 @@ name = "switch-core"
 version = "0.3.0"
 dependencies = [
  "keyring",
+ "libc",
  "percent-encoding",
  "quick-xml",
  "rusqlite",
