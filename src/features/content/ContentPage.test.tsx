@@ -212,4 +212,60 @@ describe('GitHub 令牌', () => {
     expect(screen.getByText(/不填也能用/)).toBeInTheDocument();
     expect(screen.getByText(/只存进系统凭据库/)).toBeInTheDocument();
   });
+
+  it('点按钮打开弹窗，填入令牌后保存并提示成功', async () => {
+    const user = userEvent.setup();
+    const setContentGithubToken = vi.fn().mockResolvedValue(true);
+    renderWithToasts(<ContentPage client={baseClient({ setContentGithubToken })} />);
+    await user.click(await screen.findByRole('tab', { name: '订阅源' }));
+
+    // 入口不再是 window.prompt：真机上它没有界面，点了等于没点。
+    await user.click(await screen.findByRole('button', { name: '填写令牌' }));
+
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('GitHub 令牌'), 'ghp_secret');
+    await user.click(within(dialog).getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(setContentGithubToken).toHaveBeenCalledWith('ghp_secret'));
+    expect(await screen.findByText('令牌已存入系统凭据库')).toBeInTheDocument();
+    // 成功后弹窗关闭，卡片上的徽章改口。
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(await screen.findByText('已配置')).toBeInTheDocument();
+  });
+
+  it('已配置时弹窗底栏给出清除路径，清除后徽章回到未配置', async () => {
+    const user = userEvent.setup();
+    const setContentGithubToken = vi.fn().mockResolvedValue(false);
+    const client = baseClient({
+      setContentGithubToken,
+      contentGithubTokenStatus: vi.fn().mockResolvedValue(true),
+    });
+    renderWithToasts(<ContentPage client={client} />);
+    await user.click(await screen.findByRole('tab', { name: '订阅源' }));
+
+    await user.click(await screen.findByRole('button', { name: '更新令牌' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: '清除令牌' }));
+
+    await waitFor(() => expect(setContentGithubToken).toHaveBeenCalledWith(null));
+    expect(await screen.findByText('令牌已清除')).toBeInTheDocument();
+    expect(await screen.findByText('未配置')).toBeInTheDocument();
+  });
+
+  it('保存失败时弹窗留在原地并如实提示', async () => {
+    const user = userEvent.setup();
+    const setContentGithubToken = vi.fn().mockRejectedValue(new Error('凭据库已锁定'));
+    renderWithToasts(<ContentPage client={baseClient({ setContentGithubToken })} />);
+    await user.click(await screen.findByRole('tab', { name: '订阅源' }));
+
+    await user.click(await screen.findByRole('button', { name: '填写令牌' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('GitHub 令牌'), 'ghp_secret');
+    await user.click(within(dialog).getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(setContentGithubToken).toHaveBeenCalled());
+    // 失败不能吞掉：弹窗不关，人还在，错误也有提示。
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(await screen.findByText('操作失败，请重试或查看诊断。')).toBeInTheDocument();
+  });
 });
