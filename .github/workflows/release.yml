@@ -112,6 +112,14 @@ jobs:
   build-windows:
     needs: [gate, test]
     # 手动触发时看 with_windows；打标签触发时不出 Windows（需要时手动再触发一次）。
+    #
+    # 这个 job 自「应用内更新」落地（`createUpdaterArtifacts: true`）起一直没能出包：
+    # 那个开关是全局的，于是 Windows 也要求签名更新产物，而 `TAURI_SIGNING_PRIVATE_KEY`
+    # 只配给 macOS（本仓库的 CI 没有任何签名凭据）。失败发生在最后一步——两个安装包都已
+    # 经产好了，才在签名时以「A public key has been found, but no private key」整批失败。
+    # 现在由 `src-tauri/tauri.windows.conf.json` 在 Windows 上显式关掉更新产物：Windows
+    # 是预览形态，更新清单里也只有 `darwin-aarch64`，不需要它。放在平台配置而不是这里，
+    # 是因为在 Windows 上手动构建的开发者会撞上同一堵墙。
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.with_windows }}
     runs-on: windows-latest
     name: Windows (x64)
