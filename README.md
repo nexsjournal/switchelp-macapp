@@ -38,51 +38,33 @@ Codex  →  ~/.codex/config.toml (the fields this tool manages)
 
 ## Download and install
 
-Grab a build from [Releases](https://github.com/nexsjournal/switchelp-macapp/releases).
+Grab a build from [Releases](https://github.com/nexsjournal/switchelp-macapp/releases):
 
-**0.3.0 — the current release — publishes macOS Apple Silicon, and attaches a Windows x64 installer as a preview.**
-Intel Mac bundles are not attached; see the notes below the table for what each one does.
+- **macOS (Apple Silicon)** · `Switchelp_0.3.0_aarch64.dmg`
+- **Windows (x64)** · `Switchelp_0.3.0_x64-setup.exe` — preview
 
-| Platform | File | First launch |
-| --- | --- | --- |
-| macOS (Apple Silicon) | `Switchelp_0.3.0_aarch64.dmg` | Signed with a Developer ID but **not notarized** — see below |
-| macOS (Apple Silicon) | `Switchelp-0.3.0-arm64.zip` | Same as above; unzip and drag `Switchelp.app` into `/Applications` |
-| Windows (x64) | `Switchelp_0.3.0_x64-setup.exe` or `Switchelp_0.3.0_x64_en-US.msi` | Unsigned, and **preview only** — it installs and opens but refuses to apply configuration, see Windows status |
+**First launch (macOS)** — the build is signed with a Developer ID but not notarized, so macOS blocks it once:
+**System Settings → Privacy & Security**, scroll to **Security**, click **Open Anyway** next to the blocked app, then
+confirm with your password. Or, once, in a terminal:
 
-**Why macOS warns, and how to get past it**: signing and notarization are two separate gates and this project only
-has the first one. macOS will refuse the first launch. Two ways through, easiest first:
+```bash
+xattr -dr com.apple.quarantine /Applications/Switchelp.app
+```
 
-1. **System Settings → Privacy & Security**, scroll to the **Security** section, click **Open Anyway** next to the
-   blocked app, then confirm with your password. This is the path Apple documents today — its support page no longer
-   mentions the older right-click → Open shortcut, so don't be surprised if that does nothing.
-2. Terminal, once, then open the app normally:
+**Windows** — the installer is a preview. It installs and opens, but it refuses to apply configuration and says why:
+the credential helper has no Windows implementation yet, so Codex could not authenticate against the local gateway.
+The Windows installers attached to 0.1.1–0.1.3 were withdrawn for writing configuration anyway and reporting success.
 
-   ```bash
-   xattr -dr com.apple.quarantine /Applications/Switchelp.app
-   ```
+**Notes**
 
-Notarization needs credentials from the account owner; the steps are in
-[signing, notarization and release](docs/development/03-signing-and-release.md). Once configured, the app opens with a
-double-click and CI produces notarized builds automatically.
-
-The 0.1.0 artifacts still carry the old `GPTSwitch` name: they were built before the product and the repository
-were renamed. The bundle identifier stays `app.gptswitch.desktop` on purpose, so app data and stored credentials
-from earlier versions keep working.
-
-**Windows status**: 0.3.0 attaches a Windows x64 installer (NSIS `setup.exe` and MSI) as a **preview**, unsigned —
-there is no Windows code-signing certificate yet. It installs and opens, and it **refuses to apply configuration**,
-saying so in the UI instead of writing anything: the credential helper has no Windows implementation yet, and
-without it Codex could not authenticate against the local gateway, so every request would fail. The previous
-behaviour — writing the config anyway and reporting success — was worse than useless: it broke a working Codex and
-blamed the upstream. That is why the Windows installers attached to 0.1.1, 0.1.2 and 0.1.3 were withdrawn from
-their releases. See the [evidence index](docs/appendix/01-source-index.md).
-
-The build job (`build-windows` in [`release.yml`](.github/workflows/release.yml)) only runs on a manual
-`workflow_dispatch` with `with_windows` enabled — a tag push never builds it.
-
-**Intel Mac status**: the release matrix does cover `x86_64-apple-darwin`, but the `build-macos` job only runs when
-the Apple signing secrets are configured in CI, and the 0.3.0 artifacts were signed locally on Apple Silicon. Build
-from source (`pnpm exec tauri build`) if you need an Intel bundle.
+- **Intel Mac**: build from source (`pnpm exec tauri build`). The release matrix covers `x86_64-apple-darwin`, but
+  bundles are signed locally on Apple Silicon.
+- **Notarization**: needs credentials from the account owner — steps in
+  [signing, notarization and release](docs/development/03-signing-and-release.md). Once configured, the app opens
+  with a double-click and CI produces notarized builds automatically.
+- **Older artifacts**: 0.1.0 still carries the old `GPTSwitch` name, from before the product and repository were
+  renamed. The bundle identifier stays `app.gptswitch.desktop` on purpose, so app data and stored credentials from
+  earlier versions keep working.
 
 ## Build and verify
 
