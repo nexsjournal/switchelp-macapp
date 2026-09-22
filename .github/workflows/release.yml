@@ -348,7 +348,5 @@ jobs:
                xattr -dr com.apple.quarantine /Applications/Switchelp.app
                ```
 
-            下载后可自行核对 SHA-256（`shasum -a 256 <文件>`）；GitHub 也会在附件旁标注 digest。
-
             **Windows 与 Intel Mac**：自动构建目前不产出它们。原因与替代做法见
             [README 的下载与安装一节](https://github.com/nexsjournal/switchelp-macapp#download-and-install)。
