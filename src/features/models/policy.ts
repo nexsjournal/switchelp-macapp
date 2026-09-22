@@ -97,7 +97,7 @@ export function defaultPolicy(): ModelPolicy {
     reasoning: { support: 'unknown', control: 'none', allowedValues: [], defaultValue: null, budgetTokens: null, mappingId: null },
     inputs: inputKinds.map(kind => ({ kind, upstream: kind === 'text' ? 'supported' : 'unknown', gateway: 'unknown', host: 'unknown',
       effectivePath: 'blocked', mimeTypes: [], maxBytes: null, conversionId: null, verification: 'declared', blockedReasonKey: null })),
-    tools: { functionTools: 'unknown', parallelTools: 'unknown', customTools: 'unknown', verification: 'declared' } };
+    tools: { functionTools: 'unknown', parallelTools: 'unknown', customTools: 'unknown', builtinTools: 'unknown', verification: 'declared' } };
 }
 
 /**
@@ -112,15 +112,21 @@ export const EDITABLE_INPUT_KINDS: readonly InputKind[] = ['text', 'image', 'aud
 /**
  * 从上游批量添加模型时用的默认长度。
  *
- * 上游的 `/models` 只返回 ID 和名称，不返回窗口大小，所以只能给一组**保守**的默认值：
- * 128K / 8K 对当前主流模型都成立，且输出小于上下文，能直接通过核心校验。
- * 「先用默认的」不等于「猜对了」——这两个值会写进模型策略，之后必须在编辑弹窗里按
- * 供应商文档核对，界面也要把这件事说出来。
+ * 上游的 `/models` 只返回 ID 和名称，不返回窗口大小，所以只能给一组默认值：
+ * 1M / 128K 是当前前沿模型的量级（用户明确要的就是这两个数）。它**不是**「猜对了」——
+ * 这两个值会写进模型策略，超过上游真实上限时请求会被上游拒掉，所以界面必须把
+ * 「按供应商文档核对」这件事说出来（见 `editor.smartOn` 与发现结果弹窗的底栏提示）。
  */
-export const DISCOVERY_DEFAULT_LIMITS = { contextLimit: 128_000, outputLimit: 8_192 } as const;
+export const DISCOVERY_DEFAULT_LIMITS = { contextLimit: 1_000_000, outputLimit: 128_000 } as const;
 
-/** 批量添加时的完整默认策略：长度取上面的默认值，能力保持未知等人确认。 */
-export function discoveredModelPolicy(previous: ModelPolicy = defaultPolicy()): ModelPolicy {
+/**
+ * 新模型的推荐起点：长度取上面的默认值，能力保持未知等人确认。
+ *
+ * 两处都用它：从上游批量添加（上游不返回窗口大小），以及整页编辑器里手工新建一个模型。
+ * 后者以前给的是两个空框——而「未声明上下文」的模型根本应用不到 Codex，把它当起点
+ * 只会让用户先撞一次应用失败；两个编辑入口的默认值必须一样，否则同一件事有两套答案。
+ */
+export function recommendedPolicy(previous: ModelPolicy = defaultPolicy()): ModelPolicy {
   return { ...previous, contextLimit: DISCOVERY_DEFAULT_LIMITS.contextLimit, outputLimit: DISCOVERY_DEFAULT_LIMITS.outputLimit };
 }
 
@@ -185,6 +191,8 @@ export interface CapabilityState {
   inputs: Record<InputKind, Support>;
   functionTools: Support;
   parallelTools: Support;
+  /** 上游自己执行的服务端内置工具（`web_search` 等）。 */
+  builtinTools: Support;
   /** 思考档位，从低到高。空表示这个模型不声明档位。 */
   levels: string[];
   /** 默认档位，必须是 `levels` 里的一项。 */
@@ -203,6 +211,7 @@ export function capabilityState(policy: ModelPolicy = defaultPolicy()): Capabili
     inputs,
     functionTools: policy.tools.functionTools,
     parallelTools: policy.tools.parallelTools,
+    builtinTools: policy.tools.builtinTools,
     levels: [...policy.reasoning.allowedValues],
     defaultLevel: policy.reasoning.defaultValue,
   };
@@ -239,7 +248,8 @@ export function policyFromCapability(input: CapabilityState, previous: ModelPoli
         ? { ...saved, upstream: input.inputs[base.kind], verification: 'declared' as const }
         : saved;
     }),
-    tools: { ...previous.tools, functionTools: input.functionTools, parallelTools: input.parallelTools, verification: 'declared' },
+    tools: { ...previous.tools, functionTools: input.functionTools, parallelTools: input.parallelTools,
+      builtinTools: input.builtinTools, verification: 'declared' },
   };
 }
 
@@ -271,8 +281,9 @@ export function policyFromForm(data: FormData, previous = defaultPolicy()): Mode
       upstream: inputBlocked(input.kind) || !data.has(`input-${input.kind}`)
         ? input.upstream
         : data.get(`input-${input.kind}`) as Support })),
-    tools: { functionTools: data.get('functionTools') as Support, parallelTools: data.get('parallelTools') as Support,
-      customTools: 'unknown', verification: 'declared' },
+    tools: { ...previous.tools, functionTools: data.get('functionTools') as Support, parallelTools: data.get('parallelTools') as Support,
+      customTools: previous.tools.customTools, builtinTools: (data.get('builtinTools') as Support | null) ?? previous.tools.builtinTools,
+      verification: 'declared' },
   };
   if (policy.contextLimit !== null && policy.outputLimit !== null && policy.outputLimit >= policy.contextLimit) throw new Error(t('editor.outputExceedsContext'));
   if (policy.reasoning.defaultValue && !allowedValues.includes(policy.reasoning.defaultValue)) throw new Error(t('editor.defaultNotAllowed'));

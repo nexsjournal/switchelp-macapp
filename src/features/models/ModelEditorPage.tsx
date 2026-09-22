@@ -8,8 +8,8 @@ import { FieldHelp } from '@/components/FieldHelp';
 import { Switch } from '@/components/Switch';
 import { LevelChips } from './LevelChips';
 import {
-  EDITABLE_INPUT_KINDS, capabilityState, defaultPolicy, inputBlocked, inputLabel, parseTokens,
-  policyFromCapability, reasoningKeptKey, reasoningLevelPresets, type CapabilityState,
+  EDITABLE_INPUT_KINDS, capabilityState, inputBlocked, inputLabel, parseTokens,
+  policyFromCapability, reasoningKeptKey, reasoningLevelPresets, recommendedPolicy, type CapabilityState,
 } from './policy';
 import styles from './ModelEditorPage.module.css';
 
@@ -42,7 +42,9 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
    */
   onDirtyChange?: (dirty: boolean) => void;
 }) {
-  const policy = model?.policy ?? defaultPolicy();
+  // 新建一个模型时长度从**推荐默认值**起步（与「添加模型」弹窗的智能配置同一组数）；
+  // 编辑已有模型则原样带出它的策略，绝不用默认值覆盖已保存的值。
+  const policy = model?.policy ?? recommendedPolicy();
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState('');
@@ -167,6 +169,9 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
           <CheckCell label={t('editor.parallelTools')} hint={t('editor.abilitiesHint')}
             checked={ability.parallelTools === 'supported'}
             onChange={next => { setAbility(current => ({ ...current, parallelTools: next ? 'supported' : 'unsupported' })); updateDirty(true); }} />
+          <CheckCell label={t('editor.builtinTools')} hint={t('editor.builtinToolsHint')}
+            checked={ability.builtinTools === 'supported'}
+            onChange={next => { setAbility(current => ({ ...current, builtinTools: next ? 'supported' : 'unsupported' })); updateDirty(true); }} />
         </CheckCells>
         <p className="field-hint">{t('editor.abilityTriState')}</p>
 

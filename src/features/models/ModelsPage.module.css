@@ -63,6 +63,12 @@
 .sortButton:hover:not(:disabled) { background: transparent; color: var(--text-primary); }
 .rowActions { display: flex; align-items: center; gap: 8px; }
 .rowActions > button { height: var(--control-height-compact); padding: 0 8px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+/*
+ * 批量测试按钮：作用在整个列表上，与「添加模型」同一条工具栏。
+ * 嵌进供应商详情时工具栏是**单列 grid**，子元素默认拉伸——不给它 fit-content，
+ * 这个按钮会变成一条横贯整栏的宽带子（实测 616 × 40），看着像块分隔区而不像按钮。
+ */
+.testAll { justify-self: start; width: fit-content; }
 .count { margin: 16px 0 0; color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 
 /*

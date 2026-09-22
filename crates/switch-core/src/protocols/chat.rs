@@ -991,6 +991,7 @@ mod tests {
         RouteLimits {
             output_limit: output,
             reasoning_efforts: efforts.iter().map(|value| (*value).to_owned()).collect(),
+            ..RouteLimits::default()
         }
     }
 

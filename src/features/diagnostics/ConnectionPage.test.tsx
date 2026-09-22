@@ -25,7 +25,7 @@ const model = (id: string, providerId: string, displayName: string): Model => ({
   policy: {
     contextLimit: 128_000, outputLimit: 8_192, compactLimit: null,
     reasoning: { support: 'supported', control: 'effort', allowedValues: ['low', 'high'], defaultValue: 'low', budgetTokens: null, mappingId: 'm' },
-    inputs: [], tools: { functionTools: 'supported', parallelTools: 'unknown', customTools: 'unsupported', verification: 'declared' },
+    inputs: [], tools: { functionTools: 'supported', parallelTools: 'unknown', customTools: 'unsupported', builtinTools: 'unsupported', verification: 'declared' },
   },
   displayNameLayer: { discovered: null, userValue: displayName, overridden: true },
   capabilityRevision: 1, version: 1, createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z',

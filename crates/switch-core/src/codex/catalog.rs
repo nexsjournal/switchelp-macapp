@@ -318,6 +318,10 @@ impl CatalogCompiler {
             experimental_supported_tools: Vec::new(),
             input_modalities: modalities,
             supports_reasoning_summary_parameter: false,
+            // 恒为 false，与模型的「上游内置工具」声明**不是**同一件事：实测宿主并不按它
+            // 决定发不发 `web_search`（本机目录里写着 false，请求里照样带着它），所以
+            // 这里不拿它去表达那个声明——写了也管不住，反而像是「已经关掉了联网搜索」。
+            // 真正的开关在网关侧（见 protocols::responses 的内置工具摘除）。
             supports_search_tool: false,
             // output_reserve 只用于校验，不进目录；目录没有通用最大输出字段。
             // 保留变量使用避免未使用告警。

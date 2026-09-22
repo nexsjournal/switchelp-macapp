@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Boxes, Filter, Plus, Search } from 'lucide-react';
-import type { Model, Provider } from '@/contracts/types';
+import { Boxes, Filter, PlugZap, Plus, Search } from 'lucide-react';
+import type { Credential, Model, Provider } from '@/contracts/types';
 import { type DesktopClient, toCoreError } from '@/desktop/client';
 import { Dialog } from '@/components/Dialog';
 import { EmptyState } from '@/components/EmptyState';
@@ -55,6 +55,8 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
   const [busy, setBusy] = useState('');
   const [confirm, setConfirm] = useState<{ title: string; body: string; label: string; danger?: boolean; run: () => Promise<void> } | null>(null);
   const [probe, setProbe] = useState<{ model: Model; stages: { stageKey: string; status: string; messageKey: string; elapsedMs?: number | null }[] } | null>(null);
+  /** 「测试全部」的进度；为 null 表示没在跑。 */
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   /** 每个模型最近一次「测试」的结果。放在会话级的表里，切页面不丢（见 connectionStore）。 */
   const connection = useConnections();
 
@@ -143,12 +145,22 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
 
   /** 只读探测：不发真实生成请求，也不产生费用。 */
   const probeModel = (model: Model) => run('probe', async () => {
-    const credentials = await client.listCredentials(model.providerId);
-    const active = credentials.find(credential => credential.status !== 'disabled' && credential.status !== 'missing');
-    if (!active) {
+    const report = await probeOne(model);
+    if (!report) {
       showToast(t('models.probeNoKey', { name: providerName(model.providerId) }), 'danger');
       return;
     }
+    setProbe({ model, stages: report.stages });
+  });
+
+  /**
+   * 探测一个模型并记账。返回 null 表示这个模型没测（供应商还没有可用的 Key）。
+   * 抛出的错误交给调用方——批量那条要的是「这一个失败不算整批失败」。
+   */
+  async function probeOne(model: Model, credentials: Map<string, Credential[]> = new Map()) {
+    if (!credentials.has(model.providerId)) credentials.set(model.providerId, await client.listCredentials(model.providerId));
+    const active = credentials.get(model.providerId)!.find(credential => credential.status !== 'disabled' && credential.status !== 'missing');
+    if (!active) return null;
     const report = await client.startProbe(
       { providerId: model.providerId, modelId: model.id, credentialId: active.id },
       { includeGenerate: false },
@@ -156,7 +168,37 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
     // 有失败阶段就是失败；全通过或跳过（上游没有 /models 之类）算通过。
     const failed = report.stages.some(stage => stage.status === 'failed');
     rememberConnection(model.id, failed ? 'failed' : 'passed');
-    setProbe({ model, stages: report.stages });
+    return report;
+  }
+
+  /**
+   * 一次测完当前列表里的全部模型。
+   *
+   * 为什么要有它：从上游批量拉进来十几个模型时，逐行点「测试」是十几次点击，
+   * 而且不知道还剩哪些没点过。行内那个「测试」仍然只测这一行——它挂在行上，
+   * 测别的行才是意外；「全部」是一个独立动作，就该有自己的按钮。
+   *
+   * 串行而不是并发：探测是真实的上游请求，十来个一起打过去等于自己给自己限流。
+   */
+  const probeAll = () => run('probeAll', async () => {
+    const credentials = new Map<string, Credential[]>();
+    let passed = 0; let failed = 0; let skipped = 0;
+    setProgress({ done: 0, total: visible.length });
+    try {
+      for (const [index, model] of visible.entries()) {
+        try {
+          const report = await probeOne(model, credentials);
+          if (!report) skipped += 1;
+          else if (report.stages.some(stage => stage.status === 'failed')) failed += 1;
+          else passed += 1;
+        } catch {
+          // 单个模型探测失败（超时、上游 5xx）不打断整批：剩下的模型还要测。
+          failed += 1;
+        }
+        setProgress({ done: index + 1, total: visible.length });
+      }
+    } finally { setProgress(null); }
+    showToast(t('models.testAllDone', { passed, failed, skipped }), failed > 0 ? 'danger' : 'success');
   });
 
   const toggleAll = () => setSelected(current => current.length === selectableIds.length ? [] : selectableIds);
@@ -187,6 +229,12 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
         </select></label>
       </div>
       {!embedded && <button className="primary" onClick={() => onEditModel('new')} disabled={!providers.length}><Plus size={18} />{t('action.addModel')}</button>}
+      {/* 批量测试与「添加模型」同级：它作用在整个列表上，不是某一行。
+          列表为空或正在测时不给点——按下去也只会立刻空转一轮。 */}
+      <button className={styles.testAll} onClick={() => void probeAll()} disabled={busy !== '' || !visible.length}>
+        <PlugZap size={16} />
+        {progress ? t('models.testAllRunning', { done: progress.done, total: progress.total }) : t('models.testAll')}
+      </button>
     </div>
 
 
@@ -250,7 +298,7 @@ export function ModelsPage({ client, providers, models, onChanged, providerScope
               })()}</td>
               <td><div className={styles.rowActions}>
                 <button onClick={() => onEditModel(model)} aria-label={t('models.editAria', { name: model.displayName })}>{t('common.edit')}</button>
-                <button onClick={() => void probeModel(model)} disabled={busy === 'probe'} aria-label={t('models.testAria', { name: model.displayName })}>{t('common.test')}</button>
+                <button onClick={() => void probeModel(model)} disabled={busy !== ''} aria-label={t('models.testAria', { name: model.displayName })}>{t('common.test')}</button>
                 <RowMenu label={t('models.moreActions', { name: model.displayName })} items={[
                   { key: 'copy', label: t('action.copyModelId'), onSelect: () => void navigator.clipboard?.writeText(model.upstreamId).then(() => showToast(t('models.copied', { id: model.upstreamId })), () => showToast(t('common.copyFailed'), 'danger')) },
                   {

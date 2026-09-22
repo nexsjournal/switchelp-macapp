@@ -4,6 +4,7 @@
 //! 目录前缀决定可用的 alias 集合；旧宿主仍带旧前缀时按旧快照服务，
 //! 绝不静默回落到最新版本；请求开始即固定 `routeRevision + credentialVersion + protocolVersion`。
 
+use crate::domain::capability::Support;
 use crate::domain::error::{CoreError, ErrorCode};
 use crate::domain::ids::{CredentialId, InstanceId, ModelId, ProviderId, RevisionId};
 use crate::storage::snapshot::{RevisionRefs, RouteEntry, RouteSnapshot};
@@ -88,6 +89,9 @@ pub struct RequestRoute {
     pub reasoning_efforts: Vec<String>,
     /// 声明可由宿主原生发送的模态。
     pub native_modalities: Vec<String>,
+    /// 该模型是否声明了上游自己执行的内置工具（`web_search` 等）。未声明即不转发。
+    #[serde(default)]
+    pub builtin_tools: Support,
 }
 
 impl RequestRoute {
@@ -96,6 +100,7 @@ impl RequestRoute {
         crate::protocols::RouteLimits {
             output_limit: self.output_limit,
             reasoning_efforts: self.reasoning_efforts.clone(),
+            builtin_tools: self.builtin_tools,
         }
     }
 }
@@ -121,6 +126,7 @@ impl RequestRoute {
             output_limit: entry.output_limit,
             reasoning_efforts: entry.reasoning_efforts.clone(),
             native_modalities: entry.native_modalities.clone(),
+            builtin_tools: entry.builtin_tools,
         }
     }
 
@@ -387,6 +393,7 @@ mod tests {
             output_limit: None,
             reasoning_efforts: Vec::new(),
             native_modalities: Vec::new(),
+            builtin_tools: Support::Unknown,
         }
     }
 

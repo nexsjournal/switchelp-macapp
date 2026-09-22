@@ -41,7 +41,7 @@ function model(id: string, providerId: string, displayName: string, upstreamId: 
       // 能力表：文本永远支持，视觉按参数给——模型行上的「视觉」徽章就是这么来的。
       inputs: defaultPolicy().inputs.map(entry => entry.kind === 'text' ? { ...entry, upstream: 'supported' as const }
         : entry.kind === 'image' && vision ? { ...entry, upstream: 'supported' as const, gateway: 'supported' as const } : entry),
-      tools: { functionTools: 'supported', parallelTools: 'unknown', customTools: 'unsupported', verification: 'declared' },
+      tools: { functionTools: 'supported', parallelTools: 'unknown', customTools: 'unsupported', builtinTools: 'unsupported', verification: 'declared' },
     },
     displayNameLayer: { discovered: null, userValue: displayName, overridden: true },
     capabilityRevision: 1, version: 1, createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z',

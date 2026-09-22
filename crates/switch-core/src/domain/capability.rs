@@ -1,11 +1,15 @@
 use serde::{Deserialize, Serialize};
 
 /// 能力支持状态：未知不能当作支持，也不能当作不支持。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// 默认值是未知而不是不支持：老数据里没有这一项时，界面要能把它显示成「没声明过」，
+/// 而不是替用户下一个「不支持」的结论。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Support {
     Supported,
     Unsupported,
+    #[default]
     Unknown,
 }
 
@@ -238,6 +242,18 @@ pub struct ToolCapability {
     pub function_tools: Support,
     pub parallel_tools: Support,
     pub custom_tools: Support,
+    /// 上游自己执行的服务端内置工具（`web_search`、`file_search`、`code_interpreter` 等）。
+    ///
+    /// 与 function / custom 工具不是一回事：那两类由宿主（Codex）自己调用并回传结果，
+    /// 网关只负责转发；内置工具是**上游的**功能，上游没实现就整条请求被拒。
+    /// 实测：第三方网关收到 `{"type":"web_search"}` 直接回 400
+    /// `responses_feature_not_supported: tool type 'web_search' is not supported`，
+    /// 而这条 400 与用户「我根本没开过联网搜索」的认知完全对不上。
+    ///
+    /// 所以它不是「有没有这个能力」而是「要不要转发」：未声明（含未知）时不转发，
+    /// 并在诊断里记为损失。老数据缺这一项时按未知处理。
+    #[serde(default)]
+    pub builtin_tools: Support,
     pub verification: Verification,
 }
 
@@ -247,6 +263,7 @@ impl Default for ToolCapability {
             function_tools: Support::Unknown,
             parallel_tools: Support::Unknown,
             custom_tools: Support::Unknown,
+            builtin_tools: Support::Unknown,
             verification: Verification::Declared,
         }
     }

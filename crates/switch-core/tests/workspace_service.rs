@@ -682,3 +682,101 @@ fn switching_the_active_key_puts_the_models_back_to_pending() {
         "换 Key 之后模型必须回到待应用，否则界面完全看不出「还没生效」"
     );
 }
+
+/// 把一个已发布的模型落到「已加载」，返回写回后的行（版本已前移）。
+fn mark_loaded(
+    service: &WorkspaceService,
+    model: &switch_core::domain::model::Model,
+) -> switch_core::domain::model::Model {
+    let mut next = model.clone();
+    next.host_state = HostState::Loaded;
+    service.repository.save_model(next, model.version).unwrap()
+}
+
+/// 改模型的协议覆盖必须回到待应用。
+///
+/// `protocol_override` 决定路由快照里的 `protocol_id`，也就是用哪个适配器：不重新发布
+/// 就等于没改。用户的话是「配置更新了但没同步，还得自己重启 Codex」——看得见的那部分是
+/// 界面：只要模型回到待应用，网关页顶部那条就会自己出现。
+#[test]
+fn changing_the_protocol_override_puts_the_model_back_to_pending() {
+    let (service, provider) = seeded_provider();
+    let model = service
+        .save_model(ready_model(provider.id.as_str(), "vendor/a", "模型甲"), 0)
+        .unwrap();
+    let model = mark_loaded(&service, &model);
+
+    let mut switched = ready_model(provider.id.as_str(), "vendor/a", "模型甲");
+    switched.id = Some(model.id.as_str().to_owned());
+    switched.catalog_alias = model.catalog_alias.as_str().to_owned();
+    switched.protocol_override = Some(Protocol::ChatCompletions);
+    let after = service.save_model(switched, model.version).unwrap();
+
+    assert_eq!(
+        after.host_state,
+        HostState::PendingApply,
+        "换适配器不重新发布就等于没换"
+    );
+}
+
+/// 什么都没改就保存（打开编辑器直接点保存）不该把「已加载」打回待应用。
+///
+/// 反过来做的话，用户每次翻一遍模型都会被要求再应用一次，那条待应用条就成了噪音。
+#[test]
+fn saving_a_model_without_changes_leaves_the_host_state_alone() {
+    let (service, provider) = seeded_provider();
+    let model = service
+        .save_model(ready_model(provider.id.as_str(), "vendor/a", "模型甲"), 0)
+        .unwrap();
+    let model = mark_loaded(&service, &model);
+
+    let mut same = ready_model(provider.id.as_str(), "vendor/a", "模型甲");
+    same.id = Some(model.id.as_str().to_owned());
+    same.catalog_alias = model.catalog_alias.as_str().to_owned();
+    let after = service.save_model(same, model.version).unwrap();
+
+    assert_eq!(after.host_state, HostState::Loaded);
+}
+
+/// 改供应商的接口协议：它旗下已纳入目录的模型必须回到待应用。
+///
+/// 协议决定 `protocol_id`，而它冻结在路由快照里；以前改完协议页面上一句提示都没有，
+/// 用户以为已经生效了，实际新请求还在走旧适配器。
+#[test]
+fn switching_a_providers_protocol_puts_its_models_back_to_pending() {
+    let (service, provider) = seeded_provider();
+    let model = service
+        .save_model(ready_model(provider.id.as_str(), "vendor/a", "模型甲"), 0)
+        .unwrap();
+    mark_loaded(&service, &model);
+
+    let mut switched = provider_draft();
+    switched.id = Some(provider.id.as_str().to_owned());
+    switched.protocol = Protocol::ChatCompletions;
+    service.save_provider(switched, provider.version).unwrap();
+
+    let after = service.list_models().unwrap().remove(0);
+    assert_eq!(
+        after.host_state,
+        HostState::PendingApply,
+        "换协议之后模型必须回到待应用"
+    );
+}
+
+/// 只改备注这种与路由无关的字段，不该要求重新应用。
+#[test]
+fn editing_a_providers_notes_does_not_ask_for_a_reapply() {
+    let (service, provider) = seeded_provider();
+    let model = service
+        .save_model(ready_model(provider.id.as_str(), "vendor/a", "模型甲"), 0)
+        .unwrap();
+    mark_loaded(&service, &model);
+
+    let mut annotated = provider_draft();
+    annotated.id = Some(provider.id.as_str().to_owned());
+    annotated.notes = Some("备用账号".into());
+    service.save_provider(annotated, provider.version).unwrap();
+
+    let after = service.list_models().unwrap().remove(0);
+    assert_eq!(after.host_state, HostState::Loaded);
+}

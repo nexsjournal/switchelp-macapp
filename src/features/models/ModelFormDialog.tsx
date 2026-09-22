@@ -62,6 +62,23 @@ export function ModelFormDialog({ client, providerId, model, onSaved, onClose }:
     return () => window.removeEventListener('keydown', onKeydown);
   }, [busy]);
 
+  /**
+   * 智能配置要补的最大输出。
+   *
+   * 默认值（128K）只在它真的装得下时才用：输出上限**必须小于**上下文窗口，所以填一个
+   * 比默认值更小的窗口时（例如手动写 128k），照抄默认值会立刻得到一对非法数值——
+   * 保存按钮按下去就是「最大输出必须小于上下文窗口」，而占位符刚刚还承诺会给一个值。
+   * 折半是各家文档里常见的输出/窗口比例，也是不用追问用户就能保证成立的那个取值。
+   */
+  const smartOutput = (context: number | null) => context === null
+    ? DISCOVERY_DEFAULT_LIMITS.outputLimit
+    : Math.max(1, Math.min(DISCOVERY_DEFAULT_LIMITS.outputLimit, Math.floor(context / 2)));
+
+  /** 已经填好并解析出来的上下文窗口。输入还在写（例如刚敲了 `12k`）时不抛错，当作空。 */
+  const typedContext = () => { try { return parseTokens(context); } catch { return null; } };
+  /** 智能配置实际会用的上下文：没填就是默认值。 */
+  const effectiveContext = () => typedContext() ?? DISCOVERY_DEFAULT_LIMITS.contextLimit;
+
   /** 长度留空时智能配置补什么值：写成占位符让人看得见，而不是保存时才偷偷填。 */
   const fallback = (value: string, limit: number) => smart && !value.trim() ? limit.toLocaleString() : undefined;
 
@@ -79,7 +96,7 @@ export function ModelFormDialog({ client, providerId, model, onSaved, onClose }:
     try {
       const next: CapabilityState = { ...ability,
         contextLimit: parseTokens(context) ?? (smart ? DISCOVERY_DEFAULT_LIMITS.contextLimit : null),
-        outputLimit: parseTokens(output) ?? (smart ? DISCOVERY_DEFAULT_LIMITS.outputLimit : null) };
+        outputLimit: parseTokens(output) ?? (smart ? smartOutput(effectiveContext()) : null) };
       const id = upstreamId.trim();
       const saved = await client.saveModel({
         id: model?.id,
@@ -118,7 +135,9 @@ export function ModelFormDialog({ client, providerId, model, onSaved, onClose }:
           <Switch checked={smart} onChange={value => { setSmart(value); setDirty(true); }} label={t('editor.smart')} />
         </div>
         {/* 开关换行的解释放在开关下面：它是这一段的行为说明，不是某个字段的标签。 */}
-        <p className={styles.smartNote}>{smart ? t('editor.smartOn', { context: DISCOVERY_DEFAULT_LIMITS.contextLimit.toLocaleString(), output: DISCOVERY_DEFAULT_LIMITS.outputLimit.toLocaleString() }) : t('editor.smartOff')}</p>
+        <p className={styles.smartNote}>{smart
+          ? t('editor.smartOn', { context: effectiveContext().toLocaleString(), output: smartOutput(effectiveContext()).toLocaleString() })
+          : t('editor.smartOff')}</p>
 
         <label>{t('editor.modelId')}<input value={upstreamId} required maxLength={256} autoFocus={!model}
           onChange={event => { setUpstreamId(event.target.value); setDirty(true); }}
@@ -130,7 +149,7 @@ export function ModelFormDialog({ client, providerId, model, onSaved, onClose }:
 
         <label><span className="field-label">{t('editor.outputShort')}<FieldHelp text={t('editor.outputHint')} /></span>
           <input value={output} onChange={event => { setOutput(event.target.value); setDirty(true); }}
-            placeholder={fallback(output, DISCOVERY_DEFAULT_LIMITS.outputLimit) ?? t('editor.outputPlaceholder')} /></label>
+            placeholder={fallback(output, smartOutput(smart ? effectiveContext() : null)) ?? t('editor.outputPlaceholder')} /></label>
 
         <label><span className="field-label">{t('editor.protocol')}<FieldHelp text={t('editor.protocolHint')} /></span>
           {/* 默认跟随供应商：绝大多数模型不需要单独设协议，把「跟随」放在第一项。 */}
@@ -166,6 +185,9 @@ export function ModelFormDialog({ client, providerId, model, onSaved, onClose }:
               <CheckCell label={t('editor.parallelTools')} hint={t('editor.abilitiesHint')}
                 checked={ability.parallelTools === 'supported'}
                 onChange={next => setAbility(current => ({ ...current, parallelTools: next ? 'supported' : 'unsupported' }))} />
+              <CheckCell label={t('editor.builtinTools')} hint={t('editor.builtinToolsHint')}
+                checked={ability.builtinTools === 'supported'}
+                onChange={next => setAbility(current => ({ ...current, builtinTools: next ? 'supported' : 'unsupported' }))} />
             </CheckCells>
             <p className="field-hint">{t('editor.abilityTriState')}</p>
 

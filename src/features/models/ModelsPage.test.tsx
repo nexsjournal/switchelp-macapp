@@ -30,7 +30,7 @@ function model(id: string, providerId: string, displayName: string, overrides: P
     policy: {
       contextLimit: 128_000, outputLimit: 8_192, compactLimit: null,
       reasoning: { support: 'supported', control: 'effort', allowedValues: ['low'], defaultValue: 'low', budgetTokens: null, mappingId: 'm' },
-      inputs: [], tools: { functionTools: 'supported', parallelTools: 'unknown', customTools: 'unsupported', verification: 'declared' },
+      inputs: [], tools: { functionTools: 'supported', parallelTools: 'unknown', customTools: 'unsupported', builtinTools: 'unsupported', verification: 'declared' },
     },
     displayNameLayer: { discovered: null, userValue: displayName, overridden: true },
     capabilityRevision: 1, version: 1, createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z',
@@ -40,6 +40,10 @@ function model(id: string, providerId: string, displayName: string, overrides: P
 
 const catalogModel = model('m_1', 'p_a', '目录中的模型');
 const looseModel = model('m_2', 'p_b', '目录外的模型', { inCatalog: false, hostState: 'not_in_catalog' });
+
+const credential = { id: 'k_1', providerId: 'p_a', label: '日常', secretRef: 'r', secretVersion: 1,
+  maskedSuffix: '0001', status: 'verified' as const, scope: null, lastVerifiedAt: null, version: 1,
+  createdAt: '2026-09-18T00:00:00Z' };
 
 function renderPage(overrides: Partial<Parameters<typeof testClient>[0]> = {}, models: Model[] = [catalogModel, looseModel]) {
   const client = testClient(overrides);
@@ -228,6 +232,56 @@ describe('模型列表', () => {
 
     await user.click(screen.getByRole('button', { name: '测试 目录中的模型' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('还没有可用的 Key，无法测试');
+  });
+
+  /**
+   * 用户反馈：从上游批量拉进来十来个模型之后，得逐个点行里的「测试」，还得自己记着
+   * 哪些点过。行内那个按钮留在原处（它挂在行上，测别的行才是意外），批量的入口另给一个。
+   */
+  it('「测试全部」一次测完列表里的每个模型，并汇总结果', async () => {
+    const user = userEvent.setup();
+    const startProbe = vi.fn()
+      .mockResolvedValueOnce({ stages: [{ stageKey: 'connect', status: 'passed', messageKey: 'probe.connectPassed', elapsedMs: 5 }] })
+      .mockResolvedValueOnce({ stages: [{ stageKey: 'credential', status: 'failed', messageKey: 'probe.upstreamRejected', elapsedMs: 5 }] });
+    renderPage({
+      listCredentials: vi.fn().mockResolvedValue([{ id: 'k_1', providerId: 'p_a', label: '日常', status: 'verified', maskedSuffix: '0001', version: 1, createdAt: '2026-09-18T00:00:00Z' }]),
+      startProbe,
+    });
+
+    await user.click(screen.getByRole('button', { name: '测试全部' }));
+
+    // 每个模型都测到，而且各测各的（不是拿第一行冒充）。
+    expect(startProbe).toHaveBeenCalledTimes(2);
+    expect(startProbe).toHaveBeenCalledWith(
+      { providerId: 'p_a', modelId: 'm_1', credentialId: 'k_1' }, { includeGenerate: false });
+    expect(startProbe).toHaveBeenCalledWith(
+      { providerId: 'p_b', modelId: 'm_2', credentialId: 'k_1' }, { includeGenerate: false });
+
+    // 连接列逐行写回真实结论，不只给个汇总。
+    expect(await screen.findByText('正常')).toBeInTheDocument();
+    expect(await screen.findByText('失败', { selector: 'td span.text-muted' })).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('1 个正常 · 1 个失败 · 0 个缺 Key 未测');
+  });
+
+  it('批量测试里没有可用 Key 的供应商记为「未测」，不算成失败', async () => {
+    const user = userEvent.setup();
+    const startProbe = vi.fn().mockResolvedValue({
+      stages: [{ stageKey: 'connect', status: 'passed', messageKey: 'probe.connectPassed', elapsedMs: 5 }],
+    });
+    renderPage({
+      // 只有供应商甲有 Key：乙的模型测不了，但它不是「失败」。
+      listCredentials: vi.fn(async (providerId: string) => providerId === 'p_a'
+        ? [credential]
+        : []),
+      startProbe,
+    });
+
+    await user.click(screen.getByRole('button', { name: '测试全部' }));
+
+    expect(startProbe).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('status')).toHaveTextContent('1 个正常 · 0 个失败 · 1 个缺 Key 未测');
+    // 没测的那一行保持中性的「未测试」：没有证据不等于有问题。
+    expect(screen.getAllByText('未测试')).toHaveLength(1);
   });
 });
 

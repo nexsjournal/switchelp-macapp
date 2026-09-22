@@ -9,6 +9,7 @@
 pub mod chat;
 pub mod responses;
 
+use crate::domain::capability::Support;
 use serde::{Deserialize, Serialize};
 
 /// 适配器标识。路由快照里的 `protocol_id` 决定用哪一个。
@@ -55,9 +56,19 @@ pub struct RouteLimits {
     pub output_limit: Option<u64>,
     /// 声明可用的思考档位。非空表示该模型已声明档位且映射已版本化。
     pub reasoning_efforts: Vec<String>,
+    /// 该模型是否声明了上游自己的服务端内置工具（`web_search` 等）。
+    ///
+    /// 默认未知＝不转发：宿主发来的内置工具在这个模型上没有依据，而把一件上游没实现的
+    /// 功能转过去，代价不是「能力少一点」而是整条请求被上游 400 拒掉。
+    pub builtin_tools: Support,
 }
 
 impl RouteLimits {
+    /// 内置工具是否允许转发。只有明确声明支持才转发。
+    pub fn forwards_builtin_tools(&self) -> bool {
+        self.builtin_tools == Support::Supported
+    }
+
     /// 收口输出上限：返回实际要发送的值，以及是否因为模型策略被下调。
     pub fn clamp_output_limit(&self, requested: Option<u64>) -> (Option<u64>, bool) {
         match (requested, self.output_limit) {

@@ -1077,6 +1077,9 @@ impl ApplyService {
                     .into_iter()
                     .map(str::to_owned)
                     .collect(),
+                // 内置工具（web_search 等）是上游自己的功能，同样随策略冻结：
+                // 请求期回读表单会让在途请求的行为随一次保存而改变。
+                builtin_tools: model.policy.tools.builtin_tools,
             });
         }
         RouteSnapshot::new(
