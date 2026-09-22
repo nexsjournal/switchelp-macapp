@@ -2,7 +2,7 @@
  * 页面内审计函数。用法（在 mcp__node_repl__js 里）：
  *
  *   const src = await (await import('node:fs/promises')).readFile(
- *     '.zcode/skills/design-conformance/scripts/in-page-audit.js', 'utf8');
+ *     'scripts/in-page-audit.js', 'utf8');
  *   const audit = await tab.playwright.evaluate(`(${src})(${JSON.stringify(rootSelector)})`);
  *
  * rootSelector 传 CSS 选择器：整页用 `'main'`，弹窗用 `'[role="dialog"]'`。

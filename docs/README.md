@@ -42,6 +42,7 @@
 | [扩展板块设计规范审计](audits/2026-09-21-extension-pages-design-conformance.md) | 三轮实测：几何/对比度/点击目标/键盘、配色「更清爽」的取值依据、三处版面重做 |
 | [开发计划](development/01-implementation-plan.md) | 分期、任务、依赖、产物与工期估算 |
 | [测试与发布](development/02-testing-and-release.md) | 兼容实验、协议测试、双平台验收与发布门禁 |
+| [设计规范符合性审计方法](development/04-design-conformance.md) | 用实测数字核对界面：几何四项、对比度、点击目标、键盘与语义、最小窗口与缩放；含已登记的例外与「不许报一个没量过的数字」这条硬规则 |
 | [证据索引](appendix/01-source-index.md) | 仓库 SHA、源码定位、本地证据与调研边界 |
 | [需求追踪与待验证项](appendix/02-traceability-and-risks.md) | 每条需求的实现、页面、测试和未决问题 |
 
