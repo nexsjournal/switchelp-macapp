@@ -26,12 +26,13 @@ Codex  →  ~/.codex/config.toml（本工具受管字段）
 
 从 [Releases](https://github.com/nexsjournal/switchelp-macapp/releases) 下载。
 
-**当前版本 0.2.0 只发布 macOS Apple Silicon 两个包**；Windows 与 Intel Mac 的产物没有附在这次发布上，原因与替代做法见表格下方。
+**当前版本 0.3.0 发布 macOS Apple Silicon 两个包，并附带一个 Windows x64 安装包作为预览**；Intel Mac 的产物没有附在这次发布上，各包的实际能力见表格下方。
 
 | 平台 | 文件 | 首次打开 |
 | --- | --- | --- |
-| macOS（Apple Silicon） | `Switchelp_0.2.0_aarch64.dmg` | 已用 Developer ID 签名，但**尚未公证**，首次打开会被拦截——见下方两条路 |
-| macOS（Apple Silicon） | `Switchelp-0.2.0-arm64.zip` | 同上，解压后把 `Switchelp.app` 拖进 `/Applications` |
+| macOS（Apple Silicon） | `Switchelp_0.3.0_aarch64.dmg` | 已用 Developer ID 签名，但**尚未公证**，首次打开会被拦截——见下方两条路 |
+| macOS（Apple Silicon） | `Switchelp-0.3.0-arm64.zip` | 同上，解压后把 `Switchelp.app` 拖进 `/Applications` |
+| Windows（x64） | `Switchelp_0.3.0_x64-setup.exe` 或 `Switchelp_0.3.0_x64_en-US.msi` | 未签名，且**只是预览**——能装能开，但会拒绝应用配置，见下方 Windows 现状 |
 
 **为什么 macOS 会拦住，以及怎么过去**：签名与公证是两道关卡，本项目目前只有前者，所以首次打开会被系统拒绝。两条路，先试第一条：
 
@@ -47,11 +48,11 @@ Codex  →  ~/.codex/config.toml（本工具受管字段）
 
 更早的 0.1.0 产物名仍是旧的 `GPTSwitch`——它们是在产品与仓库改名之前构建的。应用标识仍是 `app.gptswitch.desktop`（有意保留，让旧版本的应用数据与凭据继续可用）。
 
-**Windows 现状**：0.2.0 **没有发布任何 Windows 产物**。构建任务本身在（[`release.yml`](.github/workflows/release.yml) 的 `build-windows`），但它只在手动触发并勾选 `with_windows` 时才跑——打标签发布永远不会构建它。
+**Windows 现状**：0.3.0 附带一个 Windows x64 安装包（NSIS `setup.exe` 与 MSI）作为**预览**，未签名——目前没有 Windows 代码签名证书。它**能安装、能打开，但会拒绝应用配置**，并在界面上说明原因，而不是照写不误：凭据 helper 在 Windows 上还没有实现，没有它 Codex 无法对本地网关鉴权，每一次请求都会失败。以前的做法——配置照写、界面报成功——比没用更糟：它把一个本来可用的 Codex 弄坏，还让人以为是上游的问题；0.1.1 / 0.1.2 / 0.1.3 三个发布上原先附带的 Windows 安装包已因此撤回。详见[证据索引](docs/appendix/01-source-index.md)。
 
-即便构建出来，**这个应用在 Windows 上会拒绝应用配置**，并在界面上说明原因，而不是照写不误：凭据 helper 在 Windows 上还没有实现，没有它 Codex 无法对本地网关鉴权，每一次请求都会失败。以前的做法——配置照写、界面报成功——比没用更糟：它把一个本来可用的 Codex 弄坏，还让人以为是上游的问题。详见[证据索引](docs/appendix/01-source-index.md)。
+构建任务在（[`release.yml`](.github/workflows/release.yml) 的 `build-windows`），但它只在手动触发并勾选 `with_windows` 时才跑——打标签发布永远不会构建它。
 
-**Intel Mac 现状**：发布矩阵里**是**包含 `x86_64-apple-darwin` 的，但 `build-macos` 任务只在 CI 配好 Apple 签名密钥时才运行，而 0.2.0 的包是本机在 Apple Silicon 上签的。需要 Intel 包请从源码构建（`pnpm exec tauri build`）。
+**Intel Mac 现状**：发布矩阵里**是**包含 `x86_64-apple-darwin` 的，但 `build-macos` 任务只在 CI 配好 Apple 签名密钥时才运行，而 0.3.0 的包是本机在 Apple Silicon 上签的。需要 Intel 包请从源码构建（`pnpm exec tauri build`）。
 
 ## 构建与验证
 

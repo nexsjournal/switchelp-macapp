@@ -40,13 +40,14 @@ Codex  →  ~/.codex/config.toml (the fields this tool manages)
 
 Grab a build from [Releases](https://github.com/nexsjournal/switchelp-macapp/releases).
 
-**0.2.0 — the current release — publishes macOS Apple Silicon only.** Windows and Intel Mac bundles are not
-attached to it; see the notes below the table for why and what to do instead.
+**0.3.0 — the current release — publishes macOS Apple Silicon, and attaches a Windows x64 installer as a preview.**
+Intel Mac bundles are not attached; see the notes below the table for what each one does.
 
 | Platform | File | First launch |
 | --- | --- | --- |
-| macOS (Apple Silicon) | `Switchelp_0.2.0_aarch64.dmg` | Signed with a Developer ID but **not notarized** — see below |
-| macOS (Apple Silicon) | `Switchelp-0.2.0-arm64.zip` | Same as above; unzip and drag `Switchelp.app` into `/Applications` |
+| macOS (Apple Silicon) | `Switchelp_0.3.0_aarch64.dmg` | Signed with a Developer ID but **not notarized** — see below |
+| macOS (Apple Silicon) | `Switchelp-0.3.0-arm64.zip` | Same as above; unzip and drag `Switchelp.app` into `/Applications` |
+| Windows (x64) | `Switchelp_0.3.0_x64-setup.exe` or `Switchelp_0.3.0_x64_en-US.msi` | Unsigned, and **preview only** — it installs and opens but refuses to apply configuration, see Windows status |
 
 **Why macOS warns, and how to get past it**: signing and notarization are two separate gates and this project only
 has the first one. macOS will refuse the first launch. Two ways through, easiest first:
@@ -68,18 +69,19 @@ The 0.1.0 artifacts still carry the old `GPTSwitch` name: they were built before
 were renamed. The bundle identifier stays `app.gptswitch.desktop` on purpose, so app data and stored credentials
 from earlier versions keep working.
 
-**Windows status**: no 0.2.0 artifact is published. The build job exists (`build-windows` in
-[`release.yml`](.github/workflows/release.yml)) but only runs on a manual `workflow_dispatch` with `with_windows`
-enabled — a tag push never builds it.
+**Windows status**: 0.3.0 attaches a Windows x64 installer (NSIS `setup.exe` and MSI) as a **preview**, unsigned —
+there is no Windows code-signing certificate yet. It installs and opens, and it **refuses to apply configuration**,
+saying so in the UI instead of writing anything: the credential helper has no Windows implementation yet, and
+without it Codex could not authenticate against the local gateway, so every request would fail. The previous
+behaviour — writing the config anyway and reporting success — was worse than useless: it broke a working Codex and
+blamed the upstream. That is why the Windows installers attached to 0.1.1, 0.1.2 and 0.1.3 were withdrawn from
+their releases. See the [evidence index](docs/appendix/01-source-index.md).
 
-Even once built, **the app refuses to apply configuration on Windows**, and says so in the UI instead of writing
-anything: the credential helper has no Windows implementation yet, and without it Codex could not authenticate
-against the local gateway, so every request would fail. The previous behaviour — writing the config anyway and
-reporting success — was worse than useless: it broke a working Codex and blamed the upstream. See the
-[evidence index](docs/appendix/01-source-index.md).
+The build job (`build-windows` in [`release.yml`](.github/workflows/release.yml)) only runs on a manual
+`workflow_dispatch` with `with_windows` enabled — a tag push never builds it.
 
 **Intel Mac status**: the release matrix does cover `x86_64-apple-darwin`, but the `build-macos` job only runs when
-the Apple signing secrets are configured in CI, and the 0.2.0 artifacts were signed locally on Apple Silicon. Build
+the Apple signing secrets are configured in CI, and the 0.3.0 artifacts were signed locally on Apple Silicon. Build
 from source (`pnpm exec tauri build`) if you need an Intel bundle.
 
 ## Build and verify
