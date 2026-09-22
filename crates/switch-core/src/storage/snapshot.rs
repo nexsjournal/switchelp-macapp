@@ -5,6 +5,7 @@
 //! 请求开始时持有不可变 Revision；中途 UI 保存不会更换其上游；目录修订与运行策略修订
 //! 分开发布，旧目录在仍有引用时保留。
 
+use crate::domain::capability::Support;
 use crate::domain::error::{CoreError, ErrorCode};
 use crate::domain::ids::{CredentialId, InstanceId, ModelId, ProviderId, RevisionId};
 use serde::{Deserialize, Serialize};
@@ -88,6 +89,12 @@ pub struct RouteEntry {
     /// 目录声明可由宿主原生发送的模态，用于显式拒绝未声明的输入。
     #[serde(default)]
     pub native_modalities: Vec<String>,
+    /// 该模型是否声明了上游自己执行的内置工具（`web_search` 等）。
+    ///
+    /// 老快照没有这项，缺省即未知＝不转发：把一份没有依据的内置工具转给上游，
+    /// 换来的是一条与用户操作无关的 400。
+    #[serde(default)]
+    pub builtin_tools: Support,
 }
 
 impl RouteEntry {
@@ -96,6 +103,7 @@ impl RouteEntry {
         crate::protocols::RouteLimits {
             output_limit: self.output_limit,
             reasoning_efforts: self.reasoning_efforts.clone(),
+            builtin_tools: self.builtin_tools,
         }
     }
 }

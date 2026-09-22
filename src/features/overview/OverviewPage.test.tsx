@@ -7,7 +7,7 @@ const model = {
   lifecycle: 'saved' as const, hostState: 'pending_apply' as const, inCatalog: true,
   policy: { contextLimit: 128_000, outputLimit: 8_192, compactLimit: null,
     reasoning: { support: 'unknown' as const, control: 'none' as const, allowedValues: [], defaultValue: null, budgetTokens: null, mappingId: null },
-    inputs: [], tools: { functionTools: 'unknown' as const, parallelTools: 'unknown' as const, customTools: 'unknown' as const, verification: 'declared' as const } },
+    inputs: [], tools: { functionTools: 'unknown' as const, parallelTools: 'unknown' as const, customTools: 'unknown' as const, builtinTools: 'unknown' as const, verification: 'declared' as const } },
   displayNameLayer: { discovered: null, userValue: null, overridden: false },
   capabilityRevision: 1, version: 1, createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z',
 };

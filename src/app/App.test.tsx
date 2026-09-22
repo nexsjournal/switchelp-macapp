@@ -348,7 +348,7 @@ test('获取可用模型：弹窗里勾选确认，一次把模型按默认长�
   expect(within(picker).getByRole('checkbox', { name: /vendor\/old/ })).toBeDisabled();
   expect(within(picker).getByRole('checkbox', { name: /vendor\/deepseek-v4\.1/ })).toBeChecked();
   // 上游不返回窗口大小：默认值写在底栏，加之前就能看到。
-  expect(within(picker).getByText(/128,000 \/ 8,192 的默认值/)).toBeInTheDocument();
+  expect(within(picker).getByText(/1,000,000 \/ 128,000 的默认值/)).toBeInTheDocument();
 
   await user.click(within(picker).getByRole('button', { name: '添加 2 个模型' }));
 
@@ -357,8 +357,8 @@ test('获取可用模型：弹窗里勾选确认，一次把模型按默认长�
     providerId: 'p_test', upstreamId: 'vendor/deepseek-v4.1', displayName: 'deepseek-v4.1', inCatalog: true,
   }), 0);
   const policy = saveModel.mock.calls[0]![0]!.policy;
-  expect(policy.contextLimit).toBe(128_000);
-  expect(policy.outputLimit).toBe(8_192);
+  expect(policy.contextLimit).toBe(1_000_000);
+  expect(policy.outputLimit).toBe(128_000);
   expect(screen.getByText('已添加 2 个模型。')).toBeInTheDocument();
 });
 
@@ -385,12 +385,13 @@ test('手工添加模型：模型 ID 与长度落进策略，供应商弹窗留�
   await user.type(within(form).getByLabelText('上下文窗口'), '128k');
   await user.click(within(form).getByRole('button', { name: '保存' }));
 
-  // 显示名沿用模型 ID；128k 被解析成数值，最大输出用智能配置的默认值补齐。
+  // 显示名沿用模型 ID；128k 被解析成数值。最大输出留空时由智能配置补齐，但**不会**
+  // 照抄 128K 的默认值：输出上限必须小于窗口，填进来的窗口正好也是 128k，于是取窗口折半。
   expect(saveModel).toHaveBeenCalledWith(expect.objectContaining({
     providerId: 'p_test', upstreamId: 'vendor/manual', displayName: 'vendor/manual', inCatalog: true,
   }), 0);
   expect(saveModel.mock.calls[0]![0]!.policy.contextLimit).toBe(128_000);
-  expect(saveModel.mock.calls[0]![0]!.policy.outputLimit).toBe(8_192);
+  expect(saveModel.mock.calls[0]![0]!.policy.outputLimit).toBe(64_000);
 });
 
 /** 供应商弹窗里的一行模型：徽章、四个动作，以及它们各自的结论。 */
@@ -399,7 +400,7 @@ function modelRow() {
     displayName: '目录中的模型', lifecycle: 'saved' as const, hostState: 'pending_apply' as const, inCatalog: true,
     policy: { contextLimit: 1_048_576, outputLimit: 8_192, compactLimit: null,
       reasoning: { support: 'unknown' as const, control: 'none' as const, allowedValues: [], defaultValue: null, budgetTokens: null, mappingId: null },
-      inputs: [], tools: { functionTools: 'unknown' as const, parallelTools: 'unknown' as const, customTools: 'unknown' as const, verification: 'declared' as const } },
+      inputs: [], tools: { functionTools: 'unknown' as const, parallelTools: 'unknown' as const, customTools: 'unknown' as const, builtinTools: 'unknown' as const, verification: 'declared' as const } },
     displayNameLayer: { discovered: null, userValue: null, overridden: false }, capabilityRevision: 1, version: 3,
     createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z' };
 }
@@ -480,7 +481,7 @@ test('编辑器有未保存修改时侧栏导航先确认，放弃后才真正�
     displayName: '目录中的模型', lifecycle: 'saved' as const, hostState: 'pending_apply' as const, inCatalog: true,
     policy: { contextLimit: 128_000, outputLimit: 8_192, compactLimit: null,
       reasoning: { support: 'unknown' as const, control: 'none' as const, allowedValues: [], defaultValue: null, budgetTokens: null, mappingId: null },
-      inputs: [], tools: { functionTools: 'unknown' as const, parallelTools: 'unknown' as const, customTools: 'unknown' as const, verification: 'declared' as const } },
+      inputs: [], tools: { functionTools: 'unknown' as const, parallelTools: 'unknown' as const, customTools: 'unknown' as const, builtinTools: 'unknown' as const, verification: 'declared' as const } },
     displayNameLayer: { discovered: null, userValue: null, overridden: false }, capabilityRevision: 1, version: 3,
     createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z' };
   const client = testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
@@ -527,7 +528,7 @@ test('纳入目录的模型不能直接删除，必须先移出', async () => {
     displayName: '目录中的模型', lifecycle: 'saved' as const, hostState: 'pending_apply' as const, inCatalog: true,
     policy: { contextLimit: 128_000, outputLimit: 8_192, compactLimit: null,
       reasoning: { support: 'unknown' as const, control: 'none' as const, allowedValues: [], defaultValue: null, budgetTokens: null, mappingId: null },
-      inputs: [], tools: { functionTools: 'unknown' as const, parallelTools: 'unknown' as const, customTools: 'unknown' as const, verification: 'declared' as const } },
+      inputs: [], tools: { functionTools: 'unknown' as const, parallelTools: 'unknown' as const, customTools: 'unknown' as const, builtinTools: 'unknown' as const, verification: 'declared' as const } },
     displayNameLayer: { discovered: null, userValue: null, overridden: false }, capabilityRevision: 1, version: 3,
     createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z' };
   const client = testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
@@ -550,7 +551,7 @@ test('移出目录要确认，并按版本号提交 inCatalog=false', async () =
     displayName: '目录中的模型', lifecycle: 'saved' as const, hostState: 'pending_apply' as const, inCatalog: true,
     policy: { contextLimit: 128_000, outputLimit: 8_192, compactLimit: null,
       reasoning: { support: 'unknown' as const, control: 'none' as const, allowedValues: [], defaultValue: null, budgetTokens: null, mappingId: null },
-      inputs: [], tools: { functionTools: 'unknown' as const, parallelTools: 'unknown' as const, customTools: 'unknown' as const, verification: 'declared' as const } },
+      inputs: [], tools: { functionTools: 'unknown' as const, parallelTools: 'unknown' as const, customTools: 'unknown' as const, builtinTools: 'unknown' as const, verification: 'declared' as const } },
     displayNameLayer: { discovered: null, userValue: null, overridden: false }, capabilityRevision: 1, version: 3,
     createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z' };
   const client = testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),

@@ -7,7 +7,7 @@ import { RowMenu } from '@/components/RowMenu';
 import { Switch } from '@/components/Switch';
 import { showToast, dismissTone } from '@/components/Toast';
 import { ModelFormDialog } from '@/features/models/ModelFormDialog';
-import { compactTokens, discoveredModelPolicy, modelDraft } from '@/features/models/policy';
+import { compactTokens, modelDraft, recommendedPolicy } from '@/features/models/policy';
 import { DiscoverModelsDialog } from './DiscoverModelsDialog';
 import styles from './ProviderForm.module.css';
 
@@ -239,7 +239,7 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
       await client.saveModel({
         providerId: targetId, upstreamId: model.upstreamId,
         displayName: model.displayName || model.upstreamId, catalogAlias: '',
-        policy: discoveredModelPolicy(), inCatalog: true, displayNameOverridden: false,
+        policy: recommendedPolicy(), inCatalog: true, displayNameOverridden: false,
         // 发现出来的模型一律跟随供应商：上游列表不会告诉我们它走哪套协议。
         protocolOverride: null,
       }, 0);

@@ -18,6 +18,7 @@ use switch_core::{
     credentials::MemoryVault,
     diagnostics::{DiagnosticLog, LogLevel},
     domain::{
+        capability::Support,
         ids::{InstanceId, RevisionId},
         model::ModelPolicy,
         provider::{AuthKind, Protocol},
@@ -149,6 +150,8 @@ struct TestPolicy {
     output_limit: Option<u64>,
     reasoning_efforts: Vec<String>,
     native_modalities: Vec<String>,
+    /// 上游内置工具（`web_search` 等）是否声明支持；默认未知＝不转发。
+    builtin_tools: Support,
 }
 
 impl TestPolicy {
@@ -238,6 +241,7 @@ impl Harness {
                         output_limit: route_policy.output_limit,
                         reasoning_efforts: route_policy.reasoning_efforts.clone(),
                         native_modalities: route_policy.native_modalities.clone(),
+                        builtin_tools: route_policy.builtin_tools,
                     }],
                     "2026-09-18T00:00:00Z",
                 )
@@ -640,6 +644,71 @@ fn responses_upstream_passes_through_and_hides_the_upstream_id() {
     assert_eq!(upstream_body["model"], "vendor/Upstream-Model");
     assert!(upstream_body["input"].is_array(), "透传必须保留 input 结构");
     assert!(upstream_body.get("messages").is_none());
+}
+
+/// 宿主发来的一帧带工具清单的请求：既包含它自己调用的 shell，也包含要求上游执行的
+/// 联网搜索。
+fn request_body_with_tools(alias: &str) -> Value {
+    let mut body = request_body(alias);
+    body["tools"] = json!([
+        {"type": "function", "name": "shell", "parameters": {"type": "object"}},
+        {"type": "web_search"},
+    ]);
+    body
+}
+
+/// 回归：第三方网关收到 `{"type":"web_search"}` 会直接回 400
+/// `responses_feature_not_supported`，用户看到的却是一条跟自己的操作无关的错误。
+/// 没声明过内置工具的模型，网关不得把它转给上游——但宿主自己调用的工具一个不能少。
+#[test]
+fn host_builtin_tools_never_reach_an_upstream_that_did_not_declare_them() {
+    let harness = Harness::start(
+        RESPONSES_V1,
+        MockReply::Sse(RESPONSES_SSE),
+        Protocol::Responses,
+    );
+    let token = harness.token.expose().to_owned();
+
+    let (status, _) = harness.post(
+        "responses",
+        Some(&token),
+        &request_body_with_tools(&harness.alias),
+    );
+    assert_eq!(status, 200);
+
+    let upstream_body = harness.upstream.last_body();
+    let types: Vec<&str> = upstream_body["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(types, vec!["function"], "内置工具必须在上游之前被摘掉");
+}
+
+/// 声明过就原样转发：这是一条真实的能力声明，不是「一律不转发」的一刀切。
+#[test]
+fn declared_builtin_tools_are_forwarded_to_the_upstream() {
+    let harness = Harness::start_with(
+        RESPONSES_V1,
+        MockReply::Sse(RESPONSES_SSE),
+        Protocol::Responses,
+        TestPolicy {
+            builtin_tools: Support::Supported,
+            ..TestPolicy::default()
+        },
+    );
+    let token = harness.token.expose().to_owned();
+
+    let (status, _) = harness.post(
+        "responses",
+        Some(&token),
+        &request_body_with_tools(&harness.alias),
+    );
+    assert_eq!(status, 200);
+
+    let upstream_body = harness.upstream.last_body();
+    assert_eq!(upstream_body["tools"].as_array().unwrap().len(), 2);
 }
 
 #[test]

@@ -39,6 +39,7 @@
 | 多轮 tool call 与 output | 保持 call_id 对应、顺序和角色，不拼成普通聊天文字 |
 | parallel tool calls | 仅在全链路通过测试时声明；否则拒绝或使用预先公开策略 |
 | custom / freeform 工具 | 不是普通 function；有专用映射才允许，尤其 apply_patch |
+| 上游内置工具（`web_search` 等） | 由上游执行，网关既不转译也不替代：该模型未声明支持时**摘掉并记损失**。原样转发会被没实现它的网关整条拒掉（实测小米 MiMo：`responses_feature_not_supported: tool type 'web_search' is not supported`），用户看到的却是一条与自己的操作无关的 400。宿主自己调用的 function / custom 工具不受影响 |
 | reasoning 内容 | 与可见输出分开；不将供应商隐藏字段当普通文本输出 |
 | usage | 可缺失，用 null；不伪造 0 Token 或收费金额 |
 | 流结束 | 正常完成、输出上限截断、取消、异常分别映射 |

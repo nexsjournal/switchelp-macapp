@@ -11,6 +11,29 @@ pub fn endpoint(base: &str) -> String {
     format!("{}/responses", base.trim_end_matches('/'))
 }
 
+/// 上游自己执行的服务端内置工具类型。
+///
+/// 这些能力由模型服务方实现并在服务端跑，网关既不能转译也不能替代。**不在这张表里的**
+/// 类型（`function`、`custom`）是宿主自己调用、把结果回传的工具，必须原样转发。
+const PROVIDER_SIDE_TOOL_TYPES: [&str; 9] = [
+    "web_search",
+    "web_search_preview",
+    "file_search",
+    "computer_use_preview",
+    "code_interpreter",
+    "image_generation",
+    "mcp",
+    "local_shell",
+    "apply_patch",
+];
+
+/// 该工具是否属于「上游自己执行」的一类。
+fn is_provider_side_tool(tool: &serde_json::Value) -> bool {
+    tool.get("type")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|kind| PROVIDER_SIDE_TOOL_TYPES.contains(&kind))
+}
+
 /// 准备透传请求：只替换 `model`，其余字段原样保留。
 pub fn prepare(
     base: &str,
@@ -81,6 +104,61 @@ pub fn prepare(
         }
     }
 
+    // 上游自己执行的内置工具（`web_search` 等）：该模型没声明过就一律摘掉。
+    //
+    // 实测故障：第三方网关收到 `{"type":"web_search"}` 直接回 400
+    // `responses_feature_not_supported: tool type 'web_search' is not supported by this
+    // gateway phase`——用户根本没开过联网搜索，看到的却是一条跟自己的操作毫无关系的 400，
+    // 而 Codex 只在启动时读配置，于是「换个模型试试」也救不回来。
+    //
+    // 与 reasoning 同一个口径：未声明 = 不发，并如实记为损失。宿主自己调用的
+    // function / custom 工具不受影响，它们是这个网关真正服务的对象。
+    if !limits.forwards_builtin_tools() {
+        let mut dropped: Vec<String> = Vec::new();
+        if let Some(tools) = object
+            .get_mut("tools")
+            .and_then(|value| value.as_array_mut())
+        {
+            tools.retain(|tool| {
+                if is_provider_side_tool(tool) {
+                    dropped.push(
+                        tool.get("type")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("?")
+                            .to_owned(),
+                    );
+                    return false;
+                }
+                true
+            });
+            // 摘空了就不要留一个空数组：有的网关对 `"tools": []` 也不客气。
+            if tools.is_empty() {
+                object.remove("tools");
+            }
+        }
+        if !dropped.is_empty() {
+            dropped.dedup();
+            // 指定用某个已被摘掉的内置工具时，`tool_choice` 会指向一个请求里不存在的工具。
+            let dangling_choice = object.get("tool_choice").is_some_and(is_provider_side_tool);
+            if dangling_choice {
+                object.remove("tool_choice");
+            }
+            losses.push(AdaptationLoss::new(
+                "tools",
+                "loss.builtinToolDropped",
+                format!(
+                    "该模型未声明上游内置工具，宿主请求的 {} 未转发{}",
+                    dropped.join("、"),
+                    if dangling_choice {
+                        "，指向它的 tool_choice 也一并摘除"
+                    } else {
+                        ""
+                    }
+                ),
+            ));
+        }
+    }
+
     let bytes = serde_json::to_vec(&body).map_err(|_| CoreError::internal("请求体序列化失败"))?;
     Ok(PreparedRequest {
         url: endpoint(base),
@@ -137,6 +215,7 @@ mod tests {
             &RouteLimits {
                 output_limit: None,
                 reasoning_efforts: vec!["low".to_owned()],
+                ..RouteLimits::default()
             },
         )
         .unwrap();
@@ -181,6 +260,156 @@ mod tests {
 }
 
 #[cfg(test)]
+mod builtin_tool_tests {
+    use super::super::RouteLimits;
+    use super::*;
+    use crate::domain::capability::Support;
+    use serde_json::json;
+
+    fn limits(builtin_tools: Support) -> RouteLimits {
+        RouteLimits {
+            builtin_tools,
+            ..RouteLimits::default()
+        }
+    }
+
+    /// 宿主发来的一帧工具清单：既包含它自己调用的 shell / exec，也包含要求上游执行的
+    /// 联网搜索——后者才是这条链路上真正会出事的那一个。
+    fn request() -> serde_json::Value {
+        json!({
+            "model": "gs/x",
+            "input": [],
+            "tools": [
+                {"type": "function", "name": "shell", "parameters": {}},
+                {"type": "custom", "name": "exec"},
+                {"type": "web_search"},
+            ],
+        })
+    }
+
+    fn prepared(builtin_tools: Support) -> (serde_json::Value, Vec<AdaptationLoss>) {
+        let prepared = prepare(
+            "https://host/v1",
+            "vendor/M",
+            &request(),
+            &limits(builtin_tools),
+        )
+        .unwrap();
+        let body = serde_json::from_slice(&prepared.body).unwrap();
+        (body, prepared.losses)
+    }
+
+    #[test]
+    fn an_undeclared_model_never_sends_the_upstreams_own_builtin_tools() {
+        // 第三方网关收到 `{"type":"web_search"}` 会直接回
+        // `responses_feature_not_supported`（实测于小米 MiMo），而用户从没开过联网搜索。
+        // 未声明 = 不发，并把这件事说清楚。
+        let (body, losses) = prepared(Support::Unknown);
+
+        let types: Vec<&str> = body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["type"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            types,
+            vec!["function", "custom"],
+            "宿主自己调用的工具一个都不能少，上游自己执行的必须摘掉"
+        );
+        assert_eq!(losses.len(), 1);
+        assert_eq!(losses[0].message_key, "loss.builtinToolDropped");
+        assert!(
+            losses[0].detail.contains("web_search"),
+            "摘了哪一个必须写出来：{}",
+            losses[0].detail
+        );
+    }
+
+    #[test]
+    fn a_model_that_declares_builtin_tools_gets_them_forwarded_untouched() {
+        let (body, losses) = prepared(Support::Supported);
+
+        assert_eq!(body["tools"].as_array().unwrap().len(), 3);
+        assert!(losses.is_empty(), "声明过就不该产生损失记录");
+    }
+
+    #[test]
+    fn a_request_without_tools_produces_no_loss() {
+        let prepared = prepare(
+            "https://host/v1",
+            "vendor/M",
+            &json!({"model": "gs/x", "input": []}),
+            &limits(Support::Unknown),
+        )
+        .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&prepared.body).unwrap();
+
+        assert!(body.get("tools").is_none());
+        assert!(prepared.losses.is_empty(), "没发工具就不该报损失");
+    }
+
+    #[test]
+    fn dropping_the_only_tool_leaves_no_empty_array() {
+        let prepared = prepare(
+            "https://host/v1",
+            "vendor/M",
+            &json!({"model": "gs/x", "input": [], "tools": [{"type": "web_search"}]}),
+            &limits(Support::Unknown),
+        )
+        .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&prepared.body).unwrap();
+
+        assert!(
+            body.get("tools").is_none(),
+            "空工具数组有的网关也照拒，摘空就连字段一起摘"
+        );
+    }
+
+    #[test]
+    fn a_tool_choice_pinning_a_dropped_tool_is_removed_too() {
+        // 指定用已被摘掉的工具，等于要求上游调用一个请求里不存在的工具。
+        let prepared = prepare(
+            "https://host/v1",
+            "vendor/M",
+            &json!({
+                "model": "gs/x",
+                "input": [],
+                "tools": [{"type": "function", "name": "shell"}, {"type": "web_search"}],
+                "tool_choice": {"type": "web_search"},
+            }),
+            &limits(Support::Unknown),
+        )
+        .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&prepared.body).unwrap();
+
+        assert!(body.get("tool_choice").is_none());
+        assert_eq!(body["tools"].as_array().unwrap().len(), 1);
+        assert!(prepared.losses[0].detail.contains("tool_choice"));
+    }
+
+    #[test]
+    fn a_string_tool_choice_is_left_alone() {
+        // 宿主默认发的是 `"auto"`，它不指向任何具体工具，摘工具不影响它。
+        let prepared = prepare(
+            "https://host/v1",
+            "vendor/M",
+            &json!({
+                "model": "gs/x",
+                "input": [],
+                "tools": [{"type": "web_search"}],
+                "tool_choice": "auto",
+            }),
+            &limits(Support::Unknown),
+        )
+        .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&prepared.body).unwrap();
+
+        assert_eq!(body["tool_choice"], "auto");
+    }
+}
+
+#[cfg(test)]
 mod reasoning_tests {
     use super::super::RouteLimits;
     use super::*;
@@ -190,6 +419,7 @@ mod reasoning_tests {
         RouteLimits {
             output_limit: None,
             reasoning_efforts: efforts.iter().map(|value| (*value).to_owned()).collect(),
+            ..RouteLimits::default()
         }
     }
 
@@ -298,6 +528,7 @@ mod reasoning_tests {
             &RouteLimits {
                 output_limit: Some(4_096),
                 reasoning_efforts: vec!["low".to_owned()],
+                ..RouteLimits::default()
             },
         )
         .unwrap();

@@ -115,6 +115,10 @@ impl WorkspaceService {
         };
         let previous_name = provider.name.clone();
         let renamed_from = (previous_name != draft.name).then_some(previous_name);
+        // 协议是**冻结在路由快照里**的（`protocol_id`）：改了它，网关在下次发布之前
+        // 仍然按旧适配器发请求。以前这里什么都不说，用户改完协议发现「没生效」，
+        // 只能自己去 Codex 配置页翻——而 Codex 配置页也在等一个「待应用」。
+        let protocol_changed = provider.protocol != draft.protocol;
         provider.name = draft.name;
         provider.endpoint = draft.endpoint;
         provider.protocol = draft.protocol;
@@ -127,6 +131,9 @@ impl WorkspaceService {
         let saved = self.repository.save_provider(provider, expected_version)?;
         if let Some(previous) = renamed_from {
             self.requalify_model_display_names(&provider_id, &previous, &saved.name)?;
+        }
+        if protocol_changed {
+            self.mark_models_pending_for_provider(provider_id.as_str())?;
         }
         Ok(saved)
     }
@@ -441,13 +448,23 @@ impl WorkspaceService {
             HostState::NotInCatalog
         };
         if let Some(previous) = previous {
+            // 「目录里的这条记录变了没有」＝「磁盘上的目录 / 冻结的路由是不是旧的」。
+            // 漏一项的后果都一样：改完看起来保存成功，下次请求却还走旧值。
+            //   - 显示名 / in_catalog / alias：目录条目本身；
+            //   - policy：上下文、输出上限、档位、模态、内置工具声明；
+            //   - protocol_override：路由快照里的 `protocol_id`，决定用哪个适配器。
+            //
+            // `upstream_id` 不在这里：换上游 ID 却沿用旧 alias 会被存储层挡住
+            // （「更换上游模型需要新的目录别名」），所以它必然伴随 alias 变化。
             let catalog_changed = previous.policy != model.policy
                 || previous.display_name != model.display_name
                 || previous.catalog_alias != model.catalog_alias
-                || previous.in_catalog != model.in_catalog;
+                || previous.in_catalog != model.in_catalog
+                || previous.protocol_override != model.protocol_override;
             if catalog_changed {
                 model.capability_revision = previous.capability_revision + 1;
             } else {
+                // 什么都没改（例如打开编辑器直接保存）：不要凭空把「已加载」打回待应用。
                 model.host_state = previous.host_state;
             }
         }

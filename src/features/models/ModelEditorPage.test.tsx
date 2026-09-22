@@ -9,7 +9,7 @@ const model = {
   displayName: '代码模型', lifecycle: 'saved' as const, hostState: 'pending_apply' as const, inCatalog: true,
   policy: { contextLimit: 128_000, outputLimit: 8_192, compactLimit: null,
     reasoning: { support: 'supported' as const, control: 'effort' as const, allowedValues: ['low', 'high'], defaultValue: 'low', budgetTokens: null, mappingId: 'reasoning.effort.v1' },
-    inputs: [], tools: { functionTools: 'supported' as const, parallelTools: 'unknown' as const, customTools: 'unsupported' as const, verification: 'declared' as const } },
+    inputs: [], tools: { functionTools: 'supported' as const, parallelTools: 'unknown' as const, customTools: 'unsupported' as const, builtinTools: 'unsupported' as const, verification: 'declared' as const } },
   displayNameLayer: { discovered: null, userValue: '代码模型', overridden: true },
   capabilityRevision: 1, version: 4, createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z',
 };
@@ -44,6 +44,37 @@ test('输入类型与模型能力是勾选单元格：文本锁定，PDF 与视�
   expect(screen.queryByRole('combobox', { name: '文本' })).not.toBeInTheDocument();
   expect(screen.getByRole('checkbox', { name: '函数工具' })).toBeChecked();
   expect(screen.getByRole('checkbox', { name: '并行工具' })).not.toBeChecked();
+  // 内置工具这一项决定要不要把 `web_search` 转发给上游；说明写在单元格的 title 上。
+  expect(screen.getByRole('checkbox', { name: '上游内置工具' })).not.toBeChecked();
+  expect(screen.getByTitle(/第三方网关收到它会整条请求报 400/)).toBeInTheDocument();
+});
+
+test('内置工具未声明时点一下就是「支持」', async () => {
+  // 这一项就是那条上游 400 的开关：未声明（未知）＝不转发，勾上才是「这个上游实现了它」。
+  const user = userEvent.setup();
+  const saveModel = vi.fn().mockResolvedValue(model);
+  const unknown = { ...model, policy: { ...model.policy,
+    tools: { ...model.policy.tools, builtinTools: 'unknown' as const } } };
+  renderEditor({ saveModel }, { model: unknown });
+
+  const box = screen.getByRole('checkbox', { name: '上游内置工具' });
+  expect(box).not.toBeChecked();
+  await user.click(box);
+  expect(box).toBeChecked();
+  await user.click(screen.getByRole('button', { name: '保存' }));
+  expect(saveModel.mock.calls[0]![0]!.policy.tools.builtinTools).toBe('supported');
+});
+
+test('内置工具点两下是「明确不支持」，不会退回未确认', async () => {
+  const user = userEvent.setup();
+  const saveModel = vi.fn().mockResolvedValue(model);
+  renderEditor({ saveModel });
+
+  const box = screen.getByRole('checkbox', { name: '上游内置工具' });
+  await user.click(box);
+  await user.click(box);
+  await user.click(screen.getByRole('button', { name: '保存' }));
+  expect(saveModel.mock.calls[0]![0]!.policy.tools.builtinTools).toBe('unsupported');
 });
 
 test('勾上图片、取消函数工具后按版本号提交', async () => {
@@ -138,4 +169,18 @@ test('没有修改时取消直接返回', async () => {
 
   await user.click(screen.getByRole('button', { name: '取消' }));
   expect(onCancel).toHaveBeenCalled();
+});
+
+test('新建模型时长度从推荐默认值起步，编辑已有模型不改动已保存的值', () => {
+  // 两个编辑入口的默认值必须一样：「添加模型」弹窗的智能配置填 1M/128K，
+  // 而整页编辑器以前给两个空框——未声明的上下文根本应用不到 Codex，等于让人先撞一次失败。
+  renderEditor({}, { model: undefined });
+
+  expect(screen.getByLabelText('上下文窗口')).toHaveValue('1000000');
+  expect(screen.getByLabelText('最大输出 Token')).toHaveValue('128000');
+
+  // 编辑已有模型：带出的是它自己的值（128000 / 8192），不是默认值。
+  renderEditor();
+  expect(screen.getAllByLabelText('上下文窗口').at(-1)).toHaveValue('128000');
+  expect(screen.getAllByLabelText('最大输出 Token').at(-1)).toHaveValue('8192');
 });

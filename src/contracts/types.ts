@@ -133,6 +133,8 @@ export interface ToolCapability {
   functionTools: Support;
   parallelTools: Support;
   customTools: Support;
+  /** 上游自己执行的服务端内置工具（`web_search` 等）。未声明即不转发给上游。 */
+  builtinTools: Support;
   verification: Verification;
 }
 
