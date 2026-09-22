@@ -148,15 +148,16 @@ jobs:
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: pnpm exec tauri build --target x86_64-pc-windows-msvc
+        run: pnpm exec tauri build --target x86_64-pc-windows-msvc --bundles nsis
       - name: 归集产物
         shell: pwsh
         run: |
-          # 只取打包产物目录：整树搜索会把未打包的裸 gptswitch.exe 也带上，
-          # 那不是安装包，用户下载后会一脸问号。
+          # 只取安装器目录：整树搜索会把未打包的裸 gptswitch.exe 也带上，那不是安装包。
+          # `--bundles nsis` 已经限定只出 NSIS，所以这里也只收 *.exe——MSI 与它做的是同一件事，
+          # 发布页放两个 Windows 安装包只会让人犹豫该下哪个。
           New-Item -ItemType Directory -Force -Path out | Out-Null
           $bundle = "target/x86_64-pc-windows-msvc/release/bundle"
-          Get-ChildItem -Path $bundle -Recurse -Include *.msi,*.exe |
+          Get-ChildItem -Path $bundle -Recurse -Include *.exe |
             Copy-Item -Destination out
           if (-not (Get-ChildItem out)) { throw "没有找到任何安装包：$bundle" }
           Get-ChildItem out
@@ -263,9 +264,8 @@ jobs:
         run: |
           mkdir -p out
           find target -type f -name '*.dmg' -exec cp {} out/ \;
-          ditto -c -k --keepParent "target/${{ matrix.target }}/release/bundle/macos/Switchelp.app" \
-            "out/Switchelp-${{ matrix.target }}.zip"
-          # 应用内更新要的两个附件：更新包与它的 minisign 签名。
+          # 不再另外打一个 zip：它和 dmg 装出来是同一个 app，发布页放两种格式只会让人犹豫。
+          # 应用内更新要的两个附件仍然要出：更新包与它的 minisign 签名。
           BUNDLE="target/${{ matrix.target }}/release/bundle/macos"
           cp "$BUNDLE/Switchelp.app.tar.gz" "$BUNDLE/Switchelp.app.tar.gz.sig" out/
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
@@ -341,20 +341,26 @@ jobs:
           # 没有产物时不报错：见上，零产物是预期状态之一。
           fail_on_unmatched_files: false
           files: artifacts/*
-          # 首次打开说明写在这一页，因为下载的人先落到这里——README 里的同名说明他可能根本不会翻。
-          # 不写死版本号：正文随标签走，免得下次发版忘了改。
+          # 这是**初稿**：发布者按当版内容补一节「新增与改进 / 修复」即可（结构照双语分节，
+          # 别写成散文）。写在这一页是因为下载的人先落到这里，README 里的同名说明他未必会翻。
+          # 不写死版本号与文件名：正文随标签走，免得下次发版忘了改。
           body: |
-            ## 首次打开（macOS）
+            ## 中文
 
-            包已用 Developer ID 签名，但**尚未公证**，所以 macOS 会拦一次。两条路，先试第一条：
+            从下方 **Assets** 下载：
 
-            1. **系统设置 → 隐私与安全性** → 下滚到「安全性」一栏 → 点被拦应用旁边的**仍要打开** → 输入密码确认。
-               Apple 现在的官方文档已不再提「右键 → 打开」那个旧办法，右键没反应是正常的。
-            2. 或者打开一次终端，执行完再正常双击：
+            - **macOS（Apple Silicon）** · `.dmg`
+            - **Windows（x64）** · `-setup.exe` —— 预览版
 
-               ```bash
-               xattr -dr com.apple.quarantine /Applications/Switchelp.app
-               ```
+            **使用提示**：macOS 首次打开会被拦（已签名、未公证）：**系统设置 → 隐私与安全性 → 仍要打开**，或用一次 `xattr -dr com.apple.quarantine /Applications/Switchelp.app`。Windows 安装包为预览版，不会写入配置。
 
-            **Windows 与 Intel Mac**：自动构建目前不产出它们。原因与替代做法见
-            [README 的下载与安装一节](https://github.com/nexsjournal/switchelp-macapp#download-and-install)。
+            ---
+
+            ## English
+
+            Download from **Assets** below:
+
+            - **macOS (Apple Silicon)** · `.dmg`
+            - **Windows (x64)** · `-setup.exe` — preview
+
+            **Usage notes**: macOS blocks the first launch (signed but not notarized): **System Settings → Privacy & Security → Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/Switchelp.app` once. The Windows installer is a preview and writes no configuration.
