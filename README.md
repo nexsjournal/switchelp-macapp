@@ -40,8 +40,8 @@ Codex  →  ~/.codex/config.toml (the fields this tool manages)
 
 | Platform | Download | How to install |
 | --- | --- | --- |
-| macOS (Apple Silicon) | [Download DMG](https://github.com/nexsjournal/switchelp-macapp/releases/download/v0.3.0/Switchelp_0.3.0_aarch64.dmg) | Open the DMG, drag `Switchelp.app` into Applications |
-| Windows (x64) | [Download installer](https://github.com/nexsjournal/switchelp-macapp/releases/download/v0.3.0/Switchelp_0.3.0_x64-setup.exe) | Run the NSIS installer and follow the prompts |
+| macOS (Apple Silicon) | [Download DMG](https://github.com/nexsjournal/switchelp-macapp/releases/download/v0.3.1/Switchelp_0.3.1_aarch64.dmg) | Open the DMG, drag `Switchelp.app` into Applications |
+| Windows (x64) | [Download installer](https://github.com/nexsjournal/switchelp-macapp/releases/download/v0.3.1/Switchelp_0.3.1_x64-setup.exe) | Run the NSIS installer and follow the prompts |
 
 Every build is on [Releases](https://github.com/nexsjournal/switchelp-macapp/releases), including the older ones.
 
