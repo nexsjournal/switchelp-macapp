@@ -318,6 +318,23 @@ impl Harness {
     }
 }
 
+/// 等目录版本的引用计数排空，返回最终值。
+///
+/// 释放靠 `InferenceGuard` 的 `Drop`，而客户端拿到完整响应体可能**早于**服务端任务析构那个
+/// 守卫。所以直接 `assert_eq!(refs, 0)` 是一个时序假设：本机连跑 40 次全过，CI 上却偶发红灯
+/// 一次（2026-09-22 实测，失败的是「上游失败的分支也要释放引用」那条）。这里给一个有界的
+/// 等待窗口——到期仍不为 0 才是真泄漏，并把实际值带进断言消息。
+fn refs_after_drain(router: &GatewayRouter, revision: &str) -> usize {
+    let started = std::time::Instant::now();
+    loop {
+        let live = router.refs(revision).total();
+        if live == 0 || started.elapsed() > Duration::from_secs(5) {
+            return live;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 fn request_body(alias: &str) -> Value {
     json!({
         "model": alias,
@@ -1099,7 +1116,7 @@ mod every_failure_is_answerable {
             assert_eq!(status, 200);
             assert!(during > 0, "请求进行中必须持有引用，实际为 {during}");
             assert_eq!(
-                harness.router.refs(REVISION).total(),
+                refs_after_drain(&harness.router, REVISION),
                 0,
                 "请求结束后引用必须归还"
             );
@@ -1124,7 +1141,7 @@ mod every_failure_is_answerable {
         let (status, _) = harness.post("responses", Some(&token), &harness.request_body());
         assert_eq!(status, 200);
         assert_eq!(
-            harness.router.refs(REVISION).total(),
+            refs_after_drain(&harness.router, REVISION),
             0,
             "请求结束后引用必须归零，否则这个版本永远无法回收"
         );
@@ -1133,7 +1150,7 @@ mod every_failure_is_answerable {
         let (status, _) = harness.post("responses", Some(&token), &json!({"input": []}));
         assert_eq!(status, 400);
         assert_eq!(
-            harness.router.refs(REVISION).total(),
+            refs_after_drain(&harness.router, REVISION),
             0,
             "被拒绝的请求同样要释放引用"
         );
@@ -1151,7 +1168,7 @@ mod every_failure_is_answerable {
         let (status, _) = failing.post("responses", Some(&failing_token), &failing.request_body());
         assert_eq!(status, 403);
         assert_eq!(
-            failing.router.refs(REVISION).total(),
+            refs_after_drain(&failing.router, REVISION),
             0,
             "上游失败的分支也要释放引用"
         );
