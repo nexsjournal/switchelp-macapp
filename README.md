@@ -38,10 +38,12 @@ Codex  →  ~/.codex/config.toml (the fields this tool manages)
 
 ## Download and install
 
-Grab a build from [Releases](https://github.com/nexsjournal/switchelp-macapp/releases):
+| Platform | Download | How to install |
+| --- | --- | --- |
+| macOS (Apple Silicon) | [Download DMG](https://github.com/nexsjournal/switchelp-macapp/releases/download/v0.3.0/Switchelp_0.3.0_aarch64.dmg) | Open the DMG, drag `Switchelp.app` into Applications |
+| Windows (x64) | [Download installer](https://github.com/nexsjournal/switchelp-macapp/releases/download/v0.3.0/Switchelp_0.3.0_x64-setup.exe) | Run the NSIS installer and follow the prompts |
 
-- **macOS (Apple Silicon)** · `Switchelp_0.3.0_aarch64.dmg`
-- **Windows (x64)** · `Switchelp_0.3.0_x64-setup.exe` — preview
+Every build is on [Releases](https://github.com/nexsjournal/switchelp-macapp/releases), including the older ones.
 
 **First launch (macOS)** — the build is signed with a Developer ID but not notarized, so macOS blocks it once:
 **System Settings → Privacy & Security**, scroll to **Security**, click **Open Anyway** next to the blocked app, then

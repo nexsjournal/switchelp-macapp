@@ -24,10 +24,12 @@ Codex  →  ~/.codex/config.toml（本工具受管字段）
 
 ## 下载与安装
 
-从 [Releases](https://github.com/nexsjournal/switchelp-macapp/releases) 下载：
+| 平台 | 下载 | 安装方式 |
+| --- | --- | --- |
+| macOS（Apple Silicon） | [下载 DMG](https://github.com/nexsjournal/switchelp-macapp/releases/download/v0.3.0/Switchelp_0.3.0_aarch64.dmg) | 打开 DMG，把 `Switchelp.app` 拖进 Applications |
+| Windows（x64） | [下载安装程序](https://github.com/nexsjournal/switchelp-macapp/releases/download/v0.3.0/Switchelp_0.3.0_x64-setup.exe) | 运行 NSIS 安装程序并按提示完成安装 |
 
-- **macOS（Apple Silicon）** · `Switchelp_0.3.0_aarch64.dmg`
-- **Windows（x64）** · `Switchelp_0.3.0_x64-setup.exe` —— 预览版
+所有构建都在 [Releases](https://github.com/nexsjournal/switchelp-macapp/releases) 上，含更早的版本。
 
 **首次打开（macOS）**：包已用 Developer ID 签名，但尚未公证，所以系统会拦一次。打开**系统设置 → 隐私与安全性**，在「安全性」一栏点被拦截应用旁边的**仍要打开**，再输入密码确认。或者打开一次终端执行：
 
