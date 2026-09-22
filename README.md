@@ -1,3 +1,5 @@
+![Switchelp](./assets/banner-img.png)
+
 # Switchelp
 
 **English** · [简体中文](README.zh-CN.md)
@@ -7,6 +9,8 @@ model's context limit, output limit, input capabilities and reasoning levels.
 
 A local macOS configuration app. Tauri 2 + React 18 + TypeScript shell; every decision lives in a Rust core
 (`crates/switch-core`) that does not depend on the window framework.
+
+![The Switchelp app window](./assets/appview.jpg)
 
 ## How it works
 

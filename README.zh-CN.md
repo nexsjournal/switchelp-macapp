@@ -1,3 +1,5 @@
+![Switchelp](./assets/banner-img.png)
+
 # Switchelp
 
 [English](README.md) · **简体中文**
@@ -5,6 +7,8 @@
 让第三方供应商的模型出现在 **Codex 自己的模型选择器**里，并管理供应商、API Key、每模型的上下文 / 输出上限 / 输入能力 / 思考档位。
 
 本机 macOS 配置工具。Tauri 2 + React 18 + TypeScript 外壳，业务判定全部在一个不依赖窗口框架的 Rust 核心（`crates/switch-core`）里。
+
+![Switchelp 应用界面](./assets/appview.jpg)
 
 ## 它怎么工作
 
