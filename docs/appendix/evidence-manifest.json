@@ -419,22 +419,19 @@
       "app": "星算助手",
       "bundle_id": "xyz.xsai5.desktop",
       "version": "1.6.1",
-      "build": "1.6.1",
-      "info_plist_sha256": "b02aa02cced2e5b31463dc34818114112392b7285ddcea2ee018ae59d3ff2a3e"
+      "build": "1.6.1"
     },
     {
       "app": "CodexSplit",
       "bundle_id": "com.aitabby.codexsplit",
       "version": "2.0.1",
-      "build": "2000010",
-      "info_plist_sha256": "53a4c1f51fa73ccd89bce59214e15d8bd59dbac4d0dc7cbb7d5bf98f26d1be16"
+      "build": "2000010"
     },
     {
       "app": "ChatGPT",
       "bundle_id": "com.openai.codex",
       "version": "26.908.70816",
-      "build": "9275",
-      "info_plist_sha256": "f3f81abaedd92c2d52fcbd4e13569a3d14eb022a242929d02401c1fc13f16d39"
+      "build": "9275"
     },
     {
       "source": "local_codex_app_server_generated_schema",
@@ -547,7 +544,7 @@
       "operator": "manual (agent-executed), release-gate layer 3",
       "reference": "docs/development/02-testing-and-release.md § '两层端到端验证'",
       "environment": {
-        "os": "macOS 26.6.2 arm64",
+        "os": "macOS arm64 (exact build omitted)",
         "codex_binary": "/Applications/ChatGPT.app/Contents/Resources/codex",
         "codex_cli_version": "codex-cli 0.155.0-alpha.9.2",
         "app_binary_used": "target/debug/gptswitch (bare binary, 57 MB)",

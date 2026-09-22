@@ -8,7 +8,7 @@ Codex 可执行文件，GitHub runner 上没有，所以只能在发布前人工
 - 日期：2026-09-22
 - 版本：0.3.0
 - commit：`e345bbd`
-- 机器：macOS 26.6.2 arm64
+- 机器：macOS arm64（本机具体版本从略）
 - 真实 Codex：`/Applications/ChatGPT.app/Contents/Resources/codex`，`codex-cli 0.155.0-alpha.9.2`
 
 ## 环境与隔离的前提（先说清楚，因为后面两条探针没跑通）

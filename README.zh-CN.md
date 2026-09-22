@@ -28,10 +28,10 @@ Codex  →  ~/.codex/config.toml（本工具受管字段）
 
 **当前版本 0.2.0 只发布 macOS Apple Silicon 两个包**；Windows 与 Intel Mac 的产物没有附在这次发布上，原因与替代做法见表格下方。
 
-| 平台 | 文件 | SHA-256 | 首次打开 |
-| --- | --- | --- | --- |
-| macOS（Apple Silicon） | `Switchelp_0.2.0_aarch64.dmg` | `5b36e3624cbab6f70d3be11fdee5f56665bdd210d949310ab95cf2dbf7e445ac` | 已用 Developer ID 签名，但**尚未公证**，首次打开会被拦截——见下方两条路 |
-| macOS（Apple Silicon） | `Switchelp-0.2.0-arm64.zip` | `0fbc0337048214a2dbde853c91066c367c7dd923c147606067c0c72806046143` | 同上，解压后把 `Switchelp.app` 拖进 `/Applications` |
+| 平台 | 文件 | 首次打开 |
+| --- | --- | --- |
+| macOS（Apple Silicon） | `Switchelp_0.2.0_aarch64.dmg` | 已用 Developer ID 签名，但**尚未公证**，首次打开会被拦截——见下方两条路 |
+| macOS（Apple Silicon） | `Switchelp-0.2.0-arm64.zip` | 同上，解压后把 `Switchelp.app` 拖进 `/Applications` |
 
 **为什么 macOS 会拦住，以及怎么过去**：签名与公证是两道关卡，本项目目前只有前者，所以首次打开会被系统拒绝。两条路，先试第一条：
 

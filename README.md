@@ -43,10 +43,10 @@ Grab a build from [Releases](https://github.com/nexsjournal/switchelp-macapp/rel
 **0.2.0 — the current release — publishes macOS Apple Silicon only.** Windows and Intel Mac bundles are not
 attached to it; see the notes below the table for why and what to do instead.
 
-| Platform | File | SHA-256 | First launch |
-| --- | --- | --- | --- |
-| macOS (Apple Silicon) | `Switchelp_0.2.0_aarch64.dmg` | `5b36e3624cbab6f70d3be11fdee5f56665bdd210d949310ab95cf2dbf7e445ac` | Signed with a Developer ID but **not notarized** — see below |
-| macOS (Apple Silicon) | `Switchelp-0.2.0-arm64.zip` | `0fbc0337048214a2dbde853c91066c367c7dd923c147606067c0c72806046143` | Same as above; unzip and drag `Switchelp.app` into `/Applications` |
+| Platform | File | First launch |
+| --- | --- | --- |
+| macOS (Apple Silicon) | `Switchelp_0.2.0_aarch64.dmg` | Signed with a Developer ID but **not notarized** — see below |
+| macOS (Apple Silicon) | `Switchelp-0.2.0-arm64.zip` | Same as above; unzip and drag `Switchelp.app` into `/Applications` |
 
 **Why macOS warns, and how to get past it**: signing and notarization are two separate gates and this project only
 has the first one. macOS will refuse the first launch. Two ways through, easiest first:

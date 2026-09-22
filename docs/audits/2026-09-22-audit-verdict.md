@@ -151,7 +151,7 @@
 
 **「人工层现在到底有没有被真正跑过？」——跑过了。这是第三层第一次留下真实痕迹，但没有一条能当作「发布门禁已过」。**
 
-原始材料：`docs/appendix/2026-09-22-e2e-probe-run.md`；证据已追加进 `docs/appendix/evidence-manifest.json` 的顶层 `e2e_probe_runs`（`research_date 2026-09-22`、`project_version 0.3.0`、`commit e345bbd`、`status` 不再是 `documentation_only` 意义上的空白）；原始输出留档在 `/tmp/e2e-probe-2026-09-22/`。环境：macOS 26.6.2 arm64，真实 Codex `/Applications/ChatGPT.app/Contents/Resources/codex` = `codex-cli 0.155.0-alpha.9.2`。
+原始材料：`docs/appendix/2026-09-22-e2e-probe-run.md`；证据已追加进 `docs/appendix/evidence-manifest.json` 的顶层 `e2e_probe_runs`（`research_date 2026-09-22`、`project_version 0.3.0`、`commit e345bbd`、`status` 不再是 `documentation_only` 意义上的空白）；原始输出留档在 `/tmp/e2e-probe-2026-09-22/`。环境：macOS arm64（本机具体版本从略），真实 Codex `/Applications/ChatGPT.app/Contents/Resources/codex` = `codex-cli 0.155.0-alpha.9.2`。
 
 ### 7.1 四条探针的判定
 

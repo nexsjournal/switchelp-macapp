@@ -40,7 +40,7 @@
 | --- | --- | --- | --- |
 | 1 | 打开 README，找下载入口 | **有摩擦** | 下载表格写的是 `Switchelp_0.1.3_*`（`README.md:36-38`、`README.zh-CN.md:29-31`），而当前最新发布是 **v0.2.0**，中间还有 0.1.6/0.1.7/0.1.8/0.1.9 都没进表。陌生人照表找 → 下载到 5 个版本前的包。下载数据佐证：v0.1.0 dmg 2 次、v0.1.3 dmg 1 次、**v0.2.0 dmg 0 次**（`gh release view --json assets`）。更糟的是 v0.1.3 的 release notes 明确写「本工具目前不会替你重启 Codex」——这句在 0.2.0 已经不成立（现在会自动重启：`src/features/codex/CodexConfigPage.tsx:186`、`src/app/PendingApplyBar.tsx:82`），陌生人会按过期说明多走一步 |
 | 2 | 下载 macOS 包 | **有摩擦** | 9 个 release 的产物**全部只有 aarch64**，没有任何 x86_64 / universal。CI 的 macOS matrix 里虽然定义了 `x86_64-apple-darwin`，但没配签名 secret 时整个 job 跳过（下面 2.1）。**Intel Mac 用户没有任何可下载的包**，README 也没写「Intel 请自行构建」 |
-| 3 | 首次打开（Gatekeeper） | **卡死（对不懂 macOS 的人是劝退点）** | `.app` 只有签名、没有公证：`codesign -dv` = `Developer ID Application: <签名姓名> (<TEAMID>)`，`spctl --assess --type execute -vv` = **rejected / `source=Unnotarized Developer ID`**（本机 macOS 26.6.2 / 25G83）。README 给的第一顺位解法是「**右键 → 打开**」，但 Apple 现行的官方支持页（`support.apple.com/en-us/102445`，本次实际抓取）只描述 **系统设置 → 隐私与安全性 → 仍要打开** 这一条路径，已不再提及 Control-click。`xattr -dr com.apple.quarantine` 那条是有效的（我在 /tmp 副本上验证了标记可被清除），但要用户会开终端、会粘贴路径；而且 **.dmg 挂载后只有 `Switchelp.app` 与 `Applications` 符号链接，没有任何首次打开说明文件**——提示只存在于 README 和 release notes |
+| 3 | 首次打开（Gatekeeper） | **卡死（对不懂 macOS 的人是劝退点）** | `.app` 只有签名、没有公证：`codesign -dv` = `Developer ID Application: <签名姓名> (<TEAMID>)`，`spctl --assess --type execute -vv` = **rejected / `source=Unnotarized Developer ID`**。README 给的第一顺位解法是「**右键 → 打开**」，但 Apple 现行的官方支持页（`support.apple.com/en-us/102445`，本次实际抓取）只描述 **系统设置 → 隐私与安全性 → 仍要打开** 这一条路径，已不再提及 Control-click。`xattr -dr com.apple.quarantine` 那条是有效的（我在 /tmp 副本上验证了标记可被清除），但要用户会开终端、会粘贴路径；而且 **.dmg 挂载后只有 `Switchelp.app` 与 `Applications` 符号链接，没有任何首次打开说明文件**——提示只存在于 README 和 release notes |
 | 4 | 第一次启动 → 接入向导自动展开 | **顺利** | `src/app/App.tsx:126`：`showOnboarding = (onboardingForced \|\| (providers.length === 0 && !onboardingDismissed)) && page === 'overview' && ...`。夹具 `?view=onboarding` 实测自动进入「检测 Codex」步骤，零点击。真机启动也成功（进程活着、网关绑上 18765） |
 | 5 | 向导第 1 步：检测 Codex | **顺利**（未装 Codex 的分支只有代码证据） | 检测结果把「配置存在 / 当前未运行 / 兼容性 / 其他工具」逐项列出；检测到别的配置管理工具时说明残留标记长什么样、**写在哪个文件**（`OnboardingPage.tsx:156-168`）。未装 Codex → 空态 + 手动路径输入 + 明确「本工具不下载不安装 Codex」（`:127-134`）。**该分支夹具渲染不出来**（夹具恒定返回一个实例） |
 | 6 | 向导第 2 步 → 点「添加供应商」 | **卡死（中道消失，且不可逆）** | 见 1.1，这是本次最重要的产品问题 |
@@ -171,7 +171,7 @@
 ## 4. 未验证项
 
 1. **真机 GUI 全程**：本 agent 无法使用浏览器/电脑自动化（`agent.browsers` 在 subagent 里直接报 `Browser is not available in subagent`）。因此：
-   - **Gatekeeper 弹窗的实际文案与「右键 → 打开」在 macOS 26.6.2 上是否仍然有效，没有做视觉/交互复现**。现有证据只有两条：`spctl --assess` = rejected / `source=Unnotarized Developer ID`；Apple 现行支持页只描述「系统设置 → 隐私与安全性 → 仍要打开」这一条路径（本次实际抓取，页面未提及 Control-click）。
+   - **Gatekeeper 弹窗的实际文案与「右键 → 打开」在当前 macOS 上是否仍然有效，没有做视觉/交互复现**。现有证据只有两条：`spctl --assess` = rejected / `source=Unnotarized Developer ID`；Apple 现行支持页只描述「系统设置 → 隐私与安全性 → 仍要打开」这一条路径（本次实际抓取，页面未提及 Control-click）。
    - Codex 模型选择器里是否真的出现受管模型，**未做视觉核验**（`docs/audits/2026-09-20-implementation-verification.md` 已提供「GUI 连接用受管模型建会话并调用 `model/list`」的非视觉证据）。
 2. **真机上的完整「应用 → 重启 Codex → 菜单出现模型」链路未执行**：本次只启动了 `/Applications/Switchelp.app`（确认进程存活 + 网关绑定 127.0.0.1:18765 后退出），**没有对真实 Codex 执行应用/重启**，以免动 `~/.codex/config.toml` 与用户正在运行的 Codex。第 1 节第 10 步的「2 次点击」来自夹具合成计划 + 真实交互代码。
 3. **Windows**：无真机。「第三方模型在 Windows 上不可用（凭据 helper 的 `.cmd` 是显式未完成的桩）」只有 README 与文档的说法，代码侧本次未逐行确认，也未实测；release 里的 Windows 包只到 v0.1.3。
