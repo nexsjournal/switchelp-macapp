@@ -231,7 +231,7 @@ const client: DesktopClient = {
   detectInstances: async () => [instance],
   platformInfo: async () => ({ platform: 'macos', titlebarHeight: 44, leadingReserve: 84, systemDecorations: true }),
   applySummary: async () => ({ operationId: 'op_a', instanceId: 'inst_a', catalogRevision: 'rev_046731cc', defaultModel: 'gs/m_1', aliasCount: 2, stage: 'verified', appliedAt: '2026-09-18T03:30:03Z' }),
-  gatewayStatus: async () => ({ running: true, paused: false, port: 18765, served: 12, revisions: ['rev_046731cc'], tokenFingerprint: '3f9a1c04', error: null }),
+  gatewayStatus: async () => ({ running: true, paused: false, port: 18765, served: 12, revisions: ['rev_046731cc'], tokenFingerprint: '3f9a1c04', error: null, systemProxy: { httpEnabled: false, endpoint: null, bypassApplied: false } }),
   setGatewayPaused: async (paused: boolean) => paused,
   listBackups: async () => ([{ id: 'b_1', sourcePath: '/Users/me/.codex/config.toml', createdAt: '2026-09-18T03:20:00Z', contentHash: 'a1b2c3d4', bytes: 412, mayContainSecrets: true }]),
   createBackup: async () => ({ id: 'b_2', sourcePath: '/Users/me/.codex/config.toml', createdAt: '2026-09-18T04:00:00Z', contentHash: 'e5f6a7b8', bytes: 420, mayContainSecrets: true }),
@@ -429,6 +429,15 @@ if (view === 'onboarding') {
 if (view === 'pending') {
   (client as { listModels: unknown }).listModels = async () => models.map(model => ({ ...model, hostState: 'pending_apply' as const }));
   (client as { applySummary: unknown }).applySummary = async () => null;
+}
+// 走查「系统代理把回环地址也代理走」的那一版连接状态：默认夹具是「没开代理」，
+// 那一行量不到长句在卡片里的换行与对比度。
+if (view === 'proxy') {
+  (client as { gatewayStatus: unknown }).gatewayStatus = async () => ({
+    running: true, paused: false, port: 18765, served: 12, revisions: ['rev_046731cc'],
+    tokenFingerprint: '3f9a1c04', error: null,
+    systemProxy: { httpEnabled: true, endpoint: '127.0.0.1:7890', bypassApplied: true },
+  });
 }
 
 // 组件级直连视图：无交互截图用（headless Chrome / 审计脚本），不经过 App 壳。

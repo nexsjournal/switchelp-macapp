@@ -106,6 +106,22 @@ export interface DiagnosticsPreview {
   totalBytes: number;
 }
 
+/**
+ * 系统代理与回环地址的关系。
+ *
+ * 宿主到本机网关是 `http://127.0.0.1:<端口>`，而宿主自己的 HTTP 客户端会把系统代理
+ * 套到这条请求上，代理又到不了用户的回环地址——用户看到的就是
+ * 「502 Bad Gateway: Unknown error」。这条报告是界面唯一能说清这件事的地方。
+ */
+export interface SystemProxyReport {
+  /** 系统里有没有开 HTTP 代理。 */
+  httpEnabled: boolean;
+  /** 代理地址，形如 `127.0.0.1:7890`；读不到时为 null。 */
+  endpoint: string | null;
+  /** 「绕过回环」是否已经在生效（已写进登录会话，之后启动的 Codex 不再被拦）。 */
+  bypassApplied: boolean;
+}
+
 /** 本机网关状态。未启动时 `error` 必须带出原因，界面不得显示成正常。 */
 export interface GatewayReport {
   running: boolean;
@@ -117,6 +133,7 @@ export interface GatewayReport {
   revisions: string[];
   tokenFingerprint: string;
   error: string | null;
+  systemProxy: SystemProxyReport;
 }
 
 /** 当前已生效的配置摘要。`defaultModel` 为空表示历史事务没有记录，不用当前表单值顶替。 */

@@ -505,7 +505,8 @@ test('编辑器有未保存修改时侧栏导航先确认，放弃后才真正�
 
 test('网关未启动时明确显示原因，不显示成已接通或已应用', async () => {
   const client = testClient({ gatewayStatus: vi.fn().mockResolvedValue({ running: false, port: null, served: 0,
-    revisions: [], tokenFingerprint: '', error: '无法绑定 127.0.0.1:18765：地址已被占用' }) });
+    revisions: [], tokenFingerprint: '', error: '无法绑定 127.0.0.1:18765：地址已被占用',
+    systemProxy: { httpEnabled: false, endpoint: null, bypassApplied: false } }) });
   render(<App client={client} />);
 
   expect(await screen.findByText('网关未启动')).toBeInTheDocument();
@@ -515,7 +516,8 @@ test('网关未启动时明确显示原因，不显示成已接通或已应用',
 
 test('网关运行中且未发布目录时，不宣称已应用到 Codex', async () => {
   const client = testClient({ gatewayStatus: vi.fn().mockResolvedValue({ running: true, port: 18765, served: 0,
-    revisions: [], tokenFingerprint: 'deadbeef', error: null }) });
+    revisions: [], tokenFingerprint: 'deadbeef', error: null,
+    systemProxy: { httpEnabled: false, endpoint: null, bypassApplied: false } }) });
   render(<App client={client} />);
 
   expect(await screen.findByText(/网关运行中 · 127.0.0.1:18765 · 尚未发布目录/)).toBeInTheDocument();

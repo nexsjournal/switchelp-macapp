@@ -73,6 +73,8 @@ export function OverviewPage({ providers, models, credentialsByProvider, gateway
   }, [credentialsByProvider]);
 
   const loading = codexState(summary, gateway);
+  /** 系统代理的观察结果；网关报告还没回来时为 null（那一条就不显示，不猜）。 */
+  const proxy = gateway?.systemProxy ?? null;
 
   /** 每一步的完成判据都必须是可核实的观察值，不是估算：没有「大概完成」这种状态。 */
   const providersWithKey = providers.filter(provider => (credentialsByProvider[provider.id] ?? []).length > 0).length;
@@ -173,6 +175,19 @@ export function OverviewPage({ providers, models, credentialsByProvider, gateway
             <span className={`${styles.dot} ${loading.tone === 'ok' ? styles.ok : loading.tone === 'warn' ? styles.warn : styles.muted}`} aria-hidden="true" />
             <div><strong>{t('overview.codexLoad')}</strong><span>{loading.text}</span></div>
           </li>
+          {/*
+            系统代理这一条只在拿得到观察结果时出现（网关报告还没回来时不说）。
+            它回答的是「Codex 为什么报 502」：宿主到本机网关是回环地址，而它自己的
+            HTTP 客户端会把系统代理套上去，代理又到不了 127.0.0.1。措辞只讲**机制与
+            我们做过什么**，不断言「你现在正失败」——用户可能已经重启过 Codex 了。
+          */}
+          {proxy && <li>
+            <span className={`${styles.dot} ${proxy.httpEnabled ? styles.warn : styles.muted}`} aria-hidden="true" />
+            <div><strong>{t('overview.systemProxy')}</strong>
+              <span>{!proxy.httpEnabled
+                ? t('overview.systemProxyOff')
+                : t(proxy.bypassApplied ? 'overview.systemProxyBypassed' : 'overview.systemProxyNeedsRestart', { endpoint: proxy.endpoint ?? '—' })}</span></div>
+          </li>}
         </ul>
         {gateway?.error && <p className={styles.gatewayError} role="alert">{gateway.error}</p>}
         <div className={styles.cardActions}>

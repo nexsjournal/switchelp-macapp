@@ -6,6 +6,9 @@
 
 use std::path::{Path, PathBuf};
 
+/// 系统代理与回环地址的冲突（宿主连不上本机网关的那一类故障）。
+pub mod proxy;
+
 /// 支持的目标平台。首发是 macOS 与 Windows，Linux 只保证编译与逻辑正确。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {

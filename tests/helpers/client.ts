@@ -55,7 +55,7 @@ export function testClient(overrides: Partial<DesktopClient> = {}): DesktopClien
     openReleasePage: failing(),
     onUpdateProgress: vi.fn().mockResolvedValue(() => {}),
     platformInfo: vi.fn().mockResolvedValue({ platform: 'macos', titlebarHeight: 44, leadingReserve: 84, systemDecorations: true }),
-    gatewayStatus: vi.fn().mockResolvedValue({ running: true, paused: false, port: 18765, served: 0, revisions: [], tokenFingerprint: 'deadbeef', error: null }),
+    gatewayStatus: vi.fn().mockResolvedValue({ running: true, paused: false, port: 18765, served: 0, revisions: [], tokenFingerprint: 'deadbeef', error: null, systemProxy: { httpEnabled: false, endpoint: null, bypassApplied: false } }),
     listProviders: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     saveProvider: failing(),
     listCredentials: vi.fn().mockResolvedValue([]),

@@ -12,7 +12,7 @@ const model = {
   capabilityRevision: 1, version: 1, createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z',
 };
 
-const gateway = { running: true, paused: false, port: 18765, served: 3, revisions: ['rev_a'], tokenFingerprint: 'x', error: null };
+const gateway = { running: true, paused: false, port: 18765, served: 3, revisions: ['rev_a'], tokenFingerprint: 'x', error: null, systemProxy: { httpEnabled: false, endpoint: null, bypassApplied: false } };
 
 function renderOverview(overrides: Partial<Parameters<typeof OverviewPage>[0]> = {}) {
   return render(<OverviewPage
@@ -72,4 +72,34 @@ test('有未应用改动时常驻应用栏提示数量', () => {
 
   const bar = screen.getByRole('region', { name: '待应用的修改' });
   expect(bar).toHaveTextContent('2 个模型待应用');
+});
+
+/**
+ * 系统代理那一条要能回答「Codex 为什么报 502」，而且只能讲机制和我们做过的事：
+ * 用户可能已经重启过 Codex，断言「你现在正失败」就成了假话。
+ */
+test('开着系统代理时状态卡说明回环被代理走，并区分绕过是否已生效', () => {
+  const hijacked = { ...gateway, systemProxy: { httpEnabled: true, endpoint: '127.0.0.1:7890', bypassApplied: true } };
+  renderOverview({ gateway: { ...hijacked, systemProxy: { ...hijacked.systemProxy, bypassApplied: false } } });
+
+  const statusCard = screen.getByRole('heading', { name: '连接状态' }).closest('section')!;
+  expect(within(statusCard).getByText('系统代理')).toBeInTheDocument();
+  expect(within(statusCard).getByText(/127\.0\.0\.1:7890 会连回环地址一起代理/)).toBeInTheDocument();
+  // 绕过还没写进会话时说清楚要靠本工具重启，不冒充已经解决。
+  expect(within(statusCard).getByText(/用本工具重启 Codex 会带上绕过/)).toBeInTheDocument();
+});
+
+test('没有系统代理时状态卡只说没开启，不渲染绕过的话术', () => {
+  renderOverview();
+
+  const statusCard = screen.getByRole('heading', { name: '连接状态' }).closest('section')!;
+  expect(within(statusCard).getByText('未开启，本机网关直连。')).toBeInTheDocument();
+  expect(within(statusCard).queryByText(/会连回环地址一起代理/)).not.toBeInTheDocument();
+});
+
+/** 观察结果还没回来（网关报告为 null）时那一条不出现：不知道就不说。 */
+test('网关报告缺失时不显示系统代理那一条', () => {
+  renderOverview({ gateway: null });
+
+  expect(screen.queryByText('系统代理')).not.toBeInTheDocument();
 });
