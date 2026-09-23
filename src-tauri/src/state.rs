@@ -3,6 +3,7 @@
 //! 壳只持有 `Arc` 与服务句柄，业务判定全部在 `switch-core`：这里不复制
 //! 任何模型、供应商或事务规则，也不直接读写 Codex 配置。
 
+use serde::Serialize;
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -17,10 +18,28 @@ use switch_core::{
     diagnostics::{DiagnosticLog, Probes},
     domain::error::CoreError,
     gateway::Gateway,
+    platform::{proxy, Platform, ProcessProbe, SystemProcessProbe},
     plugins::PluginService,
     storage::HubStore,
     toolhub::ToolHubService,
 };
+
+/// 系统代理与回环地址的关系，以及我们就此做过的事。
+///
+/// 宿主到本机网关是 `http://127.0.0.1:<端口>`，而宿主自己的 HTTP 客户端会把系统代理
+/// 套到这条请求上，代理又到不了用户的回环地址，于是回一个**空正文的 502**——
+/// 在 Codex 里就显示成「unexpected status 502 Bad Gateway: Unknown error」。
+/// 成因与依据见 `switch_core::platform::proxy` 的模块说明。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemProxyReport {
+    /// 系统里有没有开 HTTP 代理。
+    pub http_enabled: bool,
+    /// 代理地址，形如 `127.0.0.1:7890`；取不到时为 null。
+    pub endpoint: Option<String>,
+    /// 「绕过回环」是否已经在生效。为真时，之后启动的 Codex 不会再被代理拦下。
+    pub bypass_applied: bool,
+}
 
 /// 启动时的两个「可能失败」的装配结果。
 ///
@@ -64,6 +83,52 @@ pub struct DesktopState {
     /// 抓取器与凭据库：内容服务每次按需装配，这样换了令牌立刻生效。
     feed_fetcher: Arc<dyn FeedFetcher>,
     vault: Arc<dyn SecretVault>,
+    /// 系统代理的观察结果与已做的绕过。启动时算一次：代理是会话级设置，
+    /// 进程生命周期里重算没有意义，只会让同一个事实在两个时刻显示成两句话。
+    system_proxy: SystemProxyReport,
+}
+
+/// 宿主到本机网关是回环地址：绕过代理只能靠这两个环境变量，两个拼写都带上。
+///
+/// 不依赖「检测到代理」：代理可能是刚开的、也可能没读到，而多带一个只影响回环地址的
+/// 例外在任何时候都不会有害。已有的值先合并进来，不覆盖用户自己的例外名单。
+pub fn loopback_bypass_env(platform: Platform) -> Vec<(String, String)> {
+    let merged = proxy::merge_bypass(
+        proxy::session_bypass_value(platform).as_deref(),
+        proxy::LOOPBACK_BYPASS,
+    );
+    vec![
+        ("NO_PROXY".to_owned(), merged.clone()),
+        ("no_proxy".to_owned(), merged),
+    ]
+}
+
+/// 启动时把「绕过回环」安顿好，并留下一个可核实的观察结果。
+///
+/// 要做两件事，因为宿主有两条启动路径：我们重启它时会给它带上环境变量；而用户重启电脑后
+/// 常常直接从程序坞打开 Codex，那条路不经过我们——那一份只能写进**登录会话**
+/// （`launchctl setenv`，只影响当前登录会话，退出登录即失效，不写任何文件）。
+///
+/// 只有真的开着 HTTP 代理时才去动会话：没开代理的时候写这个变量没有任何收益，
+/// 却会往用户的会话里多塞一个环境变量。写失败也不算错——重启宿主那条路仍然带着注入。
+fn prepare_system_proxy() -> SystemProxyReport {
+    let platform = Platform::current();
+    let observed = proxy::read_system_proxy(platform);
+    let mut bypass_applied = proxy::session_bypass_effective(platform, proxy::LOOPBACK_BYPASS);
+    if observed.hijacks_loopback() && !bypass_applied {
+        let probe = SystemProcessProbe;
+        for spec in proxy::session_bypass(platform, proxy::LOOPBACK_BYPASS) {
+            probe.spawn_detached(&spec);
+        }
+        // 重读会话，而不是相信 `launchctl setenv` 的退出码：界面要说的是「以后启动的
+        // Codex 不会再被拦」，这句话只有读回来确实带上回环地址时才成立。
+        bypass_applied = proxy::session_bypass_effective(platform, proxy::LOOPBACK_BYPASS);
+    }
+    SystemProxyReport {
+        http_enabled: observed.hijacks_loopback(),
+        endpoint: observed.endpoint(),
+        bypass_applied,
+    }
 }
 
 fn now_unix() -> i64 {
@@ -118,6 +183,7 @@ impl DesktopState {
                 .cloned()
                 .unwrap_or_else(|| error.message_key.clone())
         });
+        let system_proxy = prepare_system_proxy();
         Self {
             workspace,
             apply,
@@ -135,7 +201,13 @@ impl DesktopState {
             plugins,
             feed_fetcher: Arc::new(HttpFeedFetcher::new()),
             vault,
+            system_proxy,
         }
+    }
+
+    /// 系统代理的观察结果与已做的绕过。
+    pub fn system_proxy(&self) -> SystemProxyReport {
+        self.system_proxy.clone()
     }
 
     /// 工具管理服务；清单没加载成功时给出原因。

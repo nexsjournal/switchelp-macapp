@@ -25,7 +25,7 @@ use switch_core::{
 use tauri::{Emitter, Manager, State, WebviewWindow};
 use tauri_plugin_updater::UpdaterExt;
 
-use crate::state::DesktopState;
+use crate::state::{loopback_bypass_env, DesktopState, SystemProxyReport};
 
 type Desktop<'a> = State<'a, Arc<DesktopState>>;
 
@@ -72,6 +72,9 @@ pub struct GatewayReport {
     /// 令牌指纹：便于人工核对 helper 指向同一令牌，不泄露令牌本身。
     pub token_fingerprint: String,
     pub error: Option<String>,
+    /// 系统代理与回环地址的关系。宿主到本机网关是回环地址，系统代理会把它也代理走，
+    /// 用户看到的就是「502 Bad Gateway: Unknown error」——这条事实要能显示出来。
+    pub system_proxy: SystemProxyReport,
 }
 
 /// 事务状态。`events` 让界面能显示“等待 Codex 重载”这类中间态。
@@ -426,12 +429,17 @@ fn restart_host(desktop: &DesktopState, instance_id: &str) -> Result<HostRestart
     // 共存模式靠给宿主带上一组环境变量生效（`CODEX_CLI_PATH` 指向 bridge）。
     // 注入不了就**不重启**：普通重启会把宿主拉回纯原生，而界面还显示着共存已启用——
     // 那正是「看着正常、实则全错」。
-    let plan = if desktop.apply.coexist_enabled()? {
-        let env = switch_core::codex::coexist::launch_env(&desktop.app_data_dir(), &instance)?;
-        switch_core::platform::restart_plan_with_env(platform, &app_path, &env)
+    let mut env = if desktop.apply.coexist_enabled()? {
+        switch_core::codex::coexist::launch_env(&desktop.app_data_dir(), &instance)?
     } else {
-        switch_core::platform::restart_plan(platform, &app_path)
+        Vec::new()
     };
+    // 与共存无关，任何一次启动宿主都要带上。宿主到本机网关走的是回环地址，而它自己的
+    // HTTP 客户端会把系统代理套上去（不读代理例外列表），代理到不了 127.0.0.1，
+    // 用户看到的就是「502 Bad Gateway: Unknown error」。绕不过去的是客户端，不是我们，
+    // 所以只能靠环境变量。
+    env.extend(loopback_bypass_env(platform));
+    let plan = switch_core::platform::restart_plan_with_env(platform, &app_path, &env);
     let process_name = switch_core::platform::host_process_name(platform, &app_path);
     // 退出与启动都要等到**观察到**结果为止。这条命令会阻塞几秒到二三十秒，
     // 界面那侧显示「重启中」，比立刻返回一个不可信的成功好。
@@ -752,6 +760,7 @@ pub async fn gateway_status(
     state: Desktop<'_>,
 ) -> Result<GatewayReport, CoreError> {
     run(window, state, |desktop| {
+        let system_proxy = desktop.system_proxy();
         Ok(match desktop.gateway() {
             Some(gateway) => {
                 let status = gateway.status();
@@ -763,6 +772,7 @@ pub async fn gateway_status(
                     revisions: status.revisions,
                     token_fingerprint: status.token_fingerprint,
                     error: None,
+                    system_proxy,
                 }
             }
             None => GatewayReport {
@@ -773,6 +783,7 @@ pub async fn gateway_status(
                 revisions: Vec::new(),
                 token_fingerprint: String::new(),
                 error: desktop.gateway_error().map(str::to_owned),
+                system_proxy,
             },
         })
     })

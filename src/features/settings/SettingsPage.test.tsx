@@ -4,7 +4,7 @@ import { SettingsPage } from './SettingsPage';
 import { instance, testClient } from '../../../tests/helpers/client';
 import { renderWithToasts } from '../../../tests/helpers/render';
 
-const gateway = { running: true, paused: false, port: 18765, served: 12, revisions: ['rev_a'], tokenFingerprint: '3f9a1c04', error: null };
+const gateway = { running: true, paused: false, port: 18765, served: 12, revisions: ['rev_a'], tokenFingerprint: '3f9a1c04', error: null, systemProxy: { httpEnabled: false, endpoint: null, bypassApplied: false } };
 
 test('展示真实网关状态，未启动时给原因而不是假装正常', async () => {
   const stopped = testClient({ detectInstances: vi.fn().mockResolvedValue([]) });
