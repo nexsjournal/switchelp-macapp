@@ -27,12 +27,21 @@ pub use install::{
 pub use skill::SkillDocument;
 pub use source::{GithubFetcher, RepoCatalog, RepoFetcher, RepoSkill, SkillSourceRef};
 
-/// 预置来源。三个都经实测存在且含 `SKILL.md`（2026-09-21 核对）。
-pub const DEFAULT_SOURCES: [(&str, &str, &str); 3] = [
+/// 预置来源。四个都经实测存在且含 `SKILL.md`（2026-09-24 用 `api.github.com` 的 git tree 复核：
+/// anthropics/skills 20 个、openai/skills 44 个、obra/superpowers 15 个、wshobson/agents 183 个）。
+///
+/// 加 `openai/skills` 是因为它是**官方维护的技能目录**（仓库描述就是 "Skills Catalog for Codex"），
+/// 比社区聚合更稳；注意 `openai/codex` 里也有 SKILL.md，但那是它自己的产品内部技能，不是给外人装的东西。
+pub const DEFAULT_SOURCES: [(&str, &str, &str); 4] = [
     (
         "anthropics/skills",
         "Anthropic 官方技能集合",
         "官方公开的 Agent Skills，包含文档、设计与协作相关的技能。",
+    ),
+    (
+        "openai/skills",
+        "OpenAI 技能目录",
+        "OpenAI 公开的 Codex 技能目录，官方维护、按主题分组。",
     ),
     (
         "obra/superpowers",
@@ -42,7 +51,7 @@ pub const DEFAULT_SOURCES: [(&str, &str, &str); 3] = [
     (
         "wshobson/agents",
         "Agents 插件合集",
-        "面向编码 agent 的插件与技能合集，数量多但取向偏工程。",
+        "面向编码 agent 的插件与技能合集，数量最多，取向偏工程。",
     ),
 ];
 

@@ -25,13 +25,17 @@ pub const LOOPBACK_BYPASS: &str = "127.0.0.1,localhost";
 
 /// 系统代理的观察结果。
 ///
-/// 只取 HTTP 一侧：宿主到本机网关是 `http://`，`HTTPSProxy` 影响不到它。把两者混成一个
-/// `enabled` 会让界面在不相关的场景里报错，所以宁可窄一点。
+/// 只取 HTTP 一侧参与「回环是否被劫持」的判断：宿主到本机网关是 `http://`，
+/// `HTTPSProxy` 影响不到它。把两者混成一个 `enabled` 会让界面在不相关的场景里报错，
+/// 所以宁可窄一点。HTTPS 一侧仍要读——**本进程自己出网**时用的正是它。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SystemProxy {
     pub http_enabled: bool,
     pub host: Option<String>,
     pub port: Option<u16>,
+    pub https_enabled: bool,
+    pub https_host: Option<String>,
+    pub https_port: Option<u16>,
 }
 
 impl SystemProxy {
@@ -46,12 +50,32 @@ impl SystemProxy {
 
     /// 给界面看的代理地址，形如 `127.0.0.1:7890`。
     pub fn endpoint(&self) -> Option<String> {
-        let host = self.host.as_deref().filter(|value| !value.is_empty())?;
-        Some(match self.port {
-            Some(port) => format!("{host}:{port}"),
-            None => host.to_owned(),
-        })
+        join_endpoint(self.host.as_deref(), self.port)
     }
+
+    /// 本进程自己出网该用的代理地址。
+    ///
+    /// 先 HTTPS 再 HTTP：本工具抓的都是 https（RSS、GitHub API），而这两侧在代理软件里
+    /// 通常指向同一个端口；只配了 HTTP 一侧时它同样是可用的 http 代理。
+    pub fn outbound_endpoint(&self) -> Option<String> {
+        if self.https_enabled {
+            if let Some(endpoint) = join_endpoint(self.https_host.as_deref(), self.https_port) {
+                return Some(endpoint);
+            }
+        }
+        if self.http_enabled {
+            return self.endpoint();
+        }
+        None
+    }
+}
+
+fn join_endpoint(host: Option<&str>, port: Option<u16>) -> Option<String> {
+    let host = host.filter(|value| !value.is_empty())?;
+    Some(match port {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_owned(),
+    })
 }
 
 /// 解析 `scutil --proxy` 的输出。
@@ -72,6 +96,9 @@ pub fn parse_scutil_proxy(text: &str) -> SystemProxy {
             "HTTPEnable" => proxy.http_enabled = value == "1",
             "HTTPProxy" => proxy.host = Some(value.to_owned()),
             "HTTPPort" => proxy.port = value.parse::<u16>().ok(),
+            "HTTPSEnable" => proxy.https_enabled = value == "1",
+            "HTTPSProxy" => proxy.https_host = Some(value.to_owned()),
+            "HTTPSPort" => proxy.https_port = value.parse::<u16>().ok(),
             _ => {}
         }
     }
@@ -108,12 +135,57 @@ pub fn read_system_proxy(platform: Platform) -> SystemProxy {
     }
 }
 
+/// 本进程自己出网（抓 RSS、读 GitHub 仓库）该用的代理。
+///
+/// 为什么要这一步：这些抓取以前只认环境变量（`ureq::Proxy::try_from_env()`），而 macOS 的
+/// 系统代理**不在环境变量里**——用户开着 Clash 之类的代理、浏览器好好的，本工具却直连，
+/// 于是 `linux.do`、`raw.githubusercontent.com` 这类在本机直连不通的站点一律超时，
+/// 界面上表现为「某个源连续失败 N 次」和插件中心永远停在「正在读取仓库…」。
+///
+/// 优先级：环境变量（显式指定，交给 ureq 自己解析，行为与以前一致）→ 系统代理设置。
+/// 取不到就返回 `None`，也就是直连——不在用户没开代理时凭空塞一条代理。
+pub fn outbound_proxy(platform: Platform) -> Option<ureq::Proxy> {
+    if has_proxy_env() {
+        return ureq::Proxy::try_from_env();
+    }
+    let endpoint = read_system_proxy(platform).outbound_endpoint()?;
+    ureq::Proxy::new(&format!("http://{endpoint}")).ok()
+}
+
+/// 环境里有没有显式指定代理（大小写两种写法都认，含 `ALL_PROXY`）。
+fn has_proxy_env() -> bool {
+    [
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ]
+    .iter()
+    .any(|key| std::env::var(key).map(|value| !value.trim().is_empty()) == Ok(true))
+}
+
 /// 从 `http_proxy` 环境变量解析代理地址。`http://127.0.0.1:7890` 与 `127.0.0.1:7890`
 /// 两种写法都认（前者是惯例，后者在代理软件生成的配置里也常见）。
 pub fn from_env_proxy(value: Option<&str>) -> SystemProxy {
     let Some(raw) = value.map(str::trim).filter(|value| !value.is_empty()) else {
         return SystemProxy::default();
     };
+    let proxy = from_endpoint(raw);
+    // 环境变量只有一个地址，两侧都用它——`outbound_endpoint` 先看 https 一侧。
+    SystemProxy {
+        http_enabled: proxy.http_enabled,
+        host: proxy.host.clone(),
+        port: proxy.port,
+        https_enabled: proxy.http_enabled,
+        https_host: proxy.host,
+        https_port: proxy.port,
+    }
+}
+
+fn from_endpoint(value: &str) -> SystemProxy {
+    let raw = value;
     // 去掉 scheme 与可能的凭据段：我们只要地址，用来给用户看是哪条代理。
     let without_scheme = raw.split_once("://").map_or(raw, |(_, rest)| rest);
     let authority = without_scheme
@@ -131,6 +203,7 @@ pub fn from_env_proxy(value: Option<&str>) -> SystemProxy {
         http_enabled: !host.is_empty(),
         host: (!host.is_empty()).then(|| host.to_owned()),
         port,
+        ..SystemProxy::default()
     }
 }
 
@@ -334,5 +407,45 @@ mod tests {
         assert!(!from_env_proxy(None).hijacks_loopback());
         assert!(!from_env_proxy(Some("   ")).hijacks_loopback());
         assert!(!from_env_proxy(Some("http://")).hijacks_loopback());
+    }
+
+    /// 出网用的地址要先看 HTTPS 一侧：本工具抓的都是 https（RSS、GitHub）。
+    #[test]
+    fn outbound_endpoint_prefers_https_then_falls_back_to_http() {
+        let both = parse_scutil_proxy(SCUTIL_WITH_PROXY);
+        assert_eq!(both.outbound_endpoint().as_deref(), Some("127.0.0.1:7890"));
+
+        // 只开了 HTTP：仍然是可用的 http 代理地址。
+        let http_only =
+            "<dictionary> {\n  HTTPEnable : 1\n  HTTPProxy : 127.0.0.1\n  HTTPPort : 7890\n}";
+        assert_eq!(
+            parse_scutil_proxy(http_only).outbound_endpoint().as_deref(),
+            Some("127.0.0.1:7890")
+        );
+
+        // 只开了 HTTPS：回环那条不受影响，但出网要认它。
+        let https_only =
+            "<dictionary> {\n  HTTPSEnable : 1\n  HTTPSProxy : 127.0.0.1\n  HTTPSPort : 7897\n}";
+        let parsed = parse_scutil_proxy(https_only);
+        assert!(!parsed.hijacks_loopback());
+        assert_eq!(
+            parsed.outbound_endpoint().as_deref(),
+            Some("127.0.0.1:7897")
+        );
+
+        // 都没开：直连，不凭空塞一条代理。
+        assert_eq!(parse_scutil_proxy("").outbound_endpoint(), None);
+        assert_eq!(SystemProxy::default().outbound_endpoint(), None);
+    }
+
+    /// 环境变量只给一个地址时，http 与 https 两侧都要能用（否则出网又变直连）。
+    #[test]
+    fn an_env_proxy_serves_both_sides() {
+        let parsed = from_env_proxy(Some("http://127.0.0.1:7897"));
+        assert_eq!(
+            parsed.outbound_endpoint().as_deref(),
+            Some("127.0.0.1:7897")
+        );
+        assert!(parsed.hijacks_loopback());
     }
 }

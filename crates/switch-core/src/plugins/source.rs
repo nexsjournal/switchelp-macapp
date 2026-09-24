@@ -376,7 +376,11 @@ impl GithubFetcher {
                 .http_status_as_error(false)
                 .timeout_connect(Some(Duration::from_secs(10)))
                 .timeout_recv_response(Some(Duration::from_secs(30)))
-                .proxy(ureq::Proxy::try_from_env())
+                // GitHub 的两个主机在部分地区直连不通（`raw.githubusercontent.com` 实测超时），
+                // 而用户开着代理时它本该走代理——详见 `platform::proxy::outbound_proxy`。
+                .proxy(crate::platform::proxy::outbound_proxy(
+                    crate::platform::Platform::current(),
+                ))
                 .build(),
         );
         Self {

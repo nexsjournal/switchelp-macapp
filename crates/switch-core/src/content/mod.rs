@@ -32,7 +32,11 @@ pub const SLOT_SPREAD_SECONDS: i64 = 300;
 /// 每个源保留的最新条目数。资讯页一屏至少放 10 条（用户要求），这里留一倍余量。
 pub const PER_SOURCE_KEEP_ITEMS: usize = 20;
 /// 单次刷新的总时间预算。到点停止启动新的抓取，并把没轮到的源报出来。
-pub const REFRESH_BUDGET: Duration = Duration::from_secs(60);
+///
+/// 60 秒在「源少 + 直连」时够用，但（2026-09-24）抓取改走系统代理后每次请求要多花
+/// 1–4 秒，而源的数量也涨到十几个：一个卡住的源就能吃掉 20 秒的接收预算，后面的源
+/// 会被判成「没轮到」。120 秒是同一个测试里允许的上限（见 `refresh_budget_*` 用例）。
+pub const REFRESH_BUDGET: Duration = Duration::from_secs(120);
 /// 条目保留天数与总数上限。
 ///
 /// 成功抓取时是**整源覆盖**（见 `sync_source_items`）：本地只留「这次抓到的」，
@@ -59,8 +63,23 @@ pub enum FeedKind {
     GithubSearch,
 }
 
-/// 预置源。全部于 2026-09-21 实测可访问。
-pub const DEFAULT_SOURCES: [(&str, FeedKind, &str, &str, &str); 8] = [
+/// 预置源。全部在目标机器上逐个实测过（见 `tests/live_fetch.rs`，2026-09-24 重跑）。
+///
+/// `linux.do` 于 2026-09-24 退役：它挂在 Cloudflare 的机器人校验后面，非浏览器客户端
+/// 拿到的是 `403 Just a moment...`（JS 挑战，不是 UA 问题——curl 带同样的 UA 能过、
+/// rustls 的客户端过不去），于是这个源每天都在报「连续失败 N 次」。预置源在界面上删不掉，
+/// 所以退役只能改这里 + `ensure_defaults` 的清退逻辑。
+///
+/// 2026-09-24 新增的中文科技媒体，都在名称里如实标出通路：
+/// - 官方 feed（IT之家 / 爱范儿 / 极客公园 / 量子位 / InfoQ 中文 / Solidot）逐个实测 200 且能解析；
+/// - **36氪与知乎没有可用的官方 feed**（36氪的 `/feed` 返回 SPA 的 HTML，知乎的 `/rss` 是空正文），
+///   实测可用的只有第三方镜像 `rsshub.rssforever.com`，所以这两条的标签里直接写了「RSSHub 镜像」——
+///   哪天镜像挂了，用户看名字就知道该找谁。公共实例 `rsshub.app` 被 Cloudflare 拦，不可用。
+/// - APPSO 没有独立 feed（属爱范儿旗下），由爱范儿那条覆盖。
+/// - 另外实测可加、但没放进默认表的：钛媒体 `https://www.tmtpost.com/feed`、V2EX
+///   `https://www.v2ex.com/index.xml`（本机直连超时、需代理）、虎嗅镜像
+///   `https://rsshub.rssforever.com/huxiu/article`。用户可以在界面上自己加。
+pub const DEFAULT_SOURCES: [(&str, FeedKind, &str, &str, &str); 15] = [
     (
         "sspai",
         FeedKind::Rss,
@@ -69,17 +88,66 @@ pub const DEFAULT_SOURCES: [(&str, FeedKind, &str, &str, &str); 8] = [
         "zh",
     ),
     (
+        "ithome",
+        FeedKind::Rss,
+        "https://www.ithome.com/rss/",
+        "IT之家",
+        "zh",
+    ),
+    (
+        "ifanr",
+        FeedKind::Rss,
+        "https://www.ifanr.com/feed",
+        "爱范儿（含 APPSO）",
+        "zh",
+    ),
+    (
+        "geekpark",
+        FeedKind::Rss,
+        "https://www.geekpark.net/rss",
+        "极客公园",
+        "zh",
+    ),
+    (
+        "qbitai",
+        FeedKind::Rss,
+        "https://www.qbitai.com/feed",
+        "量子位",
+        "zh",
+    ),
+    (
+        "infoq",
+        FeedKind::Rss,
+        "https://www.infoq.cn/feed",
+        "InfoQ 中文",
+        "zh",
+    ),
+    (
+        "solidot",
+        FeedKind::Rss,
+        "https://www.solidot.org/index.rss",
+        "Solidot 奇客",
+        "zh",
+    ),
+    (
+        "36kr",
+        FeedKind::Rss,
+        "https://rsshub.rssforever.com/36kr/newsflashes",
+        "36氪（RSSHub 镜像）",
+        "zh",
+    ),
+    (
+        "zhihu-daily",
+        FeedKind::Rss,
+        "https://rsshub.rssforever.com/zhihu/daily",
+        "知乎日报（RSSHub 镜像）",
+        "zh",
+    ),
+    (
         "ruanyifeng",
         FeedKind::Rss,
         "https://www.ruanyifeng.com/blog/atom.xml",
         "阮一峰的网络日志",
-        "zh",
-    ),
-    (
-        "linuxdo",
-        FeedKind::Rss,
-        "https://linux.do/latest.rss",
-        "linux.do",
         "zh",
     ),
     (
@@ -247,9 +315,17 @@ impl HttpFeedFetcher {
         let agent = ureq::Agent::new_with_config(
             ureq::Agent::config_builder()
                 .http_status_as_error(false)
-                .timeout_connect(Some(Duration::from_secs(5)))
-                .timeout_recv_response(Some(Duration::from_secs(15)))
-                .proxy(ureq::Proxy::try_from_env())
+                // 经代理时「连接」包含代理到目标站的那一段：实测 hnrss 走代理
+                // TLS 就要 2 秒、全程 4 秒，5 秒的预算会把本来能抓到的源判死。
+                // 接收给到 25 秒也是实测决定的：RSSHub 镜像上的知乎日报要 7–12 秒才回，
+                // 20 秒时会被判成失败（而它是**能**回的）。
+                .timeout_connect(Some(Duration::from_secs(10)))
+                .timeout_recv_response(Some(Duration::from_secs(25)))
+                // 系统代理也要认：只读环境变量会让「开着代理的用户抓不到源」——
+                // 详见 `platform::proxy::outbound_proxy`。
+                .proxy(crate::platform::proxy::outbound_proxy(
+                    crate::platform::Platform::current(),
+                ))
                 .build(),
         );
         Self { agent }
@@ -336,8 +412,13 @@ impl ContentService {
         }
     }
 
-    /// 首次运行时把预置源写进库。已有的源不动——用户删掉的不会被重新塞回来。
+    /// 首次运行时把预置源写进库，并把**已退役**的预置源清出去。
+    ///
+    /// 已有的源不动——用户删掉的不会被重新塞回来。但预置源在界面上不能删（那是唯一的
+    /// 入口），所以「我们决定不再内置某个源」只能在这里落地；不清的话它会永远躺在列表里，
+    /// 按 06:00/18:00 报「连续失败 N 次」——用户看到的就是一个他既删不掉、又永远失败的源。
     pub fn ensure_defaults(&self, now: i64) -> Result<(), CoreError> {
+        self.retire_removed_defaults()?;
         let existing: HashSet<String> = self
             .store
             .list_feed_sources()?
@@ -370,6 +451,21 @@ impl ContentService {
 
     pub fn sources(&self) -> Result<Vec<FeedSource>, CoreError> {
         self.store.list_feed_sources()
+    }
+
+    /// 清掉「曾经是预置源、现在已经不在 `DEFAULT_SOURCES` 里」的那些。
+    ///
+    /// 只动 `builtin` 的行：用户自己加的源，哪怕 id 撞上了也不碰。
+    fn retire_removed_defaults(&self) -> Result<(), CoreError> {
+        for source in self.store.list_feed_sources()? {
+            let still_builtin = DEFAULT_SOURCES
+                .iter()
+                .any(|(id, _, _, _, _)| *id == source.id.as_str());
+            if source.builtin && !still_builtin {
+                self.store.delete_feed_source(&source.id)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn save_source(&self, draft: FeedSourceDraft, now: i64) -> Result<FeedSource, CoreError> {
@@ -897,6 +993,51 @@ mod tests {
             store.list_feed_sources().unwrap().len(),
             DEFAULT_SOURCES.len()
         );
+    }
+
+    /// 退役：曾经内置、现在不在 `DEFAULT_SOURCES` 里的源要被清出去。
+    ///
+    /// 预置源在界面上删不掉，所以这是我们唯一能收回它的地方；不收回就会变成
+    /// 「用户既删不掉、又永远报失败」的那一条（linux.do 就是这样被投诉的）。
+    #[test]
+    fn a_retired_builtin_source_is_removed_but_user_sources_are_kept() {
+        let (service, store) = service(Arc::new(FakeFetcher::default()));
+        service.ensure_defaults(0).unwrap();
+        // 一个「曾经的预置源」（builtin）与一个用户自己加的源（非 builtin）。
+        for (id, builtin) in [("linuxdo", true), ("mine", false)] {
+            store
+                .save_feed_source(&FeedSource {
+                    id: id.to_owned(),
+                    kind: FeedKind::Rss,
+                    url: "https://example.com/feed".to_owned(),
+                    label: id.to_owned(),
+                    lang: "zh".to_owned(),
+                    enabled: true,
+                    etag: None,
+                    last_modified: None,
+                    last_ok_at: None,
+                    last_error: Some("访问失败：timeout: connect".to_owned()),
+                    fail_streak: 21,
+                    next_fetch_at: 0,
+                    builtin,
+                })
+                .unwrap();
+        }
+
+        service.ensure_defaults(0).unwrap();
+
+        let ids: Vec<String> = store
+            .list_feed_sources()
+            .unwrap()
+            .into_iter()
+            .map(|source| source.id)
+            .collect();
+        assert!(
+            !ids.contains(&"linuxdo".to_owned()),
+            "退役的预置源必须被清掉"
+        );
+        assert!(ids.contains(&"mine".to_owned()), "用户自己的源不能被碰");
+        assert_eq!(ids.len(), DEFAULT_SOURCES.len() + 1);
     }
 
     /// 生成一份 RSS：标题与链接都由 `tag` 与索引决定，便于断言「谁还在、谁被删了」。

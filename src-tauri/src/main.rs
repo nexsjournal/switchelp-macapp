@@ -170,6 +170,28 @@ fn install_tray(
             "quit" => app.exit(0),
             _ => {}
         });
+    // 托盘图标：macOS 用**专用**的模板图，其余平台继续用应用图标。
+    //
+    // 应用图标是「黑底 + 白 S」的方块，放进菜单栏就是一块死黑的色块，和旁边那些系统
+    // 图标的取向完全不同（用户点名要求改）。模板图的做法是：源图只要「透明底 + 单色字形」，
+    // macOS 按 alpha 决定着色、颜色交给系统按菜单栏明暗给——浅色菜单栏画黑、深色画白，
+    // 于是它自动和邻居一致，不需要我们判断当前是什么主题。
+    //
+    // 只在 macOS 换：模板图是 macOS 的概念，Windows 的通知区域不会替我们上色，
+    // 一张纯黑字形在深色任务栏上等于看不见——那边的图标不该跟着改。
+    #[cfg(target_os = "macos")]
+    {
+        match tauri::image::Image::from_bytes(include_bytes!("../icons/tray-template.png")) {
+            Ok(icon) => builder = builder.icon(icon).icon_as_template(true),
+            // 读不到就退回应用图标：托盘没图标 = 用户找不到出口，比图标不好看严重得多。
+            Err(_) => {
+                if let Some(icon) = app.default_window_icon().cloned() {
+                    builder = builder.icon(icon);
+                }
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
     if let Some(icon) = app.default_window_icon().cloned() {
         builder = builder.icon(icon);
     }
@@ -449,4 +471,36 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("Switchelp 无法启动");
+}
+
+#[cfg(test)]
+mod tray_icon_tests {
+    /// 托盘图标必须是**能解码的**那一个。
+    ///
+    /// 失败面很窄但很疼：`Image::from_bytes` 返回 `Err` 时运行时会静默退回应用图标
+    /// （见 `install_tray` 的兜底），于是「图标改好了」这句话就成了假的，而菜单栏要人手去看
+    /// 才发现。这里把「PNG 能被解码、尺寸是方的、颜色是单色且带透明」钉住。
+    #[test]
+    fn the_tray_template_decodes_as_a_square_monochrome_image() {
+        let image = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-template.png"))
+            .expect("托盘模板图必须能被解码");
+        assert_eq!(image.width(), image.height(), "模板图必须是方的");
+        assert!(image.width() >= 32, "菜单栏是 2x 屏：源图太小会发虚");
+
+        let rgba = image.rgba();
+        let opaque: Vec<&[u8]> = rgba
+            .chunks_exact(4)
+            .filter(|pixel| pixel[3] > 200)
+            .collect();
+        assert!(!opaque.is_empty(), "整张图都是透明的等于没有图标");
+        assert!(
+            opaque
+                .iter()
+                .all(|pixel| pixel[0] == pixel[1] && pixel[1] == pixel[2]),
+            "模板图必须是单色：有颜色说明渲染时把品牌色带进来了"
+        );
+        // 有透明区才叫模板图——底色不透明的方块就是用户抱怨的那块「黑方块」。
+        let transparent = rgba.chunks_exact(4).filter(|pixel| pixel[3] < 8).count();
+        assert!(transparent > 0, "模板图必须有透明底");
+    }
 }
