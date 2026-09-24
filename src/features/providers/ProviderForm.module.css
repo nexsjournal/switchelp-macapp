@@ -31,9 +31,6 @@
 .secret button { position: absolute; right: 4px; top: 4px; }
 
 /* 实验状态的适配器提示：与普通 hint 同一个位置，但用警告色，因为它改的是「能用多少」的预期。 */
-.experimental { margin: -8px 0 0; padding: 8px 12px; border-radius: var(--radius-sm);
-  background: var(--status-warning-bg); color: var(--status-warning); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
-
 /* 无认证的供应商：不渲染 Key 字段，但要说清现在是哪一种认证，而不是留一片空白。 */
 .authNote { margin: 0; padding: 12px 16px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
   background: var(--bg-input); color: var(--text-secondary); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }

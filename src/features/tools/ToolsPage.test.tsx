@@ -183,5 +183,7 @@ it('本版不放安装入口：做不到的事不出现在界面上', async () =
 
   await screen.findByText('FFmpeg');
   expect(screen.queryByRole('button', { name: /安装/ })).not.toBeInTheDocument();
-  expect(screen.getByText(/不在本版范围内/)).toBeInTheDocument();
+  // 页脚那句「替你装第三方工具不在本版范围内」已经按用户要求撤掉：它解释的是一颗根本不
+  // 存在的按钮，长期挂在页面底部只是噪音。这里不再断言它，但仍然守住「没有安装入口」。
+  expect(screen.queryByText(/不在本版范围内/)).not.toBeInTheDocument();
 });

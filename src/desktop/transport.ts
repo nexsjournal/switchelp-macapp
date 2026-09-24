@@ -51,6 +51,7 @@ export const desktopClient: DesktopClient = {
   installUpdate: () => call<void>('update_install'),
   takeUpdateResult: () => call<string | null>('update_take_result'),
   openReleasePage: url => call<void>('update_open_release_page', { url }),
+  openExternalUrl: url => call<void>('open_external_url', { url }),
   async onUpdateProgress(listener) {
     // 浏览器夹具里没有事件通道：返回一个空订阅，不假装有进度。
     if (!isTauri()) return () => {};

@@ -1,17 +1,36 @@
 /*
- * Toast：右下角悬浮通知条，浮在弹窗之上。
+ * Toast：右上角悬浮通知条，浮在弹窗之上。
  *
- * 规范要求「右下角、最多 3 条、普通 4s」；失败不自动消失，因为用户下一步要靠它决定怎么办。
- * 位置固定在一个地方——弹窗和使用常规界面时都在同一处，不再随布局漂移。
+ * 位置在右上角，且**避开自绘标题栏**：`--titlebar-height` 在 macOS 是 44px、其余平台是 0，
+ * 直接用 top: 24px 会被标题栏压住（那条区域还是窗口拖拽面，点不到关闭按钮）。
+ *
+ * 三条内容（图标 / 文字 / 关闭）按行居中，而不是让图标吊在第一行的基线上：通知绝大多数
+ * 是一行文字，居中的时候三者才是齐的（用户报过「文字和关闭按钮没对齐」）。长文案换行时
+ * 居中也仍然整齐，不会出现图标顶天、文字悬空。
  */
-.host { position: fixed; right: 24px; bottom: 24px; z-index: var(--z-toast); display: grid; gap: 8px;
-  width: min(360px, calc(100vw - 48px)); pointer-events: none; }
-.toast { pointer-events: auto; display: flex; align-items: flex-start; gap: 8px; padding: 12px 16px;
+.host { position: fixed; right: 24px; top: calc(var(--titlebar-height) + 16px); z-index: var(--z-toast);
+  display: grid; gap: 8px; width: min(360px, calc(100vw - 48px)); pointer-events: none; }
+.toast { pointer-events: auto; display: flex; align-items: center; gap: 8px; padding: 12px 16px;
   border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated);
   box-shadow: var(--shadow-popover); font-size: var(--font-size-label); line-height: var(--line-height-label); }
-.toast > svg { flex-shrink: 0; margin-top: 2px; }
+.toast > svg { flex-shrink: 0; }
 .text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.toast button { flex-shrink: 0; width: 24px; height: 24px; }
+
+/*
+ * 关闭按钮：**不要用全局的 `.icon-button`**。
+ * 那个类给的是「深色底 + 描边」的常规图标按钮，压在淡色的通知底色上就是一块突兀的黑方块
+ * （用户点名说丑）。这里用与通知同色系的透明按钮：常态隐形、悬浮时给一层淡淡的同色底，
+ * 仍然保留 24×24 的点击区与 aria-label。
+ */
+.toast button { flex-shrink: 0; }
+/* `padding: 0` 是必须的：全局的 `button` 带 `padding: 0 16px`，而这是 border-box——
+   左右内边距（32px）比声明的 width（24px）还大，浏览器会把盒子的实际宽度撑到 32px。
+   实测过：不写这一行，量出来是 32×24 而不是 24×24。 */
+.close { width: 24px; height: 24px; padding: 0; display: grid; place-items: center;
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: currentColor;
+  opacity: 0.72; cursor: pointer; }
+.close:hover { opacity: 1; background: color-mix(in srgb, currentColor 16%, transparent); }
+.close:focus-visible { opacity: 1; outline: 2px solid currentColor; outline-offset: 1px; }
 
 /* 状态色只染图标与文字，底色用极淡的同色系：它是通知，不是警告牌。 */
 .success { color: var(--status-success); border-color: var(--status-success-bg); background: var(--status-success-bg); }

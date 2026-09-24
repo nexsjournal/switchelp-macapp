@@ -424,9 +424,6 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
             <option value="responses">{t('providers.formatResponses')}</option>
           </select></label>
         <p className="field-hint">{t('providers.anthropicUnsupported')}</p>
-        {/* Chat Completions 的适配器在核心层标着「未通过工具调用门禁」。这个事实必须说出来，
-            否则选它的人会以为自己拿到的和 Responses 一样稳。 */}
-        {protocol === 'chat_completions' && <p className={styles.experimental} role="note">{t('providers.chatAdapterExperimental')}</p>}
 
         {authKind === 'api_key' ? <>
           {/* SecretField：保存后只显示掩码。输入框留空＝不动已有 Key，

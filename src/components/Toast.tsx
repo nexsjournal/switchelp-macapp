@@ -112,7 +112,7 @@ export function ToastHost() {
         role={item.tone === 'danger' ? 'alert' : 'status'}>
         {TONE_ICON[item.tone]}
         <span className={styles.text}>{item.text}</span>
-        <button type="button" className="icon-button" aria-label={t('common.dismissNotification')}
+        <button type="button" className={styles.close} aria-label={t('common.dismissNotification')}
           onClick={() => dismissToast(item.id)}><X size={14} /></button>
       </div>)}
     </div>,
