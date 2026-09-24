@@ -441,6 +441,7 @@ fn main() {
             commands::update_install,
             commands::update_take_result,
             commands::update_open_release_page,
+            commands::open_external_url,
             commands::backups_list,
             commands::backups_create,
             commands::backups_preview,

@@ -299,7 +299,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
         <SettingsIcon size={18} /><span className={styles.navLabel}>{t('nav.settings')}</span>
       </button>
       <div className={styles.sidebarBottom}><ShieldCheck size={18} /><div><strong>{t('shell.localConfig')}</strong><span>{t('shell.credentialsInSecureStore')}</span></div></div>
-      <div className={styles.version}>{t('app.name')} <span>{__APP_VERSION__} · {t('app.inDevelopment')}</span></div>
+      <div className={styles.version}>{t('app.name')} <span>{__APP_VERSION__}</span></div>
     </aside>
     <div className={styles.workspace}>
       <div className={styles.topbar} data-tauri-drag-region="deep"><span>{t('common.workspace')}<ChevronRight size={14} /> {t(`nav.${page}`)}</span>{gateway && !gateway.running ? <span className="badge warning">{t('overview.loadStateGatewayDown')}</span> : pending.length ? <span className="badge warning">{awaitingHostOnly ? t('shell.awaitingHostBadge', { count: pending.length }) : t('shell.pendingCountBadge', { count: pending.length })}</span> : gateway?.revisions.length ? <span className="badge">{t('shell.applied')}</span> : <span className="badge">{t('shell.notApplied')}</span>}</div>

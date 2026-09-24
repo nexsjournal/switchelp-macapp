@@ -37,6 +37,7 @@
 | system / developer 指令 | 按适配器能力保留；降级合并必须标记 degraded |
 | developer 角色（chat 上游） | chat 没有这个角色：`input` 里的 `developer` 消息与顶层 `instructions` 合成**一条**开头的 system 消息。原样转发会被只认 system/user/assistant/tool 的上游 400（moonshot 实测 `role 'developer' is not allowed`，宿主侧只看到 `error.upstreamRejected`）；拆成两条 system 又违反「system 必须在首位」。合成本身不记损失，只有该消息原本排在对话之后、位置被提前时才记 `input.developer` |
 | 多轮 tool call 与 output | 保持 call_id 对应、顺序和角色，不拼成普通聊天文字 |
+| 工具调用在真实上游的验收 | **2026-09-24 通过**（本机、真实 chat/completions 上游）：拿包内的 codex 二进制对运行中的网关卡发一次需要工具的任务——`CODEX_HOME=<临时 home> codex exec --skip-git-repo-check --sandbox workspace-write "用 shell 执行 echo tool-ok-42，然后只回它打印出来的那一行"`——宿主发起 `exec` 工具调用、网关把流里的 `tool_calls` 翻成 Responses 的 function call 事件、宿主执行、`tool_result` 折回 messages、模型续答并给出最终答案，全程没有 400。因此适配器**不再**在应用前的差异里标「实验状态」：那条警告断言的前提（工具调用没有在真实上游上验证过）已经不成立 |
 | parallel tool calls | 仅在全链路通过测试时声明；否则拒绝或使用预先公开策略 |
 | custom / freeform 工具 | 不是普通 function；有专用映射才允许，尤其 apply_patch |
 | 上游内置工具（`web_search` 等） | 由上游执行，网关既不转译也不替代：该模型未声明支持时**摘掉并记损失**。原样转发会被没实现它的网关整条拒掉（实测小米 MiMo：`responses_feature_not_supported: tool type 'web_search' is not supported`），用户看到的却是一条与自己的操作无关的 400。宿主自己调用的 function / custom 工具不受影响 |

@@ -257,7 +257,6 @@ export function ToolsPage({ client }: { client: DesktopClient }) {
           </ul>
         )}
 
-        <p className={styles.footer}>{t('tools.openToolsNote')}</p>
       </section>
     </div>
   );

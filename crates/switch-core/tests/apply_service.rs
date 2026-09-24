@@ -1149,28 +1149,16 @@ fn a_model_level_protocol_override_reaches_the_route() {
     // 再写一遍只会和上面的唯一约束打架（同一个 supplier+upstream 的第二次身份登记）。
 }
 
-/// Chat Completions 适配必须在**应用之前**被标明为实验状态。
+/// Chat Completions 不再带「实验状态」警告：工具调用已经在真实上游上验证过。
 ///
-/// PRD 明写「chat/completions 适配通过工具调用门禁后进入首发，未通过则明确标实验状态，
-/// 不能冒充完整可用」。工具调用门禁没有实现，所以这里锁的是那条退路：
-/// 只要这次发布有模型走 CC 适配，应用前的差异里就必须有这条警告。
+/// 以前这里锁的是相反的结论——核心层把 CC 适配标成「未通过工具调用门禁」，于是每次发布
+/// 只要有一个模型走 CC，差异里就会多一条黄色警告。2026-09-24 实测该断言的前提不成立
+/// （见 `docs/architecture/03-gateway-and-protocols.md` 的兼容表），警告已撤。
+/// 这条用例留着是为了挡住「无意间又把那条泛化警告加回来」。
 #[test]
-fn chat_completions_models_are_flagged_as_experimental_before_applying() {
+fn chat_completions_models_are_no_longer_flagged_as_experimental() {
     let harness = Harness::with_ready_model(None);
     let provider = harness.workspace.list_providers().unwrap().remove(0);
-
-    // Responses 的供应商：不该出现这条警告。
-    let responses_plan = harness.service.plan_apply(&harness.instance, None).unwrap();
-    assert!(
-        !responses_plan
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("warning.chatAdapterExperimental")),
-        "全是 Responses 时不该报 CC 实验状态：{:?}",
-        responses_plan.warnings
-    );
-
-    // 把模型的协议改成 chat/completions：警告必须出现。
     let model = harness.workspace.list_models().unwrap().remove(0);
     harness
         .workspace
@@ -1183,15 +1171,15 @@ fn chat_completions_models_are_flagged_as_experimental_before_applying() {
             model.version,
         )
         .unwrap();
-    let cc_plan = harness.service.plan_apply(&harness.instance, None).unwrap();
-    let warning = cc_plan
-        .warnings
-        .iter()
-        .find(|warning| warning.contains("warning.chatAdapterExperimental"))
-        .expect("走 CC 适配时必须给出实验状态警告");
+
+    let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
     assert!(
-        warning.contains("工具调用"),
-        "警告要说清哪一部分没验证过：{warning}"
+        !plan
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("chatAdapterExperimental")),
+        "CC 适配的工具调用已经验证过，不该再有实验状态警告：{:?}",
+        plan.warnings
     );
 }
 

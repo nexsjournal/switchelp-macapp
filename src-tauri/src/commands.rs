@@ -1117,6 +1117,49 @@ pub async fn update_open_release_page(window: WebviewWindow, url: String) -> Res
     Ok(())
 }
 
+/// 用系统浏览器打开一个外部链接。内容中心的资讯条目与仓库卡片都走这里。
+///
+/// 为什么不能在前端用 `window.open`：那是 webview 里的新窗口请求，在 Tauri 里没有对应的
+/// 浏览器窗口，点了就是**没反应**（用户报的正是这个）。打开外部链接必须交回系统。
+///
+/// 为什么校验放在 Rust 侧：这个命令最终交给 `open` / `xdg-open` / `cmd /C start` 执行，
+/// 而链接来自用户订阅的 RSS 源——**那是不可信内容**。只放行 http/https 且不含控制字符，
+/// 前端那层的校验只是体验，不是边界。
+#[tauri::command]
+pub async fn open_external_url(window: WebviewWindow, url: String) -> Result<(), CoreError> {
+    authorize(&window)?;
+    let trimmed = url.trim();
+    let allowed = (trimmed.starts_with("http://") || trimmed.starts_with("https://"))
+        && !trimmed.chars().any(char::is_control);
+    if !allowed {
+        return Err(
+            CoreError::new(ErrorCode::ValidationFailed, "error.badExternalUrl")
+                .with_detail(format!("只允许打开 http/https 链接，收到的是：{trimmed}")),
+        );
+    }
+    let mut command = if cfg!(target_os = "macos") {
+        let mut command = std::process::Command::new("open");
+        command.arg(trimmed);
+        command
+    } else if cfg!(target_os = "windows") {
+        // 第一个空参数是 `start` 的窗口标题位；不给它，带引号的 URL 会被当成标题。
+        let mut command = std::process::Command::new("cmd");
+        command.args(["/C", "start", "", trimmed]);
+        command
+    } else {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(trimmed);
+        command
+    };
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|_| CoreError::internal("无法打开浏览器"))?;
+    Ok(())
+}
+
 /// 平台信息。前端据此设置 `data-platform` 与窗口相关 CSS 变量。
 #[tauri::command]
 pub async fn platform_info(

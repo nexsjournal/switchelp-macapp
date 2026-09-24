@@ -216,6 +216,20 @@ export function ContentPage({ client }: { client: DesktopClient }) {
     }
   };
 
+  /**
+   * 打开一条外部链接。必须交回系统：以前用 `window.open`，而 Tauri 的 webview 没有浏览器
+   * 新窗口，点了就是没反应。地址只接受 http/https，校验在 Rust 侧再做一遍（链接来自
+   * 用户订阅的 RSS 源，属于不可信内容）。
+   */
+  const open = async (url: string) => {
+    try {
+      await client.openExternalUrl(url);
+    } catch (cause) {
+      const core = toCoreError(cause);
+      showToast(core.safeDetails[0] ?? t(core.messageKey), 'danger');
+    }
+  };
+
   const toggleSource = async (source: FeedSource) => {
     try {
       await client.saveFeedSource({
@@ -423,7 +437,7 @@ export function ContentPage({ client }: { client: DesktopClient }) {
             <ul className={styles.itemList}>
               {news.map(item => (
                 <li key={item.url}>
-                  <button type="button" className={styles.itemRow} onClick={() => window.open(item.url, '_blank', 'noreferrer')}>
+                  <button type="button" className={styles.itemRow} onClick={() => void open(item.url)}>
                     <span className={styles.itemTitle}>{item.title}</span>
                     <span className={styles.itemMeta}>
                       {item.sourceLabel} · {relative(item.publishedAt - now, locale)}
@@ -455,7 +469,7 @@ export function ContentPage({ client }: { client: DesktopClient }) {
               <ul className={styles.repoGrid}>
                 {github.map(item => (
                   <li key={item.url}>
-                    <button type="button" className={styles.repoCard} onClick={() => window.open(item.url, '_blank', 'noreferrer')}>
+                    <button type="button" className={styles.repoCard} onClick={() => void open(item.url)}>
                       <span className={styles.repoName}>{item.repo ?? item.title}</span>
                       <span className={styles.repoStars}>★ {item.stars ?? '—'}</span>
                       <span className={styles.repoSummary}>{item.summary}</span>

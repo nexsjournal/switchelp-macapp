@@ -4,9 +4,10 @@
  * 只在开发服务器上使用（`pnpm dev` 后访问 `/visual.html`）；不参与打包，
  * 也不作为业务真相——这里的数据只用于看排版、层级、间距和状态文案。
  *
- * 支持 `?view=codex|app|tools|plugins|content|settings` 直接进入对应页面，方便自动截图。
+ * 支持 `?view=codex|app|tools|plugins|content|settings` 直接进入对应页面、`?view=toast` 推三条提示条，
+ * 方便自动截图与版面审计。
  */
-import { StrictMode, type ReactElement } from 'react';
+import { StrictMode, useEffect, type ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import type {
   ApplyPlan, CodexInstance, Credential, FeedItem, FeedSource, FieldChange, Model, Provider,
@@ -18,6 +19,7 @@ import { ProviderForm } from '@/features/providers/ProviderForm';
 import { ModelFormDialog } from '@/features/models/ModelFormDialog';
 import { ModelEditorPage } from '@/features/models/ModelEditorPage';
 import { applyTheme, readThemePreference } from '@/theme';
+import { showToast } from '@/components/Toast';
 import { defaultPolicy } from '@/features/models/policy';
 import '@/styles/tokens.css';
 import '@/styles/global.css';
@@ -250,6 +252,7 @@ const client: DesktopClient = {
   installUpdate: () => new Promise<void>(() => { /* 真实安装成功时不会 resolve（应用重启），夹具照此保持「下载中」。 */ }),
   takeUpdateResult: async () => null,
   openReleasePage: async () => undefined,
+  openExternalUrl: async () => undefined,
   onUpdateProgress: async listener => {
     let done = 0;
     const total = 5_457_549;
@@ -440,6 +443,21 @@ if (view === 'proxy') {
   });
 }
 
+/**
+ * 走查提示条：位置（右上角、避开标题栏）、三者是否对齐、关闭按钮的配色都要能一屏量到。
+ *
+ * 提示条是队列驱动的一次性反馈，没有「一直挂着」的状态页，所以只能这样主动推三条：
+ * 三种色调各来一条，正好也是同时最多显示的数量。
+ */
+function ToastFixture() {
+  useEffect(() => {
+    showToast('已添加 1 个模型。');
+    showToast('qiyuan / qiyuan/deepseek-v4.1 连接成功');
+    showToast('这个模型不支持工具调用，已按「未声明」处理，可继续对话。', 'info');
+  }, []);
+  return null;
+}
+
 // 组件级直连视图：无交互截图用（headless Chrome / 审计脚本），不经过 App 壳。
 const noop = () => {};
 /**
@@ -472,7 +490,7 @@ createRoot(container).render(
       <main style={{ height: '100%', overflow: 'auto', padding: 'var(--content-padding)' }}>
         {directViews[view]()}
       </main>
-    ) : <App client={client}
+    ) : view === 'toast' ? <><ToastFixture /><App client={client} initialPage="content" /></> : <App client={client}
       initialPage={
         view === 'codex' ? 'codexConfig'
           : view === 'providers' ? 'providers'

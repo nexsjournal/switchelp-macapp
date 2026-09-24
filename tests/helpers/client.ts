@@ -53,6 +53,7 @@ export function testClient(overrides: Partial<DesktopClient> = {}): DesktopClien
     // 默认「上次没有发生更新」：这是绝大多数用例的真实前提，也免得每次渲染都报一次未配置。
     takeUpdateResult: vi.fn().mockResolvedValue(null),
     openReleasePage: failing(),
+    openExternalUrl: vi.fn().mockResolvedValue(undefined),
     onUpdateProgress: vi.fn().mockResolvedValue(() => {}),
     platformInfo: vi.fn().mockResolvedValue({ platform: 'macos', titlebarHeight: 44, leadingReserve: 84, systemDecorations: true }),
     gatewayStatus: vi.fn().mockResolvedValue({ running: true, paused: false, port: 18765, served: 0, revisions: [], tokenFingerprint: 'deadbeef', error: null, systemProxy: { httpEnabled: false, endpoint: null, bypassApplied: false } }),

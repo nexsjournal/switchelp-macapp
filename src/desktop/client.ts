@@ -245,6 +245,8 @@ export interface DesktopClient {
   takeUpdateResult(): Promise<string | null>;
   /** 用系统浏览器打开发布页。仅允许本仓库的地址。 */
   openReleasePage(url: string): Promise<void>;
+  /** 用系统浏览器打开一个外部链接（内容中心的资讯与仓库卡片）。只接受 http/https。 */
+  openExternalUrl(url: string): Promise<void>;
 
   /** 平台与窗口策略。界面据此设置 data-platform 与窗口相关变量。 */
   platformInfo(): Promise<PlatformReport>;

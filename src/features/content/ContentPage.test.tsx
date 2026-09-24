@@ -36,6 +36,25 @@ function baseClient(overrides = {}) {
   });
 }
 
+it('点资讯条目交给系统浏览器打开，而不是 webview 里没人接的 window.open', async () => {
+  const openExternalUrl = vi.fn().mockResolvedValue(undefined);
+  renderWithToasts(<ContentPage client={baseClient({ openExternalUrl })} />);
+
+  // 回归：以前这里调 window.open，而 Tauri 的 webview 没有浏览器新窗口，点了没反应。
+  await userEvent.click(await screen.findByText('资讯 1'));
+
+  expect(openExternalUrl).toHaveBeenCalledWith('https://sspai.test/1');
+});
+
+it('打不开链接时给出提示，而不是静默失败', async () => {
+  const openExternalUrl = vi.fn().mockRejectedValue({ code: 'VALIDATION_FAILED', messageKey: 'error.badExternalUrl', safeDetails: ['只允许打开 http/https 链接。'] });
+  renderWithToasts(<ContentPage client={baseClient({ openExternalUrl })} />);
+
+  await userEvent.click(await screen.findByText('资讯 1'));
+
+  expect(await screen.findByText('只允许打开 http/https 链接。')).toBeInTheDocument();
+});
+
 it('状态行永远说清「上次更新」和「下次更新」', async () => {
   renderWithToasts(<ContentPage client={baseClient()} />);
 
