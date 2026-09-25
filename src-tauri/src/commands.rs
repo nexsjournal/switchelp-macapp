@@ -1699,6 +1699,28 @@ pub async fn content_status(
     .await
 }
 
+/// 用量统计：只读本机 Codex 会话记录，不联网、不写文件。
+///
+/// 走 `run` 而不是直接读文件，是为了和其余命令一样过 `authorize`，并且让这段
+/// 同步文件扫描落在阻塞线程池里（会话记录大的时候能到几十兆）。
+/// `days` 只收 7/30/90，其余值由核心回落到 30。
+#[tauri::command]
+pub async fn usage_report(
+    window: WebviewWindow,
+    state: Desktop<'_>,
+    days: i64,
+) -> Result<switch_core::usage::UsageReport, CoreError> {
+    run(window, state, move |_desktop| {
+        let home = switch_core::usage::resolve_codex_home();
+        Ok(switch_core::usage::collect_usage(
+            &home,
+            days,
+            now_seconds(),
+        ))
+    })
+    .await
+}
+
 /// GitHub 令牌是否已配置。**不返回令牌本身**。
 #[tauri::command]
 pub async fn content_github_token_status(

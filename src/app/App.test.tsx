@@ -142,7 +142,7 @@ test('回归：配好模型后，页面上有「应用并重启 Codex」这一�
   await waitFor(() => expect(executeApply).toHaveBeenCalledTimes(1));
   expect(restartHost).toHaveBeenCalledWith('inst_test');
   // 重启是本应用自己做的，而且退出与启动都观察到了——回执当场记下，不再让用户去
-  // 「Codex 配置」页点第二次。以前不记账，事务永远停在「等待重载」。
+  // 「配置」页点第二次。以前不记账，事务永远停在「等待重载」。
   await waitFor(() => expect(confirmReload).toHaveBeenCalledWith('op_1', true));
   expect(await screen.findByText('配置已提交，Codex 已重启；它回来后看看模型菜单。')).toBeInTheDocument();
 });
@@ -182,7 +182,7 @@ test('启动时对账：宿主已经重启过就自动补记，不必等用户�
   await waitFor(() => expect(listModels.mock.calls.length).toBeGreaterThan(1));
 });
 
-test('待应用条的「查看差异」交给宿主切到 Codex 配置页', async () => {
+test('待应用条的「查看差异」交给宿主切到「配置」页', async () => {
   const user = userEvent.setup();
   const client = testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
     listModels: vi.fn().mockResolvedValue([modelRow()]), listCredentials: vi.fn().mockResolvedValue([]) });
@@ -191,7 +191,7 @@ test('待应用条的「查看差异」交给宿主切到 Codex 配置页', asyn
   await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
   const bar = await screen.findByRole('region', { name: '待应用' });
   await user.click(within(bar).getByRole('button', { name: '查看差异' }));
-  expect(await screen.findByRole('heading', { level: 1, name: 'Codex 配置' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { level: 1, name: '配置' })).toBeInTheDocument();
 });
 
 test('供应商弹窗：标题是文字，名称是表单字段，「更多」里有停用与删除', async () => {

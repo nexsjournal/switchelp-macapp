@@ -1,0 +1,96 @@
+.page { display: grid; gap: 24px; align-content: start; }
+
+/* 工具栏：分段控件在左、重新扫描在右。两者都是 40 高的控件，同一行里基线自然对齐。 */
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+.card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: var(--card-padding); }
+.cardTitle { margin: 0; font-size: var(--font-size-card-title); line-height: var(--line-height-card-title); font-weight: 600; }
+.cardHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+/*
+ * 标题块贴行顶：卡片首行的标题按光学修正上提一点，免得与右侧同排的小字看起来没对齐。
+ * 与概览页同一条做法（修正量在 tokens.css 里）。
+ */
+.card > .cardTitle:first-child { margin-top: calc(-1 * var(--card-title-optical-trim)); }
+.card > .cardHeader:first-child { margin-top: calc(-1 * var(--card-title-optical-trim)); }
+.card > .cardHeader:first-child > :first-child { align-self: flex-start; }
+.cardMeta { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+/* 卡片里紧跟标题的说明（计划额度读不到、表里没有记录）要与标题隔开，不能贴住。 */
+.card > .cardTitle:first-child + .note, .card > .cardHeader:first-child + .note { margin-top: 12px; }
+
+/* ---- 指标卡 ---- */
+/*
+ * 两层才等宽等高：grid 只把 li 拉伸到行高，里面的卡片不跟着长，字数不同就会高低不一。
+ * 所以 li 用 flex，内层卡片自己 flex:1 撑满。
+ * `grid-auto-rows: 1fr` 让各排统一取最高那一排的高度：窄窗口降到两列时，第二排因为
+ * 多一行「含在输入内」会比第一排高（实测 110 vs 88），两排不等看着像没对齐。
+ */
+.metrics { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 16px; }
+/*
+ * 两层才等宽等高：grid 只把 li 拉伸到行高，里面的卡片不跟着长，字数不同就会高低不一。
+ * 所以 li 用 flex，内层卡片自己 flex:1 撑满。
+ */
+.metrics li { display: flex; }
+.metricCard { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; justify-items: start;
+  align-content: start; gap: 4px; padding: var(--space-4);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); }
+.metricLabel { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); white-space: nowrap; }
+/* 数字用等宽栈（已含中文回退），固定宽度便于上下两行数字对齐。 */
+.metricValue { font-family: var(--font-mono); font-size: var(--font-size-metric); line-height: var(--line-height-metric); color: var(--text-primary); }
+.metricNote { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+
+/* ---- 每日趋势 ---- */
+.chart { display: grid; gap: 8px; }
+.chartTop { display: flex; justify-content: flex-end; }
+.chartPeak { font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+/*
+ * 固定高度 + 拉满宽度：柱子横向拉伸（矩形拉伸不变形），所以 preserveAspectRatio="none"。
+ * 基线用 non-scaling-stroke，否则非等比缩放会把 1px 描边拉成随宽度变化的粗细。
+ */
+.chartSvg { display: block; width: 100%; height: 160px; }
+.chartBaseline { stroke: var(--border-subtle); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chartBar { fill: var(--accent); }
+/* 零值不是没有这一天：画一根浅色细线占住位置，横轴才连续。 */
+.chartBarZero { fill: var(--border-subtle); }
+.chartAxis { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+
+/* ---- 计划额度 ---- */
+.planRow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.planTrack { flex: 1 1 220px; min-width: 160px; height: 8px; border-radius: var(--radius-pill); background: var(--border-subtle); overflow: hidden; }
+.planFill { height: 100%; background: var(--accent); }
+/* 百分比与重置时间都用等宽：进度条按目测读不准，数字要能直接读。 */
+.planValue { font-family: var(--font-mono); font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-primary); }
+.planReset { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+
+/* ---- 表格 ---- */
+/* 给焦点环留 2px：不留的话滚动容器会把外圈描边裁掉（与全局 .scroll-area 同一做法）。 */
+.tableScroll { overflow-x: auto; padding: 2px; margin: -2px; }
+.table { width: 100%; border-collapse: collapse; text-align: left; font-size: var(--font-size-label); line-height: var(--line-height-label); }
+.table th { padding: 0 12px 12px; color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); font-weight: 500; white-space: nowrap; }
+.table td { padding: 12px; border-top: 1px solid var(--border-subtle); vertical-align: middle; }
+/* 首列贴左缘、末列贴右缘：表格自己不再多一层内缩。 */
+.table th:first-child, .table td:first-child { padding-left: 0; }
+.table th:last-child, .table td:last-child { padding-right: 0; }
+.num { text-align: right; font-family: var(--font-mono); white-space: nowrap; }
+/*
+ * 数值列的表头也要右对齐：单元格是右对齐的数字，表头默认左对齐时两者对不上——
+ * 「输入」两个字贴在列的左边、下面的数字贴在右边，中间空一大段（用户截图指的就是这个）。
+ * 单独一个类而不是复用 `.num`：表头是标签不是数字，不该跟着换成等宽栈。
+ */
+.numHead { text-align: right; }
+.numStrong { font-weight: 500; color: var(--text-primary); }
+/* 模型名与供应商名是标识符，不是文案：走等宽栈，长 id 也不会挤成两行。 */
+.mono { font-family: var(--font-mono); }
+
+/* ---- 证据行与说明 ---- */
+.note { margin: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.sourceLine { margin: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); word-break: break-all; }
+/* 有读不了的文件时必须显眼：它意味着合计比实际少。 */
+.sourceWarn { color: var(--status-warning); }
+
+.spin { animation: usage-spin 900ms linear infinite; }
+@keyframes usage-spin { to { transform: rotate(360deg); } }
+
+/* 最小窗口（规范 960 宽）下指标卡从四列降到两列。沿用 App.module.css 的 1120 断点。 */
+@media (max-width: 1120px) {
+  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

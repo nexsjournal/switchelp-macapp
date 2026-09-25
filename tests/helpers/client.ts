@@ -2,6 +2,7 @@ import { vi } from 'vitest';
 import type { ApplyPlan, CodexInstance, FieldChange } from '@/contracts/types';
 import type { DesktopClient } from '@/desktop/client';
 import type { Provider } from '@/contracts/types';
+import type { UsageReport, UsageTotals } from '@/contracts/types';
 
 export const provider: Provider = { id: 'p_test', name: '测试供应商', endpoint: 'https://example.test/v1', protocol: 'responses',
   authKind: 'api_key', activeCredentialId: null, enabled: true, version: 1, createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z' };
@@ -111,6 +112,29 @@ export function testClient(overrides: Partial<DesktopClient> = {}): DesktopClien
     contentStatus: vi.fn().mockResolvedValue({ lastOkAt: null, nextFetchAt: 0, scheduleHours: [6, 18], failing: [], totalItems: 0 }),
     contentGithubTokenStatus: vi.fn().mockResolvedValue(false),
     setContentGithubToken: failing(),
+    // 默认「本机没有任何会话记录」：这是空态用例的前提，也免得每处渲染都要造一份数据。
+    usageReport: vi.fn().mockResolvedValue(emptyUsageReport()),
     ...overrides,
   };
+}
+
+/** 零用量的用量报告；测试要造数据时用 `usageReport(days)` 覆盖。 */
+export function emptyUsageReport(overrides: Partial<UsageReport> = {}): UsageReport {
+  return {
+    sourceDirectory: '/tmp/gptswitch-test/.codex',
+    rangeDays: 30,
+    scannedFiles: 0,
+    unreadableFiles: 0,
+    sessions: 0,
+    totals: zeroTotals(),
+    daily: [],
+    byModel: [],
+    byProvider: [],
+    planWindow: null,
+    ...overrides,
+  };
+}
+
+export function zeroTotals(): UsageTotals {
+  return { inputTokens: 0, cachedTokens: 0, cacheWriteTokens: 0, outputTokens: 0, reasoningTokens: 0, totalTokens: 0 };
 }

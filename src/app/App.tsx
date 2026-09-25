@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
-import { Activity, Boxes, ChevronRight, LayoutDashboard, ListChecks, Newspaper, PackageOpen, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, SlidersHorizontal, Wrench, Settings as SettingsIcon } from 'lucide-react';
+import { Activity, Boxes, ChartColumn, ChevronRight, LayoutDashboard, ListChecks, Newspaper, PackageOpen, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, SlidersHorizontal, Wrench, Settings as SettingsIcon } from 'lucide-react';
 import type { Credential, Model, Provider } from '@/contracts/types';
 import { type AppliedSummary, type DesktopClient, type GatewayReport, type PlatformReport, type UpdateReport, toCoreError } from '@/desktop/client';
 import { desktopClient } from '@/desktop/transport';
@@ -21,13 +21,14 @@ import { SettingsPage } from '@/features/settings/SettingsPage';
 import { ToolsPage } from '@/features/tools/ToolsPage';
 import { PluginHubPage } from '@/features/plugins/PluginHubPage';
 import { ContentPage } from '@/features/content/ContentPage';
+import { UsagePage } from '@/features/usage/UsagePage';
 import { UpdateDialog } from '@/features/update/UpdateDialog';
 import { UpdatePill } from '@/features/update/UpdatePill';
 
 import styles from './App.module.css';
 
 import { useLocale, t } from '@/i18n';
-type Page = 'overview' | 'providers' | 'codexConfig' | 'tools' | 'plugins' | 'content' | 'diagnostics' | 'logs' | 'settings';
+type Page = 'overview' | 'providers' | 'codexConfig' | 'tools' | 'plugins' | 'content' | 'usage' | 'diagnostics' | 'logs' | 'settings';
 /**
  * 侧栏导航。`group` 只做视觉分组：它是分隔标签，不可点击也不折叠——
  * 为一组分隔引入折叠状态，收益是一条线，成本是用户又要学一个新控件。
@@ -40,6 +41,8 @@ const navigation = [
   { id: 'content', icon: Newspaper, group: 'shell.navGroup.extensions' },
   { id: 'tools', icon: Wrench },
   { id: 'plugins', icon: PackageOpen },
+  // 用量放在扩展组末尾：它是只读自己数据的统计页，与内容中心同类，但不打断既有的因果顺序。
+  { id: 'usage', icon: ChartColumn },
   { id: 'diagnostics', icon: Activity, group: 'shell.navGroup.diagnostics' },
   { id: 'logs', icon: ListChecks },
 ] as const;
@@ -312,11 +315,12 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
         {!showOnboarding && <header className={styles.pageHeader}><div><h1 className="text-page-title">{t(`nav.${page}`)}</h1><p>{({
               overview: t('page.overviewHint'), providers: t('page.providersHint'), codexConfig: t('page.codexHint'),
               tools: t('page.toolsHint'), plugins: t('page.pluginsHint'), content: t('page.contentHint'),
+              usage: t('page.usageHint'),
               diagnostics: t('page.diagnosticsHint'), logs: t('page.logsHint'), settings: t('page.settingsHint'),
             })[page]}</p></div>
           <div className="actions"><button className="icon-button" aria-label={t('common.reload')} disabled={loading} onClick={() => void refresh()}><RefreshCw size={18} className={loading ? styles.spin : ''} /></button>
             {page !== 'codexConfig' && page !== 'logs' && page !== 'diagnostics' && page !== 'settings'
-              && page !== 'tools' && page !== 'plugins' && page !== 'content'
+              && page !== 'tools' && page !== 'plugins' && page !== 'content' && page !== 'usage'
               && <button className="primary" disabled={loading} onClick={() => setProviderEditor('new')}><Plus size={18} />{t('action.addProvider')}</button>}</div></header>}
         {/* 页面状态（加载失败）留在页面里：它要一直看得见，直到状态本身改变。
             动作结果（已保存、已应用…）走全局 Toast，弹窗与常规界面共用同一个位置。 */}
@@ -410,6 +414,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
           {page === 'tools' && <ToolsPage client={client} />}
           {page === 'plugins' && <PluginHubPage client={client} />}
           {page === 'content' && <ContentPage client={client} />}
+          {page === 'usage' && <UsagePage client={client} />}
           {page === 'diagnostics' && <ConnectionPage client={client} providers={providers} />}
           {page === 'logs' && <LogsPage client={client} />}
           {page === 'settings' && <SettingsPage client={client} gateway={gateway} onNavigate={navigate}

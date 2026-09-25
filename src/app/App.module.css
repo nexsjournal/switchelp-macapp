@@ -85,6 +85,14 @@
 .providerSummary strong, .providerItem strong { display: block; font-weight: 500; }
 .providerSummary span { display: block; color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 4px; }
 .monogram { display: grid; place-items: center; background: var(--bg-selected); border: 1px solid var(--border-subtle); border-radius: 9px; width: 36px; height: 36px; flex-shrink: 0; font-size: var(--font-size-card-title); line-height: var(--line-height-card-title); font-weight: 600; }
+/*
+ * 选中时图标方块要换一层底色。`.monogram` 平时用 `--bg-selected` 压在 `--bg-surface` 上，
+ * 而选中卡片本身的底**也是** `--bg-selected`——同一个 token，方块直接消失在卡片里，
+ * 只剩一个孤零零的首字（用户截图里那个看不清的「示」）。
+ * 换成 `--bg-elevated` 后与 `--bg-selected` 在两套主题下都能分开：
+ * 深色 #1d2127 压 #2b2e35、浅色 #ffffff 压 #eaeaef。
+ */
+.providerItem.selected .monogram { background: var(--bg-elevated); }
 .steps { list-style: none; padding: 0; margin: 0; }
 .steps li { display: flex; gap: 12px; margin-bottom: 24px; }
 .steps li > span { width: 24px; height: 24px; border: 1px solid var(--border-subtle); color: var(--text-secondary); border-radius: 50%; text-align: center; line-height: var(--line-height-caption); font-size: var(--font-size-caption); flex-shrink: 0; }

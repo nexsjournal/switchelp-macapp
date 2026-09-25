@@ -28,6 +28,7 @@ import type {
   SkillRecord,
   SkillTarget,
   ToolState,
+  UsageReport,
   UninstallOutcome,
   UpdateInfo,
 } from '@/contracts/types';
@@ -365,6 +366,11 @@ export interface DesktopClient {
   contentGithubTokenStatus(): Promise<boolean>;
   setContentGithubToken(token: string | null): Promise<boolean>;
 
+  /**
+   * 用量统计。只读扫描本机 Codex 会话记录，不联网、不写任何文件。
+   * `days` 收 7 / 30 / 90，非法值由核心回落到 30。
+   */
+  usageReport(days: number): Promise<UsageReport>;
 }
 
 /** 错误归一化：后端 CoreError 与前端未知错误都收敛成同一形状。 */

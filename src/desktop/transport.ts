@@ -21,6 +21,7 @@ import type {
   ToolState,
   UninstallOutcome,
   UpdateInfo,
+  UsageReport,
 } from '@/contracts/types';
 import type { AppliedSummary, ApplyStatus, BackupEntry, CoexistState, DesktopClient, GatewayReport, HostRestart, InspectResult, DiagnosticsPreview, PlatformReport, UpdateProgress, UpdateReport } from './client';
 import type { DiscoveredModel } from './client';
@@ -141,4 +142,5 @@ export const desktopClient: DesktopClient = {
   contentStatus: () => call<ContentStatus>('content_status'),
   contentGithubTokenStatus: () => call<boolean>('content_github_token_status'),
   setContentGithubToken: token => call<boolean>('content_set_github_token', { token }),
+  usageReport: days => call<UsageReport>('usage_report', { days }),
 };

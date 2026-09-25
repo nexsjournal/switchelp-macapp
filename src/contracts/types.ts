@@ -581,3 +581,69 @@ export interface ContentStatus {
   failing: FeedFailure[];
   totalItems: number;
 }
+
+/**
+ * 用量统计（用量页）。全部来自 Codex 本地会话记录，不联网、不新增采集。
+ *
+ * 口径提醒：`cachedTokens ⊂ inputTokens`、`reasoningTokens ⊂ outputTokens`，所以四个
+ * 指标之间**不可相加**当作总量，界面必须说明这种包含关系。
+ *
+ * 注意 `totalTokens` 也不等于 `inputTokens + outputTokens`：本机 32366 个 token_count
+ * 事件里有 2878 个（约 9%）两者不等，差异多为 ±1~7（上游自身的记账口径所致）。
+ * 所以不要在任何地方假设这几个字段可以互相推算。
+ */
+export interface UsageTotals {
+  inputTokens: number;
+  /** 输入中被缓存命中的部分（含在 inputTokens 内）。 */
+  cachedTokens: number;
+  cacheWriteTokens: number;
+  outputTokens: number;
+  /** 输出中的推理部分（含在 outputTokens 内）。 */
+  reasoningTokens: number;
+  totalTokens: number;
+}
+
+export interface UsageDay {
+  /** 本地日期，`YYYY-MM-DD`。 */
+  date: string;
+  sessions: number;
+  totals: UsageTotals;
+}
+
+export interface UsageModelRow {
+  model: string;
+  sessions: number;
+  totals: UsageTotals;
+}
+
+export interface UsageProviderRow {
+  provider: string;
+  sessions: number;
+  totals: UsageTotals;
+}
+
+/** 计划额度窗口。只有官方计划账号的 Codex 会话会写入，第三方供应商的会话没有。 */
+export interface UsagePlanWindow {
+  planType: string;
+  usedPercent: number;
+  windowMinutes: number;
+  /** Unix 秒。 */
+  resetsAt: number;
+}
+
+export interface UsageReport {
+  /** 实际扫描的根目录，界面上如实显示，便于核对数字来源。 */
+  sourceDirectory: string;
+  /** 本次请求的时间范围（天）。 */
+  rangeDays: number;
+  scannedFiles: number;
+  unreadableFiles: number;
+  sessions: number;
+  totals: UsageTotals;
+  /** 范围内逐日零填充，按日期升序。 */
+  daily: UsageDay[];
+  /** 按总 Token 降序。 */
+  byModel: UsageModelRow[];
+  byProvider: UsageProviderRow[];
+  planWindow: UsagePlanWindow | null;
+}

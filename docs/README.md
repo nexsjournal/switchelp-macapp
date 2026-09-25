@@ -26,6 +26,7 @@
 | [桌面壳选型复审](research/03-desktop-shell-decision.md) | 星算助手迁移反馈、Tauri/Electron 对比、内嵌浏览器边界与切换条件 |
 | [DSH Desktop 补充调研](research/04-dsh-reference.md) | Electron 实际用法、本地界面与网站浏览器的区别、窗口/平台/恢复设计 |
 | [星算助手三板块拆解](research/05-xingsuan-tools-plugins-content.md) | 1.6.6 的工具管理 / 插件中心 / 内容中心怎么实现：清单 schema、云端端点、本地落盘与边界 |
+| [AITracker 调研](research/06-aitracker-research.md) | 追踪什么（36 个 AI 工具的本地日志路径与 reader 清单）、**能否全网找免费 token/额度的逐项否证 + 合规替代方案（第 9 节）**、离线价格包、出网全清单、许可证限制与可借鉴点 |
 | [总体架构](architecture/01-system-architecture.md) | 技术选型、模块、进程和架构决策 |
 | [配置与应用事务](architecture/02-configuration-lifecycle.md) | 配置优先级、差异预览、原子写入、回滚、冲突 |
 | [网关与协议](architecture/03-gateway-and-protocols.md) | 路由、流式响应、工具调用、输出限制、重试 |
@@ -39,7 +40,9 @@
 | [页面与流程](design/04-pages-and-flows.md) | 页面结构、线框、操作、校验、空态与异常 |
 | [模板与交互规则](design/05-patterns-and-accessibility.md) | 页面模板、系统交互、键盘与无障碍 |
 | [工具管理、插件中心与内容中心](design/06-tool-hub-plugin-hub-and-content-center.md) | 三个新板块的范围、页面、数据模型、抓取策略、安全约束与分批验收；**批次 A + C 已实现** |
+| [用量页](design/07-usage-page.md) | 扩展组新板块：只读 Codex 本地会话记录统计 Token、本机计划额度窗口；含解析算法（累计值差分）、契约、版面规范与验收；**已实现** |
 | [扩展板块设计规范审计](audits/2026-09-21-extension-pages-design-conformance.md) | 三轮实测：几何/对比度/点击目标/键盘、配色「更清爽」的取值依据、三处版面重做 |
+| [用量页审计与真实数据核对](audits/2026-09-25-usage-page-design-conformance.md) | 两套主题 × 两种窗口实测（几何/对比度/点击目标/语义全绿）、交互走查、解析算法与独立基准在 337 个真实文件上逐项一致 |
 | [开发计划](development/01-implementation-plan.md) | 分期、任务、依赖、产物与工期估算 |
 | [测试与发布](development/02-testing-and-release.md) | 兼容实验、协议测试、双平台验收与发布门禁 |
 | [设计规范符合性审计方法](development/04-design-conformance.md) | 用实测数字核对界面：几何四项、对比度、点击目标、键盘与语义、最小窗口与缩放；含已登记的例外与「不许报一个没量过的数字」这条硬规则 |

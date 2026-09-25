@@ -18,7 +18,7 @@ const providerChange: FieldChange = { keyPath: 'model_providers.gptswitch', befo
 async function openCodexPage(client: Parameters<typeof testClient>[0]) {
   const user = userEvent.setup();
   render(<App client={testClient(client)} />);
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'Codex 配置' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '配置' }));
   await screen.findByText('Codex 实例');
   return user;
 }
@@ -27,7 +27,7 @@ async function openCodexPage(client: Parameters<typeof testClient>[0]) {
 async function openEmptyCodexPage() {
   const user = userEvent.setup();
   render(<App client={testClient({ detectInstances: vi.fn().mockResolvedValue([]) })} />);
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'Codex 配置' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '配置' }));
   await screen.findByText('未检测到 Codex');
   return user;
 }
@@ -200,7 +200,7 @@ test('重启宿主：先确认，再调用一次，并按确认到的结果说�
   const user = userEvent.setup();
   const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitConfirmed: true, quitForced: false, launchedConfirmed: true });
   render(<App client={testClient({ detectInstances: vi.fn().mockResolvedValue([instance]), restartHost })} />);
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'Codex 配置' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '配置' }));
   await screen.findByText('Codex 实例');
 
   await user.click(screen.getByRole('button', { name: '重启 Codex' }));
@@ -220,7 +220,7 @@ test('旧进程没退出去时必须说「没能重启」，绝不报成功', as
   const user = userEvent.setup();
   const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitConfirmed: false, quitForced: false, launchedConfirmed: false });
   render(<App client={testClient({ detectInstances: vi.fn().mockResolvedValue([instance]), restartHost })} />);
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'Codex 配置' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '配置' }));
   await screen.findByText('Codex 实例');
 
   await user.click(screen.getByRole('button', { name: '重启 Codex' }));
@@ -236,7 +236,7 @@ test('退出了但没起来时，说清楚要手动打开', async () => {
   const user = userEvent.setup();
   const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitConfirmed: true, quitForced: false, launchedConfirmed: false });
   render(<App client={testClient({ detectInstances: vi.fn().mockResolvedValue([instance]), restartHost })} />);
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'Codex 配置' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '配置' }));
   await screen.findByText('Codex 实例');
 
   await user.click(screen.getByRole('button', { name: '重启 Codex' }));
@@ -251,7 +251,7 @@ test('实例检测失败要能看到原因，而不是只显示空态', async ()
   const user = userEvent.setup();
   render(<App client={testClient({ detectInstances: vi.fn().mockRejectedValue({ code: 'INTERNAL',
     messageKey: 'error.internal', safeDetails: ['无法读取 /Applications'], retryable: false, recoveryActions: [] }) })} />);
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'Codex 配置' }));
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '配置' }));
 
   // 回归：这条分支过去没有任何错误出口，界面永远停在「未检测到 Codex」，原因看不见。
   expect(await screen.findByRole('alert')).toHaveTextContent('无法读取 /Applications');

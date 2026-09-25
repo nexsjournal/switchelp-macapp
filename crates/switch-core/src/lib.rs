@@ -15,6 +15,7 @@ pub mod plugins;
 pub mod protocols;
 pub mod storage;
 pub mod toolhub;
+pub mod usage;
 
 pub use domain::error::{CoreError, ErrorCode, RecoveryAction};
 

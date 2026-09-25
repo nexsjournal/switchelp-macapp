@@ -25,6 +25,8 @@ const SOURCE_PREFIXES = new Set([
   'overview', 'page', 'probe', 'probeState', 'providers', 'reason', 'settings', 'shell', 'stage', 'time', 'warning',
   // 扩展与内容三页（工具管理 / 插件中心 / 内容中心）。
   'content', 'plugins', 'tools',
+  // 用量页（只读本机 Codex 会话记录）。
+  'usage',
   // 应用内更新：侧栏左上角的更新按钮与更新弹窗。
   'update',
 ]);
@@ -46,7 +48,7 @@ const DYNAMIC_KEYS = new Set([
   ...['defaultModel', 'providerRoute', 'catalog', 'gatewayProvider', 'contextOverride', 'reasoningDefault',
     'restore', 'test', 'other'].map(name => `reason.${name}`),
   // 扩展板块：导航来自 Page 联合类型，状态/分类/来源来自 Rust 枚举，静态扫描都看不到。
-  ...['tools', 'plugins', 'content'].map(name => `nav.${name}`),
+  ...['tools', 'plugins', 'content', 'usage'].map(name => `nav.${name}`),
   ...['ready', 'needsLogin', 'installed', 'unverified', 'notInstalled', 'unsupportedPlatform'].map(name => `tools.status.${name}`),
   ...['cliCode', 'utility', 'runtime'].map(name => `tools.category.${name}`),
   ...['path', 'candidate'].map(name => `tools.pathSource.${name}`),

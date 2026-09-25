@@ -29,7 +29,7 @@ test('是独立页面：分组标题、滚动区里的字段，页尾只有取�
   expect(screen.getByRole('button', { name: '取消' })).toBeInTheDocument();
   // 生效预览整块撤掉：同样的信息挂在每个字段的「?」上，不再单开一栏让人对照着读。
   expect(screen.queryByRole('complementary', { name: '生效预览' })).not.toBeInTheDocument();
-  expect(screen.getByText(/保存后到「Codex 配置」页生成差异并应用/)).toBeInTheDocument();
+  expect(screen.getByText(/保存后到「配置」页生成差异并应用/)).toBeInTheDocument();
 });
 
 test('输入类型与模型能力是勾选单元格：文本锁定，PDF 与视频不可启用', () => {
