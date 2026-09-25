@@ -469,6 +469,7 @@ fn main() {
             commands::content_status,
             commands::content_github_token_status,
             commands::content_set_github_token,
+            commands::usage_report,
         ])
         .run(tauri::generate_context!())
         .expect("Switchelp 无法启动");

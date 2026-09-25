@@ -4,14 +4,14 @@
  * 只在开发服务器上使用（`pnpm dev` 后访问 `/visual.html`）；不参与打包，
  * 也不作为业务真相——这里的数据只用于看排版、层级、间距和状态文案。
  *
- * 支持 `?view=codex|app|tools|plugins|content|settings` 直接进入对应页面、`?view=toast` 推三条提示条，
+ * 支持 `?view=codex|app|tools|plugins|content|usage|settings` 直接进入对应页面、`?view=toast` 推三条提示条，
  * 方便自动截图与版面审计。
  */
 import { StrictMode, useEffect, type ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import type {
   ApplyPlan, CodexInstance, Credential, FeedItem, FeedSource, FieldChange, Model, Provider,
-  RepoCatalog, SkillRecord, ToolState,
+  RepoCatalog, SkillRecord, ToolState, UsageDay, UsageReport, UsageTotals,
 } from '@/contracts/types';
 import type { ApplyStatus, DesktopClient, InspectResult } from '@/desktop/client';
 import { App } from '@/app/App';
@@ -229,6 +229,82 @@ const feedItems: FeedItem[] = [
   { url: 'https://www.ruanyifeng.com/blog/2026/09/weekly.html', sourceId: 'ruanyifeng', sourceLabel: '阮一峰的网络日志', title: '科技爱好者周刊（第 380 期）', summary: '本期话题：本地优先的软件。', publishedAt: 1_789_900_000, firstSeenAt: 1_789_900_100, lang: 'zh', stars: null, repo: null },
 ];
 
+/**
+ * 用量页夹具。数字是造出来的，只为量版面，不代表任何真实账户；但**口径照真实 rollout**
+ * （input 含 cached、output 含 reasoning、total = input + output），这样走查看到的分栏与
+ * 百分比和真机一致。周末低、工作日高，避免趋势图退化成一条直线。
+ */
+function usageFixture(days: number): UsageReport {
+  const today = new Date();
+  const daily: UsageDay[] = [];
+  for (let back = days - 1; back >= 0; back--) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - back);
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const weekend = d.getDay() === 0 || d.getDay() === 6;
+    const wave = (back * 37) % 11;
+    const inputTokens = weekend ? 420_000 + wave * 9_000 : 1_900_000 + wave * 41_000;
+    const outputTokens = Math.round(inputTokens * 0.021);
+    daily.push({
+      date,
+      sessions: weekend ? 1 + (wave % 2) : 3 + (wave % 4),
+      totals: {
+        inputTokens,
+        cachedTokens: Math.round(inputTokens * 0.52),
+        cacheWriteTokens: 0,
+        outputTokens,
+        reasoningTokens: Math.round(outputTokens * 0.46),
+        totalTokens: inputTokens + outputTokens,
+      },
+    });
+  }
+  const sum = (pick: (t: UsageTotals) => number) => daily.reduce((acc, day) => acc + pick(day.totals), 0);
+  const totals: UsageTotals = {
+    inputTokens: sum(t => t.inputTokens),
+    cachedTokens: sum(t => t.cachedTokens),
+    cacheWriteTokens: 0,
+    outputTokens: sum(t => t.outputTokens),
+    reasoningTokens: sum(t => t.reasoningTokens),
+    totalTokens: sum(t => t.totalTokens),
+  };
+  const totalsOf = (share: number): UsageTotals => ({
+    inputTokens: Math.round(totals.inputTokens * share),
+    cachedTokens: Math.round(totals.cachedTokens * share),
+    cacheWriteTokens: 0,
+    outputTokens: Math.round(totals.outputTokens * share),
+    reasoningTokens: Math.round(totals.reasoningTokens * share),
+    totalTokens: Math.round(totals.totalTokens * share),
+  });
+  const models: [string, number, number][] = [
+    ['gpt-5.6-sol', 0.46, 38],
+    ['qiyuanapi/deepseek-v4.1', 0.31, 24],
+    ['gpt-5.5', 0.15, 11],
+    ['zai/glm-5.3-flash', 0.08, 6],
+  ];
+  const providers: [string, number, number][] = [
+    ['OpenAI', 0.61, 47],
+    ['gptswitch', 0.31, 24],
+    ['opencodex', 0.08, 8],
+  ];
+  return {
+    sourceDirectory: '~/.codex',
+    rangeDays: days,
+    scannedFiles: 337,
+    unreadableFiles: 0,
+    sessions: daily.reduce((acc, day) => acc + day.sessions, 0),
+    totals,
+    daily,
+    byModel: models.map(([model, share, sessions]) => ({ model, sessions, totals: totalsOf(share) })),
+    byProvider: providers.map(([provider, share, sessions]) => ({ provider, sessions, totals: totalsOf(share) })),
+    planWindow: {
+      planType: 'plus',
+      usedPercent: 32,
+      windowMinutes: 10_080,
+      resetsAt: Math.floor(Date.now() / 1000) + 5 * 24 * 3600,
+    },
+  };
+}
+
 const client: DesktopClient = {
   detectInstances: async () => [instance],
   platformInfo: async () => ({ platform: 'macos', titlebarHeight: 44, leadingReserve: 84, systemDecorations: true }),
@@ -416,6 +492,7 @@ const client: DesktopClient = {
   }),
   contentGithubTokenStatus: async () => false,
   setContentGithubToken: async token => Boolean(token),
+  usageReport: async (days: number) => usageFixture(days === 7 || days === 90 ? days : 30),
 };
 
 const view = new URLSearchParams(window.location.search).get('view') ?? '';
@@ -497,6 +574,7 @@ createRoot(container).render(
           : view === 'tools' ? 'tools'
           : view === 'plugins' ? 'plugins'
           : view === 'content' ? 'content'
+          : view === 'usage' ? 'usage'
           : view === 'settings' ? 'settings'
           : 'overview'
       } />}

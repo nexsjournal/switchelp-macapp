@@ -16,7 +16,7 @@ import { provider, testClient } from '../tests/helpers/client';
 const client = () => testClient({ listProviders: async () => ({ items: [provider], nextCursor: null }) });
 
 /** 键名形状的片段一旦出现在界面上，就说明某个键漏了文案。 */
-const KEY_SHAPED = /\b(action|common|compat|copy|credential|diag|empty|error|group|host|nav|probe|probeState|reason|stage|warning)\.[a-zA-Z]/;
+const KEY_SHAPED = /\b(action|common|compat|copy|credential|diag|empty|error|group|host|nav|probe|probeState|reason|stage|usage|warning)\.[a-zA-Z]/;
 
 function bodyText(): string {
   return document.body.textContent ?? '';
