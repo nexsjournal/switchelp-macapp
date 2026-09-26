@@ -319,7 +319,7 @@ impl ApplyService {
             kind: OperationKind::Apply,
             operation,
             plan: plan.clone(),
-            ownership: self.operations.ownership(&instance.id)?,
+            ownership: self.ownership_of(instance)?,
             catalog_path: catalog_path.display().to_string(),
             catalog_hash,
             publication: None,
@@ -622,9 +622,32 @@ impl ApplyService {
         Ok(confirmed)
     }
 
+    /// 取实例的写入归属记录。先按当前身份查，查不到再退到旧口径的实例 ID。
+    ///
+    /// 兼容层是为「宿主升级换了 bundle 内 CLI 位置」那一类用户准备的：他们的历史记录挂在
+    /// 旧 ID 上（旧口径把 CLI 路径算进了身份），只看新 ID 会让「还原原生配置」以为从没写过
+    /// 东西，于是报「本工具尚未写入过该实例的配置」——而配置里明明还留着我们写的字段。
+    fn ownership_of(&self, instance: &CodexInstance) -> Result<Vec<FieldOwnership>, CoreError> {
+        let found = self.operations.ownership(&instance.id)?;
+        if !found.is_empty() {
+            return Ok(found);
+        }
+        let legacy = crate::codex::detect::legacy_instance_ids(
+            Path::new(&instance.config_root),
+            instance.app_path.as_deref().map(Path::new),
+        );
+        for id in legacy {
+            let found = self.operations.ownership(&id)?;
+            if !found.is_empty() {
+                return Ok(found);
+            }
+        }
+        Ok(Vec::new())
+    }
+
     /// 还原计划：只撤销本工具写入且未被外部修改的字段。
     pub fn plan_restore(&self, instance: &CodexInstance) -> Result<ApplyPlan, CoreError> {
-        let ownership = self.operations.ownership(&instance.id)?;
+        let ownership = self.ownership_of(instance)?;
         if ownership.is_empty() {
             return Err(CoreError::validation(
                 "本工具尚未写入过该实例的配置，无需还原",

@@ -242,7 +242,9 @@ mod tests {
         CodexInstance {
             id: InstanceId::new("local-main"),
             app_path: Some("/Applications/ChatGPT.app".to_owned()),
-            cli_path: Some("/Applications/ChatGPT.app/Contents/Resources/codex".to_owned()),
+            cli_path: Some(
+                "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex".to_owned(),
+            ),
             desktop_version: Some("1.0".to_owned()),
             cli_version: Some("0.155.0".to_owned()),
             config_root: "/Users/someone/.codex".to_owned(),
