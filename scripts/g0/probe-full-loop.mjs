@@ -17,8 +17,9 @@ import { mkdir, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { AppServer } from './rpc.mjs';
+import { resolveCodexBinary } from './codex-binary.mjs';
 
-const binary = process.env.GPTSWITCH_CODEX_BINARY ?? '/Applications/ChatGPT.app/Contents/Resources/codex';
+const binary = resolveCodexBinary();
 const appBinary =
   process.env.GPTSWITCH_APP_BINARY ??
   resolve('target/debug/bundle/macos/Switchelp.app/Contents/MacOS/gptswitch');

@@ -2,9 +2,10 @@ import http from 'node:http';
 import { readFile, writeFile, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AppServer } from './rpc.mjs';
+import { resolveCodexBinary } from './codex-binary.mjs';
 
 const report = JSON.parse(await readFile('.local/g0-catalog.json', 'utf8'));
-const binary = process.env.GPTSWITCH_CODEX_BINARY ?? '/Applications/ChatGPT.app/Contents/Resources/codex';
+const binary = resolveCodexBinary();
 let serial = 0;
 const requests = [];
 const server = http.createServer(async (req, res) => {

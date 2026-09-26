@@ -22,11 +22,12 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { AppServer } from './rpc.mjs';
+import { resolveCodexBinary } from './codex-binary.mjs';
 
 const workdir = process.argv[2] ?? '/tmp/g0-coexist';
 const REPO = new URL('../..', import.meta.url).pathname;
 const BRIDGE = join(REPO, 'target', 'debug', 'gptswitch-bridge');
-const REAL_CODEX = '/Applications/ChatGPT.app/Contents/Resources/codex';
+const REAL_CODEX = resolveCodexBinary();
 const LOG = join(workdir, 'bridge-check.log');
 
 const bridge = new AppServer(BRIDGE, {
