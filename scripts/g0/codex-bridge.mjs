@@ -19,9 +19,10 @@ import { spawn } from 'node:child_process';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
+import { resolveCodexBinary } from './codex-binary.mjs';
 
 const LOG = '/tmp/switchelp-bridge.log';
-const REAL_CODEX = '/Applications/ChatGPT.app/Contents/Resources/codex';
+const REAL_CODEX = resolveCodexBinary();
 /**
  * 两份 home 用环境变量指定，便于在真机上做对照实验：
  * - 原生那份应当是**没被我们改过**的配置（真实场景里由产品决定放哪，原型里用备份拼一份）；

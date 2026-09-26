@@ -15,8 +15,9 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { AppServer } from './rpc.mjs';
+import { resolveCodexBinary } from './codex-binary.mjs';
 
-const binary = process.env.GPTSWITCH_CODEX_BINARY ?? '/Applications/ChatGPT.app/Contents/Resources/codex';
+const binary = resolveCodexBinary();
 const workdir = process.env.GPTSWITCH_G0_DIR ?? join(await mkdtemp(join(tmpdir(), 'gptswitch-g0-apply-')), 'run');
 await rm(workdir, { recursive: true, force: true });
 await mkdir(workdir, { recursive: true, mode: 0o700 });

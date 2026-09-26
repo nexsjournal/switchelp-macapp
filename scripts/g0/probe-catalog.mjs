@@ -5,8 +5,9 @@ import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { testCatalog } from './catalog.mjs';
 import { AppServer } from './rpc.mjs';
+import { resolveCodexBinary } from './codex-binary.mjs';
 
-const binary = process.env.GPTSWITCH_CODEX_BINARY ?? '/Applications/ChatGPT.app/Contents/Resources/codex';
+const binary = resolveCodexBinary();
 const testRoot = await mkdtemp(join(tmpdir(), 'gptswitch-g0-'));
 const testCodexHome = join(testRoot, 'codex-home');
 await mkdir(testCodexHome, { mode: 0o700 });

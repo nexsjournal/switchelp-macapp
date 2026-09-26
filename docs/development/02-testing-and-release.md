@@ -141,7 +141,7 @@ Token 边界、推理集合、URL、精确模型 ID、null/unknown、能力交�
 ## 两层端到端验证：谁能进 CI，谁只能人工
 
 `scripts/g0/` 下的三个探针都要一个**真实的 Codex 可执行文件**
-（`/Applications/ChatGPT.app/Contents/Resources/codex`，可用 `GPTSWITCH_CODEX_BINARY` 覆盖）。
+（`/Applications/ChatGPT.app` 内的 codex：ChatGPT 26.924 起在 `Contents/Resources/codex-cli/` 下，由 `codex-package.json` 的 `entrypoint` 声明；探针统一走 `scripts/g0/codex-binary.mjs` 解析，可用 `GPTSWITCH_CODEX_BINARY` 覆盖）。
 GitHub runner 上没有它，也装不上（它是 ChatGPT 桌面端的一部分）。所以端到端验证分两层：
 
 | 层 | 跑什么 | 在哪跑 | 拦得住什么 |

@@ -22,9 +22,10 @@
 import { spawn } from 'node:child_process';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { Transform } from 'node:stream';
+import { resolveCodexBinary } from './codex-binary.mjs';
 
 const LOG = '/tmp/switchelp-cli-probe.log';
-const REAL_CODEX = '/Applications/ChatGPT.app/Contents/Resources/codex';
+const REAL_CODEX = resolveCodexBinary();
 const MAX_EVENTS = 400;
 
 const argv = process.argv.slice(2);
