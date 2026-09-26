@@ -66,7 +66,7 @@ const credentials: Credential[] = [
 ];
 
 const instance: CodexInstance = {
-  id: 'inst_a', appPath: '/Applications/ChatGPT.app', cliPath: '/Applications/ChatGPT.app/Contents/Resources/codex',
+  id: 'inst_a', appPath: '/Applications/ChatGPT.app', cliPath: '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
   desktopVersion: '1.0.0', cliVersion: '0.1.0', configRoot: '/Users/me/.codex',
   configFile: '/Users/me/.codex/config.toml', configExists: true, startupMode: 'not_running',
   compatibility: 'unverified', fingerprint: { cliVersion: '0.1.0' }, conflictingManagers: ['other-tool'], blockedReasonKey: null,

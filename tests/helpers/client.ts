@@ -7,7 +7,7 @@ import type { UsageReport, UsageTotals } from '@/contracts/types';
 export const provider: Provider = { id: 'p_test', name: '测试供应商', endpoint: 'https://example.test/v1', protocol: 'responses',
   authKind: 'api_key', activeCredentialId: null, enabled: true, version: 1, createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z' };
 
-export const instance: CodexInstance = { id: 'inst_test', appPath: '/Applications/ChatGPT.app', cliPath: '/Applications/ChatGPT.app/Contents/Resources/codex',
+export const instance: CodexInstance = { id: 'inst_test', appPath: '/Applications/ChatGPT.app', cliPath: '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
   desktopVersion: null, cliVersion: null, configRoot: '/tmp/gptswitch-test/.codex', configFile: '/tmp/gptswitch-test/.codex/config.toml',
   configExists: true, startupMode: 'not_running', compatibility: 'unverified', fingerprint: {}, conflictingManagers: [], blockedReasonKey: null };
 

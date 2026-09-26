@@ -8,7 +8,7 @@
 //! - 上游 Key 永不写入 config.toml。
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 use switch_core::{
@@ -17,7 +17,7 @@ use switch_core::{
     },
     codex::{
         config,
-        detect::{CodexInstance, StartupMode},
+        detect::{legacy_instance_id, CodexInstance, StartupMode},
         plan::{ApplyStage, RecoveryDecision},
     },
     credentials::MemoryVault,
@@ -850,6 +850,57 @@ fn restore_is_refused_before_anything_was_written() {
             .any(|detail| detail.contains("尚未写入过该实例的配置")),
         "错误详情应说明无需还原，实际：{:?}",
         error.safe_details
+    );
+}
+
+/// 宿主升级换了 bundle 内 CLI 位置之后，历史写入记录挂在**旧口径**的实例 ID 上
+/// （旧口径把 CLI 路径算进了身份）。还原必须仍然找得到它们，否则界面报
+/// 「本工具尚未写入过该实例的配置，无需还原」——而配置里明明还留着我们写的字段。
+/// 2026-09-26 的 ChatGPT 26.924 在真机上就是这条故障。
+#[test]
+fn restore_finds_records_left_under_a_pre_upgrade_instance_id() {
+    const APP_PATH: &str = "/Applications/ChatGPT.app";
+    let mut harness = Harness::with_ready_model(None);
+
+    // 升级前那次应用：身份是旧的算法，记录挂在旧 ID 下。
+    let config_root = PathBuf::from(harness.instance.config_root.clone());
+    harness.instance.app_path = Some(APP_PATH.to_owned());
+    harness.instance.id = legacy_instance_id(
+        &config_root,
+        Path::new(APP_PATH),
+        "Contents/Resources/codex",
+    );
+    let pre_upgrade_id = harness.instance.id.clone();
+    let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+    let operation_id = harness
+        .service
+        .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-pre-upgrade")
+        .unwrap();
+    harness.service.confirm_reload(&operation_id, true).unwrap();
+
+    // 升级后：同一个安装（同配置根、同 bundle 路径），但 CLI 挪了位置，身份随之改变。
+    harness.instance.cli_path = Some(format!("{APP_PATH}/Contents/Resources/codex-cli/bin/codex"));
+    harness.instance.id = InstanceId::new("inst_after_cli_moved");
+    assert_ne!(harness.instance.id, pre_upgrade_id);
+
+    // 还原必须按旧 ID 找回那份记录，而不是当成「从没写过」。
+    let restore = harness
+        .service
+        .plan_restore(&harness.instance)
+        .expect("换了 CLI 位置也必须找回升级前的写入记录");
+    harness
+        .service
+        .execute_restore(
+            restore.id.as_str(),
+            &restore.plan_hash,
+            "idem-post-upgrade-restore",
+        )
+        .unwrap();
+
+    let text = harness.read_config();
+    assert!(
+        !text.contains("model_provider"),
+        "还原后不该再有本工具写的 provider，实际：{text}"
     );
 }
 

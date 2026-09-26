@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! CODEX_CLI_PATH=<app-data>/bin/gptswitch-bridge \
-//! GPTSWITCH_BRIDGE_CODEX=/Applications/ChatGPT.app/Contents/Resources/codex \
+//! GPTSWITCH_BRIDGE_CODEX=/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex \
 //! GPTSWITCH_BRIDGE_MANAGED_HOME=<app-data>/codex-home \
 //!   open -a ChatGPT
 //! ```
