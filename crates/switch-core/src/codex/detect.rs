@@ -611,6 +611,14 @@ mod tests {
         }
     }
 
+    /// 路径断言的跨平台比较：Windows 的 `Path::join` 产出混合分隔符，而夹具写的是
+    /// POSIX 风格。要断言的是「位置对不对」，不是分隔符长什么样，所以两边都先归一成 `/`。
+    fn same_location(actual: Option<&str>, expected: &str) -> bool {
+        actual
+            .map(|value| value.replace('\\', "/") == expected.replace('\\', "/"))
+            .unwrap_or(false)
+    }
+
     const PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict>
   <key>CFBundleIdentifier</key><string>com.openai.codex</string>
@@ -678,18 +686,23 @@ mod tests {
         let found = InstanceDetector::detect(&input, &fs, None, 0).unwrap();
         assert_eq!(found.len(), 1);
         let instance = &found[0];
-        assert_eq!(
+        assert!(same_location(
             instance.app_path.as_deref(),
-            Some("/Applications/ChatGPT.app")
-        );
-        assert_eq!(
-            instance.cli_path.as_deref(),
-            Some(&format!("{NEW_CLI_DIR}/bin/codex")[..]),
+            "/Applications/ChatGPT.app"
+        ));
+        assert!(
+            same_location(
+                instance.cli_path.as_deref(),
+                &format!("{NEW_CLI_DIR}/bin/codex"),
+            ),
             "应认描述文件声明的入口，而不是猜固定路径"
         );
         assert_eq!(instance.desktop_version.as_deref(), Some("26.908.70816"));
         assert_eq!(instance.cli_version.as_deref(), Some("0.158.0-alpha.2.1"));
-        assert_eq!(instance.config_root, "/Users/example/.codex");
+        assert!(same_location(
+            Some(&instance.config_root),
+            "/Users/example/.codex"
+        ));
         assert!(instance.config_exists);
         assert!(instance.is_usable());
         assert_eq!(instance.blocked_reason_key, None);
@@ -700,9 +713,11 @@ mod tests {
         let (fs, input) = legacy_layout_env();
         let found = InstanceDetector::detect(&input, &fs, None, 0).unwrap();
         assert_eq!(found.len(), 1);
-        assert_eq!(
-            found[0].cli_path.as_deref(),
-            Some("/Applications/ChatGPT.app/Contents/Resources/codex"),
+        assert!(
+            same_location(
+                found[0].cli_path.as_deref(),
+                "/Applications/ChatGPT.app/Contents/Resources/codex",
+            ),
             "旧布局（单个 codex 文件）必须继续认得出"
         );
         assert_eq!(found[0].cli_version.as_deref(), Some("0.154.0-alpha.6.2"));
@@ -767,9 +782,11 @@ mod tests {
                 .dir("/Users/example/.codex");
             let input = DetectInput::for_macos(PathBuf::from("/Users/example"));
             let found = InstanceDetector::detect(&input, &fs, None, 0).unwrap();
-            assert_eq!(
-                found[0].cli_path.as_deref(),
-                Some(&format!("{NEW_CLI_DIR}/CodexCLI.app/Contents/MacOS/codex")[..]),
+            assert!(
+                same_location(
+                    found[0].cli_path.as_deref(),
+                    &format!("{NEW_CLI_DIR}/CodexCLI.app/Contents/MacOS/codex"),
+                ),
                 "描述文件不可用时退到候选路径，且优先真二进制：{package:?}"
             );
             assert_eq!(
@@ -802,9 +819,11 @@ mod tests {
                 .dir("/Users/example/.codex");
             let input = DetectInput::for_macos(PathBuf::from("/Users/example"));
             let found = InstanceDetector::detect(&input, &fs, None, 0).unwrap();
-            assert_eq!(
-                found[0].cli_path.as_deref(),
-                Some(&format!("{NEW_CLI_DIR}/CodexCLI.app/Contents/MacOS/codex")[..]),
+            assert!(
+                same_location(
+                    found[0].cli_path.as_deref(),
+                    &format!("{NEW_CLI_DIR}/CodexCLI.app/Contents/MacOS/codex"),
+                ),
                 "不该执行描述文件指到 bundle 之外的入口：{entry}"
             );
         }
@@ -882,10 +901,10 @@ mod tests {
             .dir("/Users/example/.codex");
         let input = DetectInput::for_macos(PathBuf::from("/Users/example"));
         let found = InstanceDetector::detect(&input, &fs, None, 0).unwrap();
-        assert_eq!(
+        assert!(same_location(
             found[0].cli_path.as_deref(),
-            Some("/Applications/ChatGPT.app/Contents/Resources/codex")
-        );
+            "/Applications/ChatGPT.app/Contents/Resources/codex"
+        ));
         assert_eq!(
             found[0].cli_version.as_deref(),
             Some("0.154.0-alpha.6.2"),
@@ -966,7 +985,10 @@ mod tests {
         input.env_codex_home = Some(PathBuf::from("/tmp/isolated-codex-home"));
         let found = InstanceDetector::detect(&input, &fs, None, 0).unwrap();
         // 仍然使用默认 ~/.codex，而不是终端里的环境变量。
-        assert_eq!(found[0].config_root, "/Users/example/.codex");
+        assert!(same_location(
+            Some(&found[0].config_root),
+            "/Users/example/.codex"
+        ));
         assert_eq!(found[0].startup_mode, StartupMode::Unmanaged);
     }
 
