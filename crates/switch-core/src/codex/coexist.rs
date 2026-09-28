@@ -313,6 +313,9 @@ mod tests {
         assert!(launch_env(dir.path(), &base).is_err());
     }
 
+    // install_bridge 在 Windows 上整体拒绝（见实现里的平台检查），拷贝/占位件这些
+    // 行为只在装配完整的平台上才有意义；Windows 侧的契约在最后一条用例里单独钉住。
+    #[cfg(not(windows))]
     #[test]
     fn install_bridge_copies_the_binary_and_keeps_it_executable() {
         let dir = tempfile::tempdir().unwrap();
@@ -330,6 +333,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn install_bridge_fails_loudly_when_the_bundle_has_no_bridge() {
         let dir = tempfile::tempdir().unwrap();
@@ -337,6 +341,7 @@ mod tests {
         assert!(error.safe_details[0].contains("无法安装共存模式"));
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn install_bridge_refuses_the_build_time_placeholder() {
         // 构建期占位件是个 shell 脚本。把它装上去等于给宿主一个「跑不起来但看起来正常」的 CLI。
@@ -350,6 +355,18 @@ mod tests {
             error.safe_details
         );
         assert!(!bridge_path(dir.path()).exists(), "不能把占位件拷进去");
+    }
+
+    /// Windows 还没有注入路径：安装必须整体拒绝，而且不能留下半个安装。
+    #[cfg(windows)]
+    #[test]
+    fn install_bridge_refuses_on_windows_without_creating_anything() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("from-bundle");
+        std::fs::write(&source, b"\xcf\xfa\xed\xfe fake executable").unwrap();
+        let error = install_bridge(dir.path(), &source).unwrap_err();
+        assert_eq!(error.message_key, "error.coexistUnsupportedPlatform");
+        assert!(!bridge_path(dir.path()).exists(), "拒绝时不得落下文件");
     }
 
     #[test]

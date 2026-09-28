@@ -212,6 +212,8 @@ mod tests {
         assert_eq!(token_mode, 0o600, "令牌不能对其他用户可读");
     }
 
+    // Windows 上 install 直接拒绝（见上），令牌轮换与撤销跟着一起没有意义。
+    #[cfg(not(windows))]
     #[test]
     fn reinstalling_rotates_the_token() {
         let dir = tempfile::tempdir().unwrap();
@@ -226,6 +228,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn revoke_removes_the_token_file() {
         let dir = tempfile::tempdir().unwrap();
