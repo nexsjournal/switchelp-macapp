@@ -53,8 +53,11 @@ confirm with your password. Or, once, in a terminal:
 xattr -dr com.apple.quarantine /Applications/Switchelp.app
 ```
 
-**Windows** — preview only. It installs and opens, but writes no configuration and says why: the credential helper
-has no Windows implementation yet.
+**Windows** — preview. What works today: install and open; provider, API-key (stored in Windows Credential
+Manager) and model management. What does not: the local gateway, Codex detection, and every config write
+(apply / restore / coexist) — the credential helper has no Windows implementation, so those actions are refused
+with an explanation. There is no in-app updater on Windows; update by downloading from Releases. The core test
+suite runs on Windows in CI, but real Windows hardware is still unverified.
 
 **Notes**
 

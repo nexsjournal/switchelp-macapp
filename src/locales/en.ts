@@ -123,6 +123,9 @@ export const en: Record<string, string> = {
   'codex.detect': "Detect Codex",
   'codex.detectFailed': "Instance detection failed.",
   'codex.detecting': "Detecting…",
+  // Windows takeover (credential helper, install-location probing) is not implemented yet:
+  // state the boundary in the empty state instead of leaving users guessing at "not detected".
+  'codex.windowsTakeoverUnavailable': "Taking over Codex is not supported on Windows yet: neither the credential helper nor install-location probing has a Windows implementation, and write actions refuse with an explanation. Provider and model management is unaffected.",
   'codex.diffPreviewed': "Diff preview generated. Nothing is written to the Codex configuration until you confirm.",
   'codex.diffTitleApply': "Apply diff",
   'codex.diffTitleRestore': "Restore diff",

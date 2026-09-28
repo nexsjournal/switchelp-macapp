@@ -39,7 +39,7 @@ Codex  →  ~/.codex/config.toml（本工具受管字段）
 xattr -dr com.apple.quarantine /Applications/Switchelp.app
 ```
 
-**Windows**：安装包是预览版。能装能开，但**不会写入配置**，并会说明原因——凭据 helper 在 Windows 上尚未实现。
+**Windows**：预览版。今天能用的：安装与打开；供应商、API Key（写入 Windows 凭据管理器）与模型的管理。还不能用的：本机网关、Codex 检测，以及所有配置写入（应用 / 还原 / 共存）——凭据 helper 尚无 Windows 实现，这些操作会明确拒绝并说明原因。Windows 上没有应用内更新，升级请到 Releases 重新下载。核心测试现在会在 CI 的 Windows 环境里跑，但真机仍未验证。
 
 **说明**
 

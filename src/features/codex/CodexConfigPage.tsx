@@ -37,6 +37,16 @@ function stageKey(phase: ApplyStage): string {
   return `stage.${phase.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())}`;
 }
 
+/**
+ * 当前界面是否跑在 Windows 上。
+ *
+ * 事实源是 App 壳写下的 `data-platform`——与 CSS 用的是同一个结论，不在这里再猜一遍
+ * userAgent。浏览器夹具里没有这个属性，按非 Windows 处理，与既有测试的预期一致。
+ */
+function isWindowsPlatform(): boolean {
+  return document.documentElement.dataset.platform === 'windows';
+}
+
 
 
 export function CodexConfigPage({ client, models, summary, onApplied }: {
@@ -266,6 +276,10 @@ export function CodexConfigPage({ client, models, summary, onApplied }: {
         <h3>{t('empty.noInstanceTitle')}</h3>
         <p>{t('empty.noInstanceBody')}</p>
       </div>
+      {/* Windows 上接管链路（凭据 helper、安装位置探测）还没有实现，与其让用户对着
+          「未检测到 Codex」猜，不如把能力边界写在同一个位置。判定依据是 App 壳写下的
+          data-platform，与 CSS 用的是同一个事实源。 */}
+      {isWindowsPlatform() && <p className={styles.subtle} role="note">{t('codex.windowsTakeoverUnavailable')}</p>}
       <div className={styles.row} style={{ justifyContent: 'center' }}>
         <label className={styles.field}>{t('codex.appPath')}
           <input aria-label={t('codex.appPathLabel')} placeholder="/Applications/ChatGPT.app" value={manualPath} onChange={event => setManualPath(event.target.value)} />

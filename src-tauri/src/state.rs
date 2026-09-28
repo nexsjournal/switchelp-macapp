@@ -296,7 +296,9 @@ impl DesktopState {
         &self,
         explicit_path: Option<String>,
     ) -> Result<Vec<CodexInstance>, CoreError> {
-        let mut input = DetectInput::for_macos(self.home.clone());
+        // 按当前平台取候选：Windows/Linux 上没有实测过的安装位置，宁可不扫，
+        // 也不拿 macOS 的候选去跑一遍必然落空的检测。
+        let mut input = DetectInput::for_platform(Platform::current(), self.home.clone());
         if let Some(path) = explicit_path.filter(|value| !value.trim().is_empty()) {
             input.app_path = Some(PathBuf::from(path));
         }

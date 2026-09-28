@@ -148,6 +148,7 @@ GitHub runner 上没有它，也装不上（它是 ChatGPT 桌面端的一部分
 | --- | --- | --- | --- |
 | 自动 | `cargo run -p switch-core --example g0_apply_pipeline`（CI 的 `pipeline` job） | 每次提交 | 计划 → CAS → 原子写入这条链路上的回归：产出物缺失、配置里没写目录、事务没停在 `awaitingReload` |
 | 自动 | `node --check` + 依赖自检（CI 的 `probes` job） | 每次提交 | 探针脚本自己烂掉（语法错、引用了已删除的模块） |
+| 自动 | `cargo test -p switch-core` / `-p gptswitch` / `-p gptswitch-bridge`（CI 的 `windows-core` job，跑在 `windows-latest` 上） | 每次 push 到 main 与 PR | 平台假设：路径分隔符、凭据管理器读写、Windows 分支的行为（如 helper 必须拒绝而不是装假件） |
 | **人工** | `node scripts/g0/probe-catalog.mjs`、`probe-apply-pipeline.mjs`、`probe-full-loop.mjs` | 发布前，本机 | 宿主是否真的接受自建目录、helper 是否真的被调用、真实 SSE 是否按 Responses 契约还原 |
 
 **发布前必须人工跑一遍第三层**，并把输出贴进对应版本的发布说明或 `docs/appendix/evidence-manifest.json`。

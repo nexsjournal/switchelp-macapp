@@ -61,6 +61,13 @@ Loopback 校验 Host、Origin、Authorization 与方法/content-type。默认无
 
 以上 OS 基线是拟定支持范围，不是参考应用的要求；G0 验证后固定。Linux、Windows 10、WSL、ARM64 Windows 暂不承诺。
 
+**实现现状（2026-09-26）**：这张表是目标，不是已完成清单。Windows 侧今天实际成立的是——安装（NSIS，未签名）
+与打开、供应商 / API Key（keyring 的 `windows-native`，即凭据管理器）与模型管理、进程重启计划（taskkill +
+直接启动 exe）、`%USERPROFILE%\.codex` 优先的配置根候选；核心测试套件在 CI 的 `windows-latest` 上运行。
+**不成立**：凭据 helper（`gateway/helper.rs` 的 Windows 分支直接拒绝，`error.windowsHelperUnimplemented`，
+因此网关起不来、应用/还原被拦）、Codex 安装位置探测（没有实测依据，不提供候选）、共存模式（显式拒绝）、
+应用内更新（Windows 不产更新签名产物）。补齐顺序见 [产品需求 §7](../01-product-requirements.md) 的发布验收。
+
 ## 7. 启停与异常
 
 关闭窗口默认保持服务，首次用非阻塞说明解释，可在设置改为退出。托盘始终保留重新打开入口。退出时若有请求，展示请求数量和“等待完成/立即退出”，不显示敏感内容。系统关机可能不给充足等待时间，因此每个请求和事务都需支持中断恢复。

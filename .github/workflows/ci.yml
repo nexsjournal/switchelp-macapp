@@ -63,6 +63,30 @@ jobs:
       - name: 共存组件（bridge）测试
         run: cargo test -p gptswitch-bridge
 
+  windows-core:
+    name: 核心（Windows 上的 cargo test）
+    # Windows 是发布平台之一，但此前它的代码从未在 Windows 上被测过——发版工作流只在
+    # windows-latest 上**打包**，不跑测试。这个 job 把同一套 Rust 测试搬到真 Windows 上跑：
+    # 路径分隔符、凭据库（Windows 凭据管理器）、平台分支的差异都会在这里暴露。
+    # 注意它的意义边界：逻辑可移植性 ≠ 功能可用，接管链路在 Windows 上的缺口见
+    # docs/architecture/05-security-and-platforms.md 的平台矩阵。
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          # 与其余 job 同一版本：lint 集合与测试行为随版本变化。
+          toolchain: 1.88.0
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      - name: 核心测试
+        run: cargo test -p switch-core
+      - name: 主程序测试
+        run: cargo test -p gptswitch --bin gptswitch
+      - name: 共存组件（bridge）测试
+        run: cargo test -p gptswitch-bridge
+
   lint:
     name: 格式与 clippy
     # 必须跑在 macOS 上：`--workspace` 会编译 src-tauri，而 Tauri 在 Linux 上需要
@@ -90,8 +114,9 @@ jobs:
     # 产出一份 config.toml 与模型目录，并断言事务停在 awaitingReload。
     #
     # 为什么是它而不是 scripts/g0 下那几个探针：那几个都要一个**真实的 Codex 可执行文件**
-    # （/Applications/ChatGPT.app/Contents/Resources/codex），runner 上没有，也不可安装。
-    # 那一半只能人工跑，见 docs/development/02-testing-and-release.md 的「两层端到端验证」。
+    # （ChatGPT.app 内的 codex，ChatGPT 26.924 起在 Contents/Resources/codex-cli/ 下），
+    # runner 上没有，也不可安装。那一半只能人工跑，见 docs/development/02-testing-and-release.md
+    # 的「两层端到端验证」。
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -120,6 +120,6 @@
 
 任一核心条件未达成不得称“稳定版”：两个不同供应商的同名模型可区分；菜单选择与实际路由一致；上下文/输出/推理有可观测结果；图片能力不会虚报；外部配置冲突可恢复；双平台真实 Codex 验收完成。
 
-现状：Windows 的凭据 helper 仍是桩，网关起不来，因此应用会被前置检查拦下并说明原因（不会写坏配置）——Windows 侧的双平台验收尚未完成，也不应被算作已完成。
+现状（2026-09-26）：Windows 的凭据 helper 仍是桩，网关起不来，因此应用会被前置检查拦下并说明原因（不会写坏配置）。另外两处缺口让它离「可用」更远：Codex 实例检测没有 Windows 候选路径（`DetectInput::for_platform` 对 Windows 故意返回空，不猜安装位置）；应用内更新在 Windows 关闭（`tauri.windows.conf.json` 的 `createUpdaterArtifacts: false`）。Windows 上可用的是安装与打开、供应商 / API Key（凭据管理器）/ 模型的管理。核心测试套件已在 CI 的 `windows-latest` 上运行（ci.yml 的 `windows-core` job），但真机验收仍未完成——Windows 侧不应被算作已完成。
 
 “界面做好”“HTTP 200”“配置文件写入成功”均不是上述验收的替代物。

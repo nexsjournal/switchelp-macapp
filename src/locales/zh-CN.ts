@@ -124,6 +124,9 @@ export const zhCN: Record<string, string> = {
   'codex.detect': "检测 Codex",
   'codex.detectFailed': "实例检测失败。",
   'codex.detecting': "检测中…",
+  // Windows 上接管链路（凭据 helper、安装位置探测）没有实现：在配置页空状态里把边界说清，
+  // 而不是让用户对着「未检测到 Codex」猜。
+  'codex.windowsTakeoverUnavailable': "Windows 版尚未支持接管 Codex 配置：凭据 helper 与安装位置探测都还没有 Windows 实现，写入类操作会如实拒绝。供应商与模型的管理不受影响。",
   'codex.diffPreviewed': "已生成差异预览。确认后才会写入 Codex 配置。",
   'codex.diffTitleApply': "应用差异",
   'codex.diffTitleRestore': "还原差异",
