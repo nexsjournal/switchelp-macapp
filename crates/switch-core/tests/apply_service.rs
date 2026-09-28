@@ -952,20 +952,42 @@ fn a_failed_write_takes_back_the_publication_it_just_made() {
     let harness = Harness::with_ready_model(Some("model = \"gpt-5.6-sol\"\n"));
     let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
 
-    // 让写入失败：目录去掉写权限，`File::create` 就建不出临时文件。
-    // 恢复权限用 guard，保证断言失败也不会把临时目录留在只读状态。
-    let dir = harness.config_path.parent().unwrap().to_path_buf();
-    let original = std::fs::metadata(&dir).unwrap().permissions();
-    let mut read_only = original.clone();
-    read_only.set_readonly(true);
-    std::fs::set_permissions(&dir, read_only).unwrap();
-    let result =
-        harness
-            .service
-            .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-write-fail");
-    std::fs::set_permissions(&dir, original).unwrap();
+    // 让写入失败，而且失败点必须在「已发布、待写盘」这一步，回撤逻辑才被真的测到。
+    // 两个平台各有一种可靠的注入方式：
+    // - Unix：目录去掉写权限，`File::create` 建不出临时文件（内核强制）。
+    //   Windows 上目录的只读属性**拦不住**建文件，这招在那里是静默无效的。
+    // - Windows：以 FILE_SHARE_READ（不给 FILE_SHARE_DELETE）占住目标文件——
+    //   CAS 的读不受影响，但 rename 替换目标必然被拒。
+    #[cfg(unix)]
+    {
+        let dir = harness.config_path.parent().unwrap().to_path_buf();
+        let original = std::fs::metadata(&dir).unwrap().permissions();
+        let mut read_only = original.clone();
+        read_only.set_readonly(true);
+        std::fs::set_permissions(&dir, read_only).unwrap();
+        let result =
+            harness
+                .service
+                .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-write-fail");
+        std::fs::set_permissions(&dir, original).unwrap();
+        assert!(result.is_err(), "写入失败必须报错，不能假装提交成功");
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1) // FILE_SHARE_READ：允许 CAS 读；不给 DELETE：rename 必败
+            .open(&harness.config_path)
+            .unwrap();
+        let result =
+            harness
+                .service
+                .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-write-fail");
+        drop(lock);
+        assert!(result.is_err(), "写入失败必须报错，不能假装提交成功");
+    }
 
-    assert!(result.is_err(), "写入失败必须报错，不能假装提交成功");
     assert!(
         !harness.router.revisions().contains(&plan.catalog_revision),
         "写入失败后，刚发布的目录版本必须被收回，否则网关会一直为一个配置里不存在的版本服务：{:?}",
