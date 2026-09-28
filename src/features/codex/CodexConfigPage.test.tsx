@@ -284,6 +284,28 @@ test('未检测到实例时显示安装指引而不显示应用入口', async ()
   expect(screen.getByLabelText('Codex 应用路径')).toBeInTheDocument();
 });
 
+test('Windows 上把能力边界写在同一个空状态里，而不是让用户猜', async () => {
+  // 平台结论由 App 壳经 platformInfo 写进 data-platform（与 CSS 同源），
+  // 所以这里 mock platformInfo 让壳自己写下 windows，测完不需要清理副作用。
+  const user = userEvent.setup();
+  render(<App client={testClient({
+    platformInfo: vi.fn().mockResolvedValue({ platform: 'windows', titlebarHeight: 0, leadingReserve: 0, systemDecorations: true }),
+    detectInstances: vi.fn().mockResolvedValue([]),
+  })} />);
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '配置' }));
+  await screen.findByText('未检测到 Codex');
+
+  expect(screen.getByRole('note')).toHaveTextContent('Windows 版尚未支持接管 Codex 配置');
+  // 手动指定路径的入口仍在：它不承诺能用，只是留着。
+  expect(screen.getByLabelText('Codex 应用路径')).toBeInTheDocument();
+});
+
+test('非 Windows 平台不显示 Windows 边界说明', async () => {
+  await openEmptyCodexPage();
+
+  expect(screen.queryByRole('note')).not.toBeInTheDocument();
+});
+
 test('确认之前说清「菜单会被替换」，并列出替换后的模型', async () => {
   // 这是本工具最容易被误解的一条行为：目录是替换整份菜单，不是往里追加。
   // 真机上「加一个模型」的预期与「原来能用的都不见了」的结果对不上，界面必须提前说。

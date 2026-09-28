@@ -135,12 +135,28 @@ pub struct DetectInput {
 
 impl DetectInput {
     /// 按平台给出默认候选，不读取环境。
-    pub fn for_macos(home: PathBuf) -> Self {
+    ///
+    /// macOS 的候选是本机实测过的；**Windows 与 Linux 故意给空**：ChatGPT 桌面版在
+    /// Windows 的安装位置与 bundle 内 CLI 布局没有可靠依据（本仓库没有真机验证过），
+    /// 写一个猜出来的路径等于假支持。检测不到时界面会说「未检测到 Codex」，与事实一致；
+    /// 用户仍可手动指定应用路径。
+    pub fn for_platform(platform: crate::platform::Platform, home: PathBuf) -> Self {
+        let app_candidates = match platform {
+            crate::platform::Platform::Macos => {
+                MACOS_APP_CANDIDATES.iter().map(PathBuf::from).collect()
+            }
+            crate::platform::Platform::Windows | crate::platform::Platform::Linux => Vec::new(),
+        };
         Self {
             home: Some(home),
-            app_candidates: MACOS_APP_CANDIDATES.iter().map(PathBuf::from).collect(),
+            app_candidates,
             ..Self::default()
         }
+    }
+
+    /// macOS 的候选。测试与 macOS 装配层都走它。
+    pub fn for_macos(home: PathBuf) -> Self {
+        Self::for_platform(crate::platform::Platform::Macos, home)
     }
 }
 
@@ -864,6 +880,26 @@ mod tests {
         assert!(!InstanceDetector::matches_bundle_id(
             "<string>com.example.codex</string>"
         ));
+    }
+
+    /// Windows 上不给任何候选路径：与其拿猜出来的 macOS 候选去扫一遍必然落空，
+    /// 不如一开始就承认检测不到。手动指定路径的入口仍在。
+    #[test]
+    fn windows_platform_has_no_app_candidates() {
+        let input = DetectInput::for_platform(
+            crate::platform::Platform::Windows,
+            PathBuf::from("/Users/example"),
+        );
+        assert!(input.app_candidates.is_empty());
+        let fs = FakeFs::default().dir("/Users/example/.codex");
+        let found = InstanceDetector::detect(&input, &fs, None, 0).unwrap();
+        assert!(found.is_empty(), "Windows 上没有可靠依据去猜安装位置");
+        // macOS 的行为不变：for_macos 与 for_platform(Macos) 等价。
+        let macos = DetectInput::for_platform(
+            crate::platform::Platform::Macos,
+            PathBuf::from("/Users/example"),
+        );
+        assert_eq!(macos.app_candidates.len(), MACOS_APP_CANDIDATES.len());
     }
 
     #[test]

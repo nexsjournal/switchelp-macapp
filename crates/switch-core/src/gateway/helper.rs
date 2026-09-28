@@ -144,6 +144,7 @@ mod tests {
         GatewayToken::from_raw("a".repeat(64))
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn install_writes_a_helper_that_prints_exactly_the_token() {
         let dir = tempfile::tempdir().unwrap();
@@ -156,6 +157,16 @@ mod tests {
             token().expose(),
             "令牌文件不得带结尾换行"
         );
+    }
+
+    /// Windows 上还没有 helper 实现：`install` 必须明确拒绝，而不是「装上」一个
+    /// 实际不能用的东西——那会让界面显示已就绪而宿主根本拿不到令牌。
+    #[cfg(windows)]
+    #[test]
+    fn install_refuses_on_windows_instead_of_writing_a_fake_helper() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = install(dir.path(), "inst_1", &token()).unwrap_err();
+        assert_eq!(error.message_key, "error.windowsHelperUnimplemented");
     }
 
     #[cfg(unix)]
