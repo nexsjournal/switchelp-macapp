@@ -402,27 +402,55 @@ fn instance_identity(
 ///
 /// 只做词法处理，**不碰文件系统**：探测阶段引入 IO 会破坏其余部分的纯函数性质
 /// （检测器要在内存假文件系统上跑出确定性结果）。也因此不解析符号链接。
+///
+/// 分隔符**不分平台**：`\` 与 `/` 都按分隔符看待，输出统一为 `/`。Windows 的 `join`
+/// 会产出混合分隔符（`/a` join `b` 得 `/a\b`），身份串必须跨写法稳定，所以先把两种
+/// 分隔符统一成一种再逐段处理，盘符（`C:`）原样保留。
 fn normalize_path(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                // 只有前面确实是一个普通片段时才回退；根目录之上、开头的 `..` 都如实保留。
-                if matches!(out.components().next_back(), Some(Component::Normal(_))) {
-                    out.pop();
-                } else if !out.is_absolute() {
-                    out.push("..");
+    let text = path.to_string_lossy().replace('\\', "/");
+    // 只有开头形如 `C:` 的单个字母加冒号才算盘符，别把普通路径里的冒号当盘符。
+    let (prefix, rest) = match text.split_once(':') {
+        Some((drive, rest))
+            if drive.len() == 1
+                && drive
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic()) =>
+        {
+            (format!("{drive}:"), rest)
+        }
+        _ => (String::new(), text.as_str()),
+    };
+    let (prefix, rest) = match rest.strip_prefix('/') {
+        Some(stripped) => (format!("{prefix}/"), stripped),
+        None => (prefix, rest),
+    };
+    let mut parts: Vec<&str> = Vec::new();
+    for segment in rest.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                // 只有前面确实是一个普通片段时才回退；相对路径开头的 `..` 如实保留，
+                // 绝对路径已在根之上，多出来的 `..` 直接丢弃。
+                if parts.last().is_some_and(|last| *last != "..") {
+                    parts.pop();
+                } else if prefix.is_empty() {
+                    parts.push("..");
                 }
             }
-            other => out.push(other.as_os_str()),
+            segment => parts.push(segment),
         }
     }
-    if out.as_os_str().is_empty() {
-        PathBuf::from(".")
-    } else {
-        out
+    if prefix.is_empty() {
+        if parts.is_empty() {
+            return PathBuf::from(".");
+        }
+        return PathBuf::from(parts.join("/"));
     }
+    if parts.is_empty() {
+        return PathBuf::from(prefix);
+    }
+    PathBuf::from(format!("{prefix}{}", parts.join("/")))
 }
 
 /// `codex-package.json` 里的 `entrypoint` 只接受老实的相对文件路径。
@@ -540,13 +568,22 @@ mod tests {
     }
 
     impl FakeFs {
+        // 键统一走词法归一化：夹具写的是 POSIX 风格路径，而 Windows 的 `Path::join`
+        // 会产出混合分隔符（`/a` join `b` 得 `/a\b`）——不归一的话，同一批用例在
+        // Windows 上会因键对不上而整体落空，检测逻辑反而一行都没被测到。
+        fn key(path: &Path) -> String {
+            normalize_path(path).to_string_lossy().to_string()
+        }
+
         fn file(mut self, path: &str, content: &str) -> Self {
-            self.files.insert(path.to_owned(), content.to_owned());
+            let key = Self::key(Path::new(path));
+            self.files.insert(key, content.to_owned());
             self
         }
 
         fn dir(mut self, path: &str) -> Self {
-            self.dirs.push(path.to_owned());
+            let key = Self::key(Path::new(path));
+            self.dirs.push(key);
             self
         }
     }
@@ -556,18 +593,16 @@ mod tests {
         // 假文件系统若按原始字符串精确比较，就会让「同一路径的不同写法」这类断言
         // 因为候选被整个跳过而恒真。
         fn exists(&self, path: &Path) -> bool {
-            let key = normalize_path(path).to_string_lossy().to_string();
+            let key = Self::key(path);
             self.files.contains_key(&key) || self.dirs.iter().any(|d| d == &key)
         }
 
         fn read_to_string(&self, path: &Path) -> Option<String> {
-            self.files
-                .get(&normalize_path(path).to_string_lossy().to_string())
-                .cloned()
+            self.files.get(&Self::key(path)).cloned()
         }
 
         fn list_dir(&self, path: &Path) -> Vec<PathBuf> {
-            let prefix = format!("{}/", normalize_path(path).to_string_lossy());
+            let prefix = format!("{}/", Self::key(path));
             self.files
                 .keys()
                 .filter(|k| k.starts_with(&prefix))
@@ -697,23 +732,25 @@ mod tests {
     #[test]
     fn legacy_instance_ids_reproduce_the_old_formula() {
         // 旧口径：sha256(配置根 + "|" + bundle 内 CLI 路径)。历史记录就挂在这些 ID 上。
-        let ids = legacy_instance_ids(
-            Path::new("/Users/example/.codex"),
-            Some(Path::new("/Applications/ChatGPT.app")),
-        );
+        // CLI 那一段必须用与旧代码相同的 join 方式拼出来：旧口径没做归一化，
+        // 它在本平台算出什么，兼容层就得复现什么（Windows 的 join 分隔符与 macOS 不同）。
+        let root = Path::new("/Users/example/.codex");
+        let app = Path::new("/Applications/ChatGPT.app");
+        let ids = legacy_instance_ids(root, Some(app));
         let old_formula = stable_instance_id(&format!(
             "{}|{}",
-            "/Users/example/.codex", "/Applications/ChatGPT.app/Contents/Resources/codex"
+            root.display(),
+            app.join("Contents/Resources/codex").display()
         ));
         assert!(
             ids.iter().any(|id| id.as_str() == old_formula),
             "必须覆盖旧布局那条路径，否则老用户的还原记录还是找不到"
         );
         // 「当时没认出 CLI」的历史形态也要能查到。
-        let no_cli = stable_instance_id("/Users/example/.codex|");
+        let no_cli = stable_instance_id(&format!("{}|", root.display()));
         assert!(ids.iter().any(|id| id.as_str() == no_cli));
         // 裸 CLI 没有 bundle，没有旧 ID 可兼容。
-        assert!(legacy_instance_ids(Path::new("/Users/example/.codex"), None).is_empty());
+        assert!(legacy_instance_ids(root, None).is_empty());
     }
 
     #[test]
@@ -869,6 +906,19 @@ mod tests {
         assert_eq!(normalize_path(Path::new("/../a")), PathBuf::from("/a"));
         assert_eq!(normalize_path(Path::new("../a")), PathBuf::from("../a"));
         assert_eq!(normalize_path(Path::new("/")), PathBuf::from("/"));
+        // 分隔符不分平台：Windows 的混合分隔符写法与纯 POSIX 写法归一成同一个结果。
+        assert_eq!(
+            normalize_path(Path::new("C:\\Program Files\\ChatGPT\\")),
+            normalize_path(Path::new("C:/Program Files/ChatGPT"))
+        );
+        assert_eq!(
+            normalize_path(Path::new("/Applications\\ChatGPT.app\\Contents")),
+            PathBuf::from("/Applications/ChatGPT.app/Contents")
+        );
+        assert_eq!(
+            normalize_path(Path::new("C:\\a\\c\\..\\b")),
+            PathBuf::from("C:/a/b")
+        );
     }
 
     #[test]
