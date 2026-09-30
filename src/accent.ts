@@ -109,26 +109,82 @@ function luminance(rgb: Rgb): number {
 }
 
 /**
- * 把一支色搬到指定亮度上，色相与彩度保持不变。
- *
- * - 要变暗：线性光里整体乘一个系数。这是**保持色度**的变换，深色主题的各档全靠它。
- * - 要变亮：往白色里掺。目标比自己亮时只有掺白能到，代价是彩度会降——那正是淡底该有的样子。
+ * 变暗：线性光里整体乘一个系数。这是**保持色度**的变换，深色主题的深淡底、深字、
+ * 以及所有「比档位更深」的中间结果全靠它。
  */
-function withLuminance(rgb: Rgb, target: number): Rgb {
+function darkenedTo(rgb: Rgb, target: number): Rgb {
   const linear = linearOf(rgb);
   const current = luminanceOf(linear);
-  const next: Linear = target <= current && current > 0
-    ? [linear[0] * (target / current), linear[1] * (target / current), linear[2] * (target / current)]
-    : target <= 0
-      // 纯黑的输入没有色相可保，任何亮度都只能是灰：交给下面掺白那支处理，
-      // 这里只接住「黑的还要更黑」这一种没有解的情况。
-      ? [0, 0, 0]
-      : [
-        linear[0] + (1 - linear[0]) * ((target - current) / (1 - current)),
-        linear[1] + (1 - linear[1]) * ((target - current) / (1 - current)),
-        linear[2] + (1 - linear[2]) * ((target - current) / (1 - current)),
-      ];
+  if (current <= 0) return { r: 0, g: 0, b: 0 };
+  const k = target / current;
+  const next: Linear = [linear[0] * k, linear[1] * k, linear[2] * k];
   return { r: linearToSrgb(next[0]), g: linearToSrgb(next[1]), b: linearToSrgb(next[2]) };
+}
+
+/**
+ * 变亮（掺白）：往色里加白。彩度会跟着降，**这正是淡底与描边要的粉彩**——
+ * tokens.css 里浅色主题的淡底就是深色强调色掺白到同一亮度得来的。
+ */
+function whitenedTo(rgb: Rgb, target: number): Rgb {
+  const linear = linearOf(rgb);
+  const current = luminanceOf(linear);
+  const t = (target - current) / (1 - current);
+  const next: Linear = [
+    linear[0] + (1 - linear[0]) * t,
+    linear[1] + (1 - linear[1]) * t,
+    linear[2] + (1 - linear[2]) * t,
+  ];
+  return { r: linearToSrgb(next[0]), g: linearToSrgb(next[1]), b: linearToSrgb(next[2]) };
+}
+
+/**
+ * 变亮（抬明度）：**保持色相与相对饱和度**，只把明度抬上去。
+ *
+ * 强调色本体不能用掺白：掺白加得越多彩度掉得越狠，用户挑一支很深的玫红（`#3b0a12`）
+ * 时，掺白到深色主题那一档会变成一块近乎中性的灰（实测 `#c0bdbd`），而界面上承诺的是
+ * 「只取你选的那个色相」。所以这一档换成「同一色相、同一饱和度，只抬明度」。
+ *
+ * 数学上就是在 sRGB 里走那条固定饱和度的色相线：`通道(t) = t + (1-t)·K`，K 是每个通道
+ * 相对中性轴的偏移，由原色反解。这条线在 t ∈ [0,1] 上单调不减、且 K ∈ [-1,1] 保证它
+ * 天然落在色域内（不需要裁剪），所以一次二分就能落在目标亮度上。
+ */
+function lightenedTo(rgb: Rgb, target: number): Rgb {
+  const channels = [rgb.r / 255, rgb.g / 255, rgb.b / 255];
+  const lightness = (Math.max(...channels) + Math.min(...channels)) / 2;
+  // 纯黑没有色相可保，只能是「亮度等于目标」的那支灰。
+  if (lightness <= 0) {
+    const gray = linearToSrgb(target);
+    return { r: gray, g: gray, b: gray };
+  }
+  const offset = channels.map(channel => lightness < 0.5
+    ? channel / lightness - 1
+    : (channel - lightness) / (1 - lightness));
+  // 色相线在明度 0.5 处分成两支，两支在 0.5 处取值相同，所以按 t 分段即可。
+  const at = (t: number): Rgb => t <= 0.5
+    ? { r: 255 * t * (1 + offset[0]!), g: 255 * t * (1 + offset[1]!), b: 255 * t * (1 + offset[2]!) }
+    : {
+      r: 255 * (t + (1 - t) * offset[0]!),
+      g: 255 * (t + (1 - t) * offset[1]!),
+      b: 255 * (t + (1 - t) * offset[2]!),
+    };
+  let low = lightness;
+  let high = 1;
+  for (let step = 0; step < 24; step++) {
+    const mid = (low + high) / 2;
+    if (luminance(at(mid)) < target) low = mid; else high = mid;
+  }
+  const { r, g, b } = at((low + high) / 2);
+  return { r: Math.round(r), g: Math.round(g), b: Math.round(b) };
+}
+
+/** 强调色本体与「更实心」那一档：变亮时保住色相，认得出是用户挑的那支色。 */
+function accentAt(rgb: Rgb, target: number): Rgb {
+  return target <= luminance(rgb) ? darkenedTo(rgb, target) : lightenedTo(rgb, target);
+}
+
+/** 深色字、淡底、描边：变亮时走掺白，要的就是粉彩。 */
+function tintAt(rgb: Rgb, target: number): Rgb {
+  return target <= luminance(rgb) ? darkenedTo(rgb, target) : whitenedTo(rgb, target);
 }
 
 /** 朝「同一亮度的灰」靠拢，亮度基本不变、彩度下降。 */
@@ -176,15 +232,18 @@ const ANCHORS: Record<ResolvedTheme, Anchors> = { dark: anchorsOf('dark'), light
  * 把用户原色归一到「强调色本体」那一档（深色主题的亮度），作为**淡底与描边的根**。
  *
  * 这两档不能直接从用户原色推：原色可能是纯黄那种高亮度色，直接推到淡底的亮度上会得到
- * 一块荧光底（浅色主题的侧栏当前项就是这么用的）。深色主题的强调色本身是「高亮度的浅色」，
- * 拿它当根再掺白，淡底自然是粉彩，与既有青绿的取值也只差个位数。
+ * 一块荧光底（浅色主题的侧栏当前项就是这么用的）。深色主题的强调色本身就是「高亮度的
+ * 浅色」，拿它当根再掺白，淡底自然是粉彩，与既有青绿的取值也只差个位数。
+ *
+ * 根走 `accentAt`（变亮时保色相）而不是掺白：否则用户挑一支很深的色时，根先被掺成灰，
+ * 后面的淡底与描边就全成了灰。
  */
 function tintRoot(base: Rgb): Rgb {
-  return withLuminance(base, ANCHORS.dark.accent);
+  return accentAt(base, ANCHORS.dark.accent);
 }
 
 /**
- * 把用户挑的色号搬进当前主题的亮度档位。色相与彩度保留，只有明暗被改写——
+ * 把用户挑的色号搬进当前主题的亮度档位。色相与相对饱和度保留，只有明暗被改写——
  * 这正是「特别亮/特别浅的颜色配白字看不清」那类问题的解法。
  */
 export function deriveAccentRamp(hex: string, theme: ResolvedTheme): AccentRamp {
@@ -192,12 +251,12 @@ export function deriveAccentRamp(hex: string, theme: ResolvedTheme): AccentRamp 
   const anchor = ANCHORS[theme];
   const tint = tintRoot(base);
   return {
-    accent: toHex(withLuminance(base, anchor.accent)),
-    accentStrong: toHex(withLuminance(base, anchor.accentStrong)),
+    accent: toHex(accentAt(base, anchor.accent)),
+    accentStrong: toHex(accentAt(base, anchor.accentStrong)),
     // 亮色主题的字是白：它是压在深底上对比最高的那一支，不参与推导。
-    accentFg: theme === 'light' ? '#ffffff' : toHex(withLuminance(base, anchor.accentFg)),
-    accentSubtle: toHex(withLuminance(tint, anchor.accentSubtle)),
-    accentBorder: toHex(desaturate(withLuminance(tint, anchor.accentBorder), BORDER_DESATURATE[theme])),
+    accentFg: theme === 'light' ? '#ffffff' : toHex(tintAt(base, anchor.accentFg)),
+    accentSubtle: toHex(tintAt(tint, anchor.accentSubtle)),
+    accentBorder: toHex(desaturate(tintAt(tint, anchor.accentBorder), BORDER_DESATURATE[theme])),
   };
 }
 
@@ -215,14 +274,26 @@ function resolvedTheme(): ResolvedTheme {
   return typeof document !== 'undefined' && document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
 }
 
+/**
+ * 本进程里最后一次真正生效的那支色。存储不可用时拿它兜底：不然会出现「用户刚选的颜色
+ * 已经写在界面上，切一次主题又重新读存储、读不到就退回默认青绿」——界面还显示着他选的
+ * 那支，实际已经变回默认。
+ */
+let lastApplied: AccentPreference = DEFAULT_ACCENT;
+
 export function readAccentPreference(): AccentPreference {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === DEFAULT_ACCENT) return DEFAULT_ACCENT;
-    const hex = stored ? normalizeHex(stored) : null;
-    if (hex) return hex;
+    if (stored !== null) {
+      // 归一化规则与写入时同一条（`accent.ts` 里只此一处判断）：存储里若是默认那支色，
+      // 也要归到默认档，否则界面上 9 个色块会一个都不显示选中。
+      const hex = stored === DEFAULT_ACCENT ? null : normalizeHex(stored);
+      if (stored === DEFAULT_ACCENT) return DEFAULT_ACCENT;
+      if (hex) return hex === DEFAULT_ACCENT_BASE ? DEFAULT_ACCENT : hex;
+    }
   } catch {
-    // 存储不可用（隐私模式等）时回落到默认，不影响渲染。
+    // 存储不可用（隐私模式等）时回落到本进程当前值，不影响渲染。
+    return lastApplied;
   }
   return DEFAULT_ACCENT;
 }
@@ -247,6 +318,7 @@ const ACCENT_VARS = {
  */
 export function applyAccent(preference: AccentPreference = readAccentPreference()): void {
   if (typeof document === 'undefined') return;
+  lastApplied = preference;
   const root = document.documentElement;
   if (preference === DEFAULT_ACCENT) {
     for (const name of Object.keys(ACCENT_VARS)) root.style.removeProperty(name);

@@ -1,6 +1,8 @@
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
+import { applyAccent } from './accent';
+
 /**
  * 主题控制。
  *
@@ -44,6 +46,9 @@ export function applyTheme(preference: ThemePreference): ResolvedTheme {
   document.documentElement.dataset.theme = resolved;
   // 让原生控件（select、滚动条、复选框）跟随主题。
   document.documentElement.style.colorScheme = resolved;
+  // 主题色跟着主题重新推一遍：同一支色在两个主题下要落到**不同的**亮度档上
+  // （浅色主题压白字、深色主题压深字），所以在切换主题处统一重算，别处不再关心。
+  applyAccent();
   applyWindowTheme(resolved);
   return resolved;
 }
