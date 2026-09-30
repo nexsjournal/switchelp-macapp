@@ -50,7 +50,18 @@ section '① 本机绝对路径里的用户名'
 # 真实姓名不在其中，所以换机器也拦得住。
 PATHS='/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+|C:\\{1,2}Users\\{1,2}[A-Za-z0-9._-]+'
 PLACEHOLDER='/(Users|home)/(example|someone|demo|me|user|username|test|you|developer|nobody)([/"]|$)|C:\\{1,2}Users\\{1,2}(example|me|user)'
-if hits=$(scan "$PATHS" | grep -vE "$PLACEHOLDER"); then
+# 先把 URL 去掉再判：这条查的是「本机绝对路径」，而公开网址里的 /home/xxx 是站点自己的
+# 路径（实测 docsUrl 里的 scnet.cn/home/subject/... 会被误判成家目录）。去掉的是整个 URL
+# 片段，同一行里真正的本机路径仍然会留下、仍然拦得住。
+# 先把 URL 去掉再判：这条查的是「本机绝对路径」，而公开网址里的 /home/xxx 是站点自己的
+# 路径（实测 docsUrl 里的 scnet.cn/home/subject/... 会被误判成家目录）。
+# 注意必须**重新判定**：scan 已经把命中行选出来了，只在结果里删 URL 是删不掉的。
+if hits=$(
+  scan "$PATHS" | while IFS= read -r line; do
+    stripped=$(printf '%s' "$line" | sed -E 's#https?://[^[:space:]]*##g')
+    printf '%s' "$stripped" | grep -qE "$PATHS" && printf '%s\n' "$stripped"
+  done | grep -vE "$PLACEHOLDER"
+); then
   printf '%s\n' "$hits" | head -20
   flag "把真实用户名换成中性占位（例如 /Users/example）后再提交"
 else
