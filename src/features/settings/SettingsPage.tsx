@@ -6,9 +6,22 @@ import { useCallback, useEffect, useState } from 'react';
 import type { CodexInstance } from '@/contracts/types';
 import { type BackupEntry, type DesktopClient, type GatewayReport, type UpdateReport, toCoreError } from '@/desktop/client';
 import { applyTheme, readThemePreference, setThemePreference, type ThemePreference } from '@/theme';
+import {
+  ACCENT_PRESETS, DEFAULT_ACCENT, DEFAULT_ACCENT_BASE, accentSwatch, normalizeHex,
+  readAccentPreference, setAccentPreference, type AccentPreference,
+} from '@/accent';
 import styles from './SettingsPage.module.css';
 
 import { readLocalePreference, setLocalePreference, t, type LocalePreference } from '@/i18n';
+
+/** 十六进制框非法提示的 id，输入框用 aria-describedby 指过来。 */
+const HEX_HINT_ID = 'accent-hex-hint';
+
+/** 取色器与十六进制框里显示的「用户挑的色号」：默认档没有自己的色号，用默认青绿当代表。 */
+function pickedHex(preference: AccentPreference): string {
+  return preference === DEFAULT_ACCENT ? DEFAULT_ACCENT_BASE : preference;
+}
+
 /**
  * 设置页（设计 P09）。
  *
@@ -33,6 +46,37 @@ export function SettingsPage({ client, gateway, onNavigate, onReopenOnboarding }
   const [preference, setPreference] = useState<ThemePreference>(() => readThemePreference());
   const [resolved, setResolved] = useState(() => applyTheme(readThemePreference()));
   const applyPreference = (next: ThemePreference) => { setPreference(next); setResolved(setThemePreference(next)); };
+  /**
+   * 主题色。存的是用户挑的色号，界面上的色块与回显都要过 `accentSwatch` 换成**当前主题实际
+   * 会用的那支**——同一支色在深浅两个主题下是不同的色号，所以两者都依赖 `resolved`。
+   */
+  const [accent, setAccent] = useState<AccentPreference>(() => readAccentPreference());
+  /** 十六进制框要留得住「还没输完」的中间态，所以它有草稿，不直接绑定 accent。 */
+  const [hexDraft, setHexDraft] = useState(() => pickedHex(accent));
+  const [hexInvalid, setHexInvalid] = useState(false);
+
+  /** 落定一支色：写偏好（立刻生效）+ 同步状态。归一化由 `setAccentPreference` 定，取它的返回值。 */
+  const chooseAccent = (hex: string) => {
+    const next = setAccentPreference(hex);
+    setAccent(next);
+    setHexDraft(pickedHex(next));
+    setHexInvalid(false);
+  };
+  /** 十六进制框的「还原」：不留一个假值在框里，落回当前生效的那支色。 */
+  const restoreHexDraft = () => { setHexDraft(pickedHex(accent)); setHexInvalid(false); };
+  /**
+   * 十六进制框的输入。
+   *
+   * 收得下就立刻生效（用户不必猜「要不要按回车」），**但不动草稿**：边输边把框里的字
+   * 换成归一化后的色号，等于把光标拽到末尾，在小写化与改中间那几位时都会跟用户抢输入。
+   * 收不下也不吭声——正在输的一半必然不合法，那时候报错只会一直闪红；
+   * 提示留给「按了回车还是收不下」这一种真的失败的提交。
+   */
+  const editHexDraft = (value: string) => {
+    setHexDraft(value);
+    const hex = normalizeHex(value);
+    if (hex) { setAccent(setAccentPreference(hex)); setHexInvalid(false); }
+  };
   /** 语言与主题同构：值写进 localStorage，解析结果由 i18n 通知全树重渲染。 */
   const [language, setLanguage] = useState<LocalePreference>(() => readLocalePreference());
   const applyLanguage = (next: LocalePreference) => { setLanguage(next); setLocalePreference(next); };
@@ -102,6 +146,50 @@ export function SettingsPage({ client, gateway, onNavigate, onReopenOnboarding }
             <option value="system">{t('common.followSystem')}</option>
           </select>
           <span className="text-muted">{t('settings.themeNote', { resolved: resolved === 'dark' ? t('settings.themeDark') : t('settings.themeLight') })}</span>
+        </dd>
+        {/*
+         * 主题色。色块的底色是**算出来的**（`accentSwatch`：只取你挑的色相，亮度搬到本主题那一档），
+         * 既不在任何 token 里、也不是某个 class 能表达的，所以这里是全项目唯一用内联 style 上色的地方。
+         * 调色板、取色器与「实际应用」三处都走同一个函数：点之前看到的色和点之后生效的色必须是同一个。
+         */}
+        <dt className={styles.accentLabel}>{t('settings.accent')}</dt><dd className={styles.accentCell}>
+          <div className={styles.accentRow} role="group" aria-label={t('settings.accent')}>
+            <button type="button" className={styles.accentChip} aria-pressed={accent === DEFAULT_ACCENT}
+              aria-label={t('settings.accentPresetDefault')} onClick={() => chooseAccent(DEFAULT_ACCENT_BASE)}>
+              <span className={styles.swatch} style={{ background: accentSwatch(DEFAULT_ACCENT, resolved) }} />
+            </button>
+            {ACCENT_PRESETS.map(preset => <button key={preset.id} type="button" className={styles.accentChip}
+              aria-pressed={accent === preset.hex} aria-label={t(preset.labelKey)} onClick={() => chooseAccent(preset.hex)}>
+              <span className={styles.swatch} style={{ background: accentSwatch(preset.hex, resolved) }} />
+            </button>)}
+          </div>
+          <div className={styles.customBlock}>
+            <div className={styles.customRow}>
+              <span className={styles.customLabel}>{t('settings.accentCustom')}</span>
+              <input type="color" className={styles.colorPicker} aria-label={t('settings.accentPick')}
+                value={pickedHex(accent)} onChange={event => chooseAccent(event.target.value)} />
+              <input type="text" className={styles.hexInput} aria-label={t('settings.accentHexLabel')}
+                spellCheck={false} value={hexDraft} aria-invalid={hexInvalid || undefined}
+                aria-describedby={hexInvalid ? HEX_HINT_ID : undefined}
+                onChange={event => editHexDraft(event.target.value)}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') {
+                    // 回车是「提交」：收不下就明说。草稿留着不动，用户改得动。
+                    if (normalizeHex(hexDraft)) chooseAccent(hexDraft);
+                    else setHexInvalid(true);
+                  } else if (event.key === 'Escape') restoreHexDraft();
+                }}
+                onBlur={restoreHexDraft} />
+            </div>
+            {hexInvalid && <p className={styles.hexError} id={HEX_HINT_ID} role="alert">{t('settings.accentInvalid')}</p>}
+          </div>
+          {/* 预设同样会被改写明暗，所以这一行不只在自定义时显示。 */}
+          <div className={styles.appliedRow}>
+            <span className={styles.swatch} style={{ background: accentSwatch(accent, resolved) }} />
+            <span>{t('settings.accentApplied')}</span>
+            <code className="text-mono">{accentSwatch(accent, resolved)}</code>
+          </div>
+          <p className={styles.accentNote}>{t('settings.accentNote')}</p>
         </dd>
         <dt className={styles.controlLabel}>{t('settings.language')}</dt><dd>
           <select aria-label={t('settings.language')} value={language} onChange={event => applyLanguage(event.target.value as LocalePreference)}>
