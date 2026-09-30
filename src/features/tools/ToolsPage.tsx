@@ -6,6 +6,7 @@ import { showToast } from '@/components/Toast';
 import { EmptyState } from '@/components/EmptyState';
 import { t, useLocale } from '@/i18n';
 import { catalogLocale, categoryLabel, describeProbedAt, monogram, statusBadge } from './toolsPolicy';
+import { toolIcon } from './toolIcons';
 import styles from './ToolsPage.module.css';
 
 /**
@@ -158,7 +159,8 @@ export function ToolsPage({ client }: { client: DesktopClient }) {
                     <button type="button" className={styles.toggle} aria-expanded={open}
                       onClick={() => setExpanded(open ? null : tool.id)}>
                       <ChevronDown size={16} className={open ? styles.chevronOpen : styles.chevron} />
-                      <span className={styles.tile} aria-hidden="true">{monogram(tool.displayName)}</span>
+                      {/* 认得出品牌的用真实图标，其余回退首字方块（见 toolIcons.tsx）。 */}
+                      <span className={styles.tile} aria-hidden="true">{toolIcon(tool.id) ?? monogram(tool.displayName)}</span>
                       <span className={styles.identity}>
                         <span className={styles.nameLine}>
                           <span className={styles.name}>{tool.displayName}</span>

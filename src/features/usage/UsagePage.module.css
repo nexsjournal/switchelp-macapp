@@ -43,14 +43,31 @@
 .chartTop { display: flex; justify-content: flex-end; }
 .chartPeak { font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 /*
- * 固定高度 + 拉满宽度：柱子横向拉伸（矩形拉伸不变形），所以 preserveAspectRatio="none"。
- * 基线用 non-scaling-stroke，否则非等比缩放会把 1px 描边拉成随宽度变化的粗细。
+ * 柱状图是普通 DIV（不是 SVG）：柱子用百分比高度、圆角顶、悬停提亮都是一行 CSS 的事，
+ * 悬浮提示也能直接锚在柱顶（SVG 非等比缩放会把 rx 圆角拉变形，原生 title 又慢）。
+ * 整列都是命中区：比柱子本身宽得多，鼠标不用瞄准。
  */
-.chartSvg { display: block; width: 100%; height: 160px; }
-.chartBaseline { stroke: var(--border-subtle); stroke-width: 1; vector-effect: non-scaling-stroke; }
-.chartBar { fill: var(--accent); }
+.chartPlot { position: relative; display: flex; align-items: stretch; height: 160px;
+  border-bottom: 1px solid var(--border-subtle); }
+.chartSlot { flex: 1 1 0; min-width: 0; display: flex; align-items: flex-end; justify-content: center; }
+.chartBar { width: 62%; min-width: 3px; max-width: 26px; border-radius: 3px 3px 0 0;
+  background: var(--accent); transition: filter var(--motion-hover); }
 /* 零值不是没有这一天：画一根浅色细线占住位置，横轴才连续。 */
-.chartBarZero { fill: var(--border-subtle); }
+.chartBarZero { width: 62%; min-width: 3px; max-width: 26px; height: 2px; border-radius: 1px;
+  background: var(--border-subtle); }
+/* 悬停的回应是「变亮」，不是变色：提示条已经给出了数字，柱子只需要指出「是这一根」。 */
+.chartSlot:hover .chartBar { filter: brightness(1.2); }
+/*
+ * 悬浮提示：锚在悬停那一列的柱顶，水平方向用 clamp 收在图表内（第一根与最后一根
+ * 不会把提示条推出卡片）。pointer-events 必须关掉，否则提示条自己会吃掉 mouseleave。
+ */
+.chartTip { position: absolute; transform: translate(-50%, 0); pointer-events: none; z-index: 2;
+  display: grid; gap: 2px; justify-items: center; padding: 8px 12px;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  background: var(--bg-elevated); box-shadow: var(--shadow-popover); white-space: nowrap; }
+.chartTipDate { font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.chartTipValue { font-family: var(--font-mono); font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-primary); font-weight: 500; }
+.chartTipMeta { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
 .chartAxis { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 
 /* ---- 计划额度 ---- */

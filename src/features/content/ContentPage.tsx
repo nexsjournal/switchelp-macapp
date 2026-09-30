@@ -434,14 +434,14 @@ export function ContentPage({ client }: { client: DesktopClient }) {
       ) : tab === 'news' ? (
         news.length ? (
           <section className={styles.card}>
-            <ul className={styles.itemList}>
+            <ul className={styles.newsGrid}>
               {news.map(item => (
                 <li key={item.url}>
-                  <button type="button" className={styles.itemRow} onClick={() => void open(item.url)}>
-                    <span className={styles.itemTitle}>{item.title}</span>
-                    <span className={styles.itemMeta}>
-                      {item.sourceLabel} · {relative(item.publishedAt - now, locale)}
-                      <ExternalLink size={11} />
+                  <button type="button" className={styles.newsCard} onClick={() => void open(item.url)}>
+                    <span className={styles.newsTitle}>{item.title}</span>
+                    <span className={styles.newsMeta}>
+                      <span className={styles.newsSource}>{item.sourceLabel} · {relative(item.publishedAt - now, locale)}</span>
+                      <ExternalLink size={11} aria-hidden="true" />
                     </span>
                   </button>
                 </li>

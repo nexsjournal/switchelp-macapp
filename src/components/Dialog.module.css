@@ -15,7 +15,12 @@
 .narrow { width: min(var(--dialog-width-confirm), calc(100vw - 48px)); }
 .normal { width: min(var(--dialog-width-normal), calc(100vw - 48px)); }
 .wide { width: min(var(--dialog-width-diff), calc(100vw - 48px)); }
-.header { display: flex; justify-content: space-between; align-items: flex-start; padding: 24px; gap: 24px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
+/*
+ * 头部一行：图标 + 标题 + 右侧动作。垂直居中——以前 flex-start 让标题贴着顶边、
+ * 右边的按钮垂下来一截，标题栏看着是歪的；内边距也从 24 收到 16：这一栏只是识别区，
+ * 不该占掉一屏的高度。带 description 的弹窗标题块是两行，居中后按钮落在两行的中线。
+ */
+.header { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; gap: 24px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
 /* 标题块：图标与标题同一行，说明另起一行。`min-width: 0` 让长标题能省略而不是撑破头部。 */
 .heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .heading > :global(.text-section-title) { margin: 0; }
@@ -23,7 +28,6 @@
 .heading .description { flex-basis: 100%; }
 .headerActions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .description { color: var(--text-secondary); margin: 8px 0 0; font-size: var(--font-size-label); line-height: var(--line-height-label); }
-.discard { padding: 24px; }
 /* `min-height: 0` 不能省：否则这个弹性项不肯收缩到内容高度以下，正文就永远不滚动。 */
 .body { overflow: auto; flex: 1; min-height: 0; }
 .footer { flex-shrink: 0; }

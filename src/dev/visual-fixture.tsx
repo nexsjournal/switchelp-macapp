@@ -4,7 +4,7 @@
  * 只在开发服务器上使用（`pnpm dev` 后访问 `/visual.html`）；不参与打包，
  * 也不作为业务真相——这里的数据只用于看排版、层级、间距和状态文案。
  *
- * 支持 `?view=codex|app|tools|plugins|content|usage|settings` 直接进入对应页面、`?view=toast` 推三条提示条，
+ * 支持 `?view=codex|app|tools|plugins|content|freeTier|usage|settings` 直接进入对应页面、`?view=toast` 推三条提示条，
  * 方便自动截图与版面审计。
  */
 import { StrictMode, useEffect, type ReactElement } from 'react';
@@ -339,7 +339,9 @@ const client: DesktopClient = {
     return () => clearInterval(timer);
   },
   listProviders: async () => ({ items: providers, nextCursor: null }),
-  saveProvider: async draft => provider('p_new', draft.name, draft.endpoint, null),
+  // 回写 presetId 与当前 Key：真核心在保存后会把这两样带回来，「保存后自动接上模型
+  // 发现」（docs/design/08 方案一）靠它们触发——夹具照此模拟，走查才能看到接续弹窗。
+  saveProvider: async draft => ({ ...provider('p_new', draft.name, draft.endpoint, 'k_1'), presetId: draft.presetId }),
   listCredentials: async id => credentials.filter(c => c.providerId === id),
   addCredential: async () => credentials[0]!,
   replaceCredential: async () => credentials[0]!,
@@ -574,6 +576,7 @@ createRoot(container).render(
           : view === 'tools' ? 'tools'
           : view === 'plugins' ? 'plugins'
           : view === 'content' ? 'content'
+          : view === 'freeTier' ? 'freeTier'
           : view === 'usage' ? 'usage'
           : view === 'settings' ? 'settings'
           : 'overview'

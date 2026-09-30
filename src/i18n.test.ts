@@ -39,7 +39,8 @@ const CORE_PREFIXES = new Set(['action', 'capability', 'compat', 'credential', '
  * 新增枚举成员时这里必须同步——否则界面会出现一个键名。
  */
 const DYNAMIC_KEYS = new Set([
-  ...['overview', 'providers', 'codexConfig', 'diagnostics', 'logs', 'settings'].map(name => `nav.${name}`),
+  ...['overview', 'providers', 'codexConfig', 'tools', 'plugins', 'content', 'freeTier', 'usage',
+    'diagnostics', 'logs', 'settings'].map(name => `nav.${name}`),
   ...['unverified', 'experimental', 'stable', 'unsupported'].map(name => `compat.${name}`),
   ...['route', 'catalog', 'policy', 'restore', 'requiresReload', 'other'].map(name => `group.${name}`),
   ...['draft', 'validating', 'blocked', 'prepared', 'committing', 'awaitingReload', 'verified', 'pending',

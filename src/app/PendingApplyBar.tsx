@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { CloudUpload } from 'lucide-react';
 import type { ApplyPlan, Model, Provider } from '@/contracts/types';
 import { type AppliedSummary, type DesktopClient, isCoreError, toCoreError } from '@/desktop/client';
+import { Dialog } from '@/components/Dialog';
 import { showToast } from '@/components/Toast';
 import { ApplyConfirmDialog } from '@/features/codex/ApplyConfirmDialog';
 import styles from './PendingApplyBar.module.css';
@@ -34,6 +35,7 @@ export function PendingApplyBar({ client, providers, models, summary, onApplied,
   onOpenDiff: () => void;
 }) {
   const [plan, setPlan] = useState<ApplyPlan | null>(null);
+  const [confirmRestart, setConfirmRestart] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -100,16 +102,25 @@ export function PendingApplyBar({ client, providers, models, summary, onApplied,
     } finally { setBusy(false); }
   }
 
-  /** 手动交回执：用于自动补记没能成立的情况（宿主没重启、平台查不到启动时间）。 */
-  async function confirmHostReloaded() {
-    if (!summary) return;
+  /**
+   * 「应用配置并重启」：等待回执时配置其实已经写完，这一步把宿主真正重启一次，
+   * 让它读进新配置，重启成功就等于拿到了回执，直接记账。
+   * 重启会退出用户的 Codex，所以先经过一只确认弹窗。
+   * 手动补记的兜底不在这一条上——「配置」页的事务面板里有确认入口，自动对账
+   * （窗口聚焦时按宿主进程启动时间补记）覆盖用户自己重启过的情况。
+   */
+  async function restartToLoad() {
+    setConfirmRestart(false);
     setBusy(true); setError('');
     try {
-      await client.confirmReload(summary.operationId, true);
+      const report = await client.restartHost(await instanceIdOf(client)).catch(() => null);
+      if (!report || !report.quitConfirmed || !report.launchedConfirmed) {
+        showToast(t('codex.restartHostStillRunning'), 'danger');
+        return;
+      }
+      if (summary) await client.confirmReload(summary.operationId, true).catch(() => null);
       await onApplied();
-      showToast(t('codex.hostReloadConfirmed'), 'info');
-    } catch (thrown) {
-      setError(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('common.failed'));
+      showToast(t('codex.hostReloadConfirmed'));
     } finally { setBusy(false); }
   }
 
@@ -125,15 +136,24 @@ export function PendingApplyBar({ client, providers, models, summary, onApplied,
       </span>
       <div className="actions">
         <button type="button" onClick={onOpenDiff}>{t('action.viewDiff')}</button>
-        {awaitingHost && summary
-          ? <button type="button" className="primary" disabled={busy} onClick={() => void confirmHostReloaded()}>
-            {t('action.confirmHostReloaded')}
-          </button>
-          : <button type="button" className="primary" disabled={busy} onClick={() => void planApply()}>
-            {busy && !plan ? t('codex.committing') : t('codex.applyAndRestart')}
-          </button>}
+        <button type="button" className="primary" disabled={busy}
+          onClick={() => awaitingHost && summary ? setConfirmRestart(true) : void planApply()}>
+          {awaitingHost && summary ? t('action.applyConfigAndRestart')
+            : busy && !plan ? t('codex.committing') : t('codex.applyAndRestart')}
+        </button>
       </div>
     </div>
+
+    {confirmRestart && <Dialog width="narrow" title={t('action.applyConfigAndRestart')}
+      description={t('codex.restartForConfigBody')} busy={busy}
+      onClose={() => setConfirmRestart(false)}
+      footer={<footer className="form-footer">
+        <span>{t('codex.restartForConfigNote')}</span>
+        <div className="actions">
+          <button type="button" onClick={() => setConfirmRestart(false)} disabled={busy}>{t('action.cancel')}</button>
+          <button type="button" className="primary" autoFocus disabled={busy} onClick={() => void restartToLoad()}>{t('codex.restartNow')}</button>
+        </div>
+      </footer>} />}
 
     {plan && <ApplyConfirmDialog plan={plan} kind="apply" busy={busy} error={error} models={models}
       commitLabel={t('codex.applyAndRestart')}
