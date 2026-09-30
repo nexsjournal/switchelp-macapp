@@ -219,6 +219,8 @@ fn main() {
         // `plugins.updater` 里，机制与发布步骤见 docs/architecture/06-updates.md。
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            // `mut` 只有下面那支开发期覆盖用得上：发行构建里它没有被改写，会报 unused_mut。
+            #[cfg_attr(not(debug_assertions), allow(unused_mut))]
             let mut directory = app.path().app_data_dir()?;
             // 开发验证使用隔离目录，发行包不读取此覆盖变量。
             #[cfg(debug_assertions)]

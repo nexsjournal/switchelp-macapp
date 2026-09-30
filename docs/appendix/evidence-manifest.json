@@ -497,7 +497,7 @@
       "sha256": "9626061037acb3ec6b1bbdfbae689802ce832130ca595fb06c6b78ffd0f2e674"
     }
   ],
-  "last_review_date": "2026-09-18",
+  "last_review_date": "2026-09-30",
   "user_reports": [
     {
       "source": "user_relay_of_xingsuan_developer",
@@ -638,6 +638,50 @@
         "probe-full-loop": "not_completed (error.portInUse 18765; bare binary itself works)",
         "coexist-check": "failed (3/6 false-negative assertions, environment-caused, reproducible; bridge routing correct)",
         "manual_layer_now_actually_run": "partially: layer-3 probes were executed and the first passed end-to-end against the real codex; two were blocked by the user's running app owning the fixed gateway port; one failed for a machine-specific environment reason. The layer is no longer unrun, but it is NOT green."
+      }
+    },
+    {
+      "run_date": "2026-09-30",
+      "project_version": "0.3.11",
+      "commit": "5ea869e",
+      "operator": "manual (agent-executed), release-gate layer 3",
+      "reference": "docs/development/02-testing-and-release.md § '两层端到端验证'",
+      "environment": {
+        "os": "macOS arm64 (exact build omitted)",
+        "codex_binary": "resolved by scripts/g0/codex-binary.mjs（候选列表命中 ChatGPT.app 内置 CLI；路径与构建号从略）",
+        "codex_cli_version": "codex-cli 0.159.2",
+        "app_binary_used": "target/debug/gptswitch（裸 debug 二进制，经 GPTSWITCH_APP_BINARY 指定）",
+        "isolation": "GPTSWITCH_E2E_DIR=/tmp/gptswitch-e2e-0311；catalog / apply-pipeline 各自用临时目录；上游全是本地 mock，合成数据，无真实 API key 与真实域名"
+      },
+      "port_conflict": null,
+      "port_conflict_note": "跑之前 18765 空闲（当时没有任何 Switchelp 实例在运行），全程只被探针自己拉起的那个实例占用，跑完已回收",
+      "probes": [
+        {
+          "id": "probe-catalog",
+          "command": "node scripts/g0/probe-catalog.mjs",
+          "exit_code": 0,
+          "verdict": "passed",
+          "key_output": "binaryVersion=codex-cli 0.159.2；result='app-server custom catalog and pagination passed; Desktop UI and routing still unverified'"
+        },
+        {
+          "id": "probe-apply-pipeline",
+          "command": "node scripts/g0/probe-apply-pipeline.mjs",
+          "exit_code": 0,
+          "verdict": "passed",
+          "key_output": "status='passed: 真实管线产物在真实 Codex 中列出并被路由（app-server 层）；Desktop UI 仍未验证'；authHelperInvocations=2（宿主真实调用 helper 取令牌）"
+        },
+        {
+          "id": "probe-full-loop",
+          "command": "GPTSWITCH_APP_BINARY=target/debug/gptswitch GPTSWITCH_E2E_DIR=/tmp/gptswitch-e2e-0311 node scripts/g0/probe-full-loop.mjs",
+          "exit_code": 0,
+          "verdict": "passed",
+          "key_output": "result='passed: 真实应用 + 真实网关 + 真实 Codex + chat 适配全链路打通（上游为本地 mock）'；helperTokenLength=64；appBinary=target/debug/gptswitch"
+        }
+      ],
+      "summary_verdict": {
+        "layer3": "三个探针在 2026-09-30（发布 v0.3.11 前）全部以退出码 0 通过",
+        "artifacts": "运行日志当时落在 /tmp/probe-catalog-0311.log、/tmp/probe-apply-0311.log、/tmp/probe-full-loop-0311.log（临时文件，不入库）",
+        "still_unverified": "Desktop 模型选择器在屏幕上的渲染（与既有条目一致）；这一层三层探针都到不了"
       }
     }
   ]
