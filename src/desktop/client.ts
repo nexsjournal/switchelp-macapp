@@ -345,7 +345,7 @@ export interface DesktopClient {
    * 浏览一个来源。GitHub 来源忽略 `query`（列表在前端本地筛）；
    * **技能市场来源**把 `query` 送到对方的搜索接口（目录有几千条，本地筛没有意义）。
    */
-  browsePluginRepo(repo: string, query?: string): Promise<RepoCatalog>;
+  browsePluginRepo(repo: string, query?: string, skill?: string): Promise<RepoCatalog>;
   /** 生成安装计划。**不写文件**，界面据此展示将写入什么、哪里会冲突。 */
   previewPluginInstall(request: InstallRequest): Promise<InstallPreview>;
   installPlugin(request: InstallRequest): Promise<InstallReport>;

@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ChartColumn, RefreshCw } from 'lucide-react';
-import type { UsageDay, UsageReport, UsageTotals } from '@/contracts/types';
+import type { UsageReport, UsageTotals } from '@/contracts/types';
 import { type DesktopClient, toCoreError } from '@/desktop/client';
 import { EmptyState } from '@/components/EmptyState';
 import { SegmentedTabs } from '@/components/SegmentedTabs';
 import { showToast } from '@/components/Toast';
 import { t, useLocale } from '@/i18n';
-import { UsageTrendChart } from './UsageTrendChart';
+import { UsageTrendChart, type DailyChartKind } from './UsageTrendChart';
 import {
-  avgPerDay, cacheRate, clampPercent, compactTokens, exactTokens, heatLevel, localDateTime, peakDay,
-  peakTotal, percentLabel, perSession, planWindowLabel, sharePercent, shortDate, weekdayIndex, weekdayNarrow,
+  avgPerDay, cacheRate, clampPercent, compactTokens, exactTokens, localDateTime, peakDay,
+  peakTotal, percentLabel, perSession, planWindowLabel, sharePercent, shortDate,
 } from './usagePolicy';
 import styles from './UsagePage.module.css';
 
@@ -24,26 +24,41 @@ import styles from './UsagePage.module.css';
  * - **计划额度没有就是没有**：一条 `rate_limits` 都读不到时不显示这张卡（也不显示 0%），
  *   换成一行说明——只有官方计划账号的会话才记录这个窗口。
  *
- * 版面顺序是「先结论、再节奏、再构成、再排行」，最后一行证据。四块各用不同的图形：
- * 大数字 + 派生小卡（结论带）、日历热力图 / 柱状图（使用节奏）、双行构成条（Token 构成）、
- * 环形进度（计划额度）。同一页里四种图形各自回答一个问题，不是同一种卡片摆四遍。
+ * 版面顺序是「先结论、再节奏、再构成、再排行」，最后一行证据。**每张卡各占一整行**：
+ * 一天一格的热力图要铺满才有 GitHub 贡献图那种密度，按模型与按供应商的名字长度差得远，
+ * 并排时总有一边空出一大块。四块各用不同的图形：大数字 + 派生小卡（结论带）、
+ * 热力图 / 柱状图 / 折线图（使用节奏，可切换）、双行构成条（Token 构成）、环形进度（计划额度）。
  *
  * 界面里的数字没有一个是写死的：全部由 `usagePolicy` 从 `UsageReport` 现算。
  */
 
 const RANGES = [
-  { id: '7', label: 'usage.range7' },
-  { id: '30', label: 'usage.range30' },
-  { id: '90', label: 'usage.range90' },
+  { id: '7', days: 7, label: 'usage.range7' },
+  { id: '30', days: 30, label: 'usage.range30' },
+  { id: '90', days: 90, label: 'usage.range90' },
+  { id: '365', days: 365, label: 'usage.range365' },
 ] as const;
 
 type RangeId = (typeof RANGES)[number]['id'];
 
-const RANGE_DAYS: Record<RangeId, number> = { '7': 7, '30': 30, '90': 90 };
+const CHART_KINDS = [
+  { id: 'heat', label: 'usage.chartHeat' },
+  { id: 'bar', label: 'usage.chartBar' },
+  { id: 'line', label: 'usage.chartLine' },
+] as const;
+
+/**
+ * 每档范围的默认画法：短期用柱状图（一天一根、当天多少一眼量得出来），90 天用折线图
+ * （90 根柱子会细成一道栅栏，折线连起来才看得出走势），一年只有热力图
+ * （365 个点没有可读性，而 53 列方格正好是 GitHub 贡献图那副形状）。
+ * 用户点过切换之后就按点的走（`chartKind`），只在这一档画不出来时才退回默认。
+ */
+const DEFAULT_CHART: Record<RangeId, DailyChartKind> = { '7': 'bar', '30': 'bar', '90': 'line', '365': 'heat' };
 
 export function UsagePage({ client }: { client: DesktopClient }) {
   const locale = useLocale();
   const [range, setRange] = useState<RangeId>('30');
+  const [chart, setChart] = useState<DailyChartKind | null>(null);
   const [report, setReport] = useState<UsageReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -51,7 +66,7 @@ export function UsagePage({ client }: { client: DesktopClient }) {
   const load = useCallback(async (next: RangeId) => {
     setLoading(true);
     try {
-      const result = await client.usageReport(RANGE_DAYS[next]);
+      const result = await client.usageReport(RANGES.find(item => item.id === next)!.days);
       setReport(result);
       setError('');
     } catch (cause) {
@@ -70,6 +85,9 @@ export function UsagePage({ client }: { client: DesktopClient }) {
   };
 
   const tabs = RANGES.map(item => ({ id: item.id, label: t(item.label) }));
+  // 一年档只有热力图：柱状与折线在 365 天上没有可读性，索性不给这两个选项。
+  const kinds = CHART_KINDS.filter(item => item.id === 'heat' || range !== '365');
+  const chartKind = chart != null && kinds.some(item => item.id === chart) ? chart : DEFAULT_CHART[range];
 
   return <div className={styles.page}>
     <div className={styles.toolbar}>
@@ -102,30 +120,35 @@ export function UsagePage({ client }: { client: DesktopClient }) {
 
           {report.sessions === 0 && <div className={styles.note}>{t('usage.rangeEmpty', { days: report.rangeDays })}</div>}
 
-          {/* 节奏与构成并排：日历热力图天生只有 7 列宽，单独占满一行会在右侧空出一大片；
-              两者本来就该一起读（什么时候用、用在了哪），并排也把这一行填满了。 */}
-          <div className={styles.splitRow}>
-            <Rhythm report={report} range={range} locale={locale} />
-            <Composition totals={report.totals} locale={locale} />
-          </div>
+          {/* 每日用量单独占一整行：热力图要铺满才有 GitHub 贡献图那种密度，
+              柱状与折线也需要横向空间；与「Token 构成」并排时它只能分到半行。 */}
+          <Rhythm
+            report={report}
+            kind={chartKind}
+            kinds={kinds.map(item => ({ id: item.id, label: t(item.label) }))}
+            onKindChange={id => setChart(id as DailyChartKind)}
+            locale={locale}
+          />
 
-          <div className={styles.rankRow}>
-            <Ranking
-              title={t('usage.modelTitle')}
-              firstColumn={t('usage.colModel')}
-              rows={report.byModel.map(row => ({ key: row.model, sessions: row.sessions, totals: row.totals }))}
-              whole={report.totals.totalTokens}
-              locale={locale}
-              mono
-            />
-            <Ranking
-              title={t('usage.providerTitle')}
-              firstColumn={t('usage.colProvider')}
-              rows={report.byProvider.map(row => ({ key: row.provider, sessions: row.sessions, totals: row.totals }))}
-              whole={report.totals.totalTokens}
-              locale={locale}
-            />
-          </div>
+          <Composition totals={report.totals} locale={locale} />
+
+          {/* 两张排行各占一整行：模型名与供应商名长度差得远，并排时短的那一边
+              下方会空出一大块；整行之后比例条也更长，「谁占多少」量得更准。 */}
+          <Ranking
+            title={t('usage.modelTitle')}
+            firstColumn={t('usage.colModel')}
+            rows={report.byModel.map(row => ({ key: row.model, sessions: row.sessions, totals: row.totals }))}
+            whole={report.totals.totalTokens}
+            locale={locale}
+            mono
+          />
+          <Ranking
+            title={t('usage.providerTitle')}
+            firstColumn={t('usage.colProvider')}
+            rows={report.byProvider.map(row => ({ key: row.provider, sessions: row.sessions, totals: row.totals }))}
+            whole={report.totals.totalTokens}
+            locale={locale}
+          />
 
           <PlanWindow plan={report.planWindow} locale={locale} />
 
@@ -201,73 +224,43 @@ function Summary({ report, locale }: { report: UsageReport; locale: string }) {
 }
 
 /**
- * 使用节奏：近 7 天用柱状图，30 / 90 天换成日历热力图。
+ * 使用节奏：同一份逐日数据，热力图 / 柱状图 / 折线图三选一。
  *
- * 天数一多，柱子会细到只剩一条线，「哪几天在用、哪几天断了」反而看不出来；热力图一格一天，
- * 空的那些天也留一个浅色格子，断档一眼可见。两张图的数字口径相同（都是当日总 Token，
- * 悬停给出日期 / 用量 / 会话数）。
+ * 三张图的口径完全相同（当日总 Token），换的只是画法：热力图看「哪几天在用、断在哪」，
+ * 柱状图量「某天到底多少」，折线图看走势与峰值。选哪一种由用户在卡片头部切换，
+ * 悬停任意一天都会在读数那行给出「日期 · 用量 · 会话数」，三种画法的读法一致。
  */
-function Rhythm({ report, range, locale }: { report: UsageReport; range: RangeId; locale: string }) {
+function Rhythm({ report, kind, kinds, onKindChange, locale }: {
+  report: UsageReport;
+  kind: DailyChartKind;
+  kinds: Array<{ id: string; label: string }>;
+  onKindChange: (id: string) => void;
+  locale: string;
+}) {
+  // 可访问名称跟着画法走：读屏听到的必须是当前这一张，不能一律报「柱状图」。
+  const ariaLabel = t(kind === 'heat' ? 'usage.heatAria' : kind === 'bar' ? 'usage.trendAria' : 'usage.lineAria');
   return <section className={styles.card}>
     <header className={styles.cardHeader}>
       <h2 className={styles.cardTitle}>{t('usage.trendTitle')}</h2>
-      <span className={styles.cardMeta}>{t('usage.trendSessions', { count: report.sessions })}</span>
+      <div className={styles.chartControls}>
+        {/* 一年档只有一种画法，不摆一个只剩一个选项的分段控件（那看着像坏了）。 */}
+        {kinds.length > 1 && <SegmentedTabs
+          tabs={kinds}
+          active={kind}
+          onChange={onKindChange}
+          ariaLabel={t('usage.trendTitle')}
+        />}
+        <span className={styles.cardMeta}>{t('usage.trendSessions', { count: report.sessions })}</span>
+      </div>
     </header>
-    {range === '7'
-      ? <UsageTrendChart
-          days={report.daily}
-          ariaLabel={t('usage.trendAria')}
-          peakLabel={t('usage.trendPeak', { value: compactTokens(peakTotal(report.daily)) })}
-          locale={locale}
-        />
-      : <UsageHeatmap days={report.daily} locale={locale} />}
+    <UsageTrendChart
+      kind={kind}
+      days={report.daily}
+      ariaLabel={ariaLabel}
+      peakLabel={t('usage.trendPeak', { value: compactTokens(peakTotal(report.daily)) })}
+      locale={locale}
+    />
   </section>;
-}
-
-/**
- * 日历热力图：列是周一到周日，行是周，一格一天。
- *
- * 四个决定：
- * - **第一格按星期占位**（`grid-column-start`），不补造不存在的日期格：补出来的格子长得跟
- *   「这天没有用量」一模一样，会把一个不存在的日期画成测得的零。
- * - **分档相对本范围的峰值**（`heatLevel`），不用绝对阈值：7 天与 90 天的量级差一个数量级，
- *   写死阈值只会让一整个范围糊在同一档里。
- * - **逐日数字走 `title`**：热力图没有坐标轴，悬停是读到「这天到底用了多少」的唯一方式，
- *   口径与柱状图一致（日期 · 完整用量 · 会话数）。
- * - **收进一块带底色的作图区**：一周 7 列是固定的，格子又要保持正方（拉成宽条就不像日历），
- *   所以宽卡片里右侧必定有余量；「峰值 / 覆盖日期」那一行横跨整块区域，右边缘才是齐的。
- */
-function UsageHeatmap({ days, locale }: { days: UsageDay[]; locale: string }) {
-  const peak = peakTotal(days);
-  const first = days[0];
-  const last = days[days.length - 1];
-  return <div className={styles.heatPlot}>
-    {/* 峰值与覆盖日期横跨整块作图区：格子只有 7 列宽，右边缘要靠这一行锚住。 */}
-    <div className={styles.heatMeta}>
-      <span className={styles.heatPeak}>{t('usage.trendPeak', { value: compactTokens(peak) })}</span>
-      <span className={styles.heatRange}>{first ? shortDate(first.date) : ''} – {last ? shortDate(last.date) : ''}</span>
-    </div>
-    <div className={styles.heatBlock}>
-      <div className={styles.heatWeekdays} aria-hidden="true">
-        {[0, 1, 2, 3, 4, 5, 6].map(index => <span key={index}>{weekdayNarrow(locale, index)}</span>)}
-      </div>
-      <div className={styles.heatGrid} role="img" aria-label={t('usage.heatAria')}>
-        {days.map((day, index) => <div
-          key={day.date}
-          className={styles.heatCell}
-          data-level={heatLevel(day.totals.totalTokens, peak)}
-          style={index === 0 && first ? { gridColumnStart: weekdayIndex(first.date) + 1 } : undefined}
-          title={`${day.date} · ${exactTokens(day.totals.totalTokens, locale)} · ${t('usage.trendSessions', { count: day.sessions })}`}
-        />)}
-      </div>
-      {/* 图例：少 → 四档 → 多。空档不画进图例，它与「有用量但很少」是两回事。 */}
-      <div className={styles.heatLegend}>
-        <span>{t('usage.heatLegendLow')}</span>
-        {[1, 2, 3, 4].map(level => <span key={level} className={styles.legendSwatch} data-level={level} />)}
-        <span>{t('usage.heatLegendHigh')}</span>
-      </div>
-    </div>
-  </div>;
 }
 
 /**

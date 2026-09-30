@@ -35,7 +35,11 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 /// 允许的时间范围（天）。范围固定，避免每日柱状图跨度失控、以及图表与合计口径不一致。
-pub const RANGE_DAYS_OPTIONS: [i64; 3] = [7, 30, 90];
+///
+/// 365 这一档是给**热力图**用的（`docs/design/07-usage-page.md`：跨度一年的每日柱状图
+/// 会失控，界面只在这一档画热力图）。后端口径不变：`daily` 仍然逐日零填充
+/// `range_days` 条，合计与其它档完全一致，只是条数是 365。
+pub const RANGE_DAYS_OPTIONS: [i64; 4] = [7, 30, 90, 365];
 /// 非法范围回落到这个值。
 pub const DEFAULT_RANGE_DAYS: i64 = 30;
 /// 递归深度上限。`sessions/年/月/日/文件` 只有四层。
@@ -900,12 +904,42 @@ mod tests {
     }
 
     #[test]
-    fn clamp_range_days_only_accepts_the_three_options() {
+    fn clamp_range_days_only_accepts_the_listed_options() {
         assert_eq!(clamp_range_days(7), 7);
         assert_eq!(clamp_range_days(30), 30);
         assert_eq!(clamp_range_days(90), 90);
+        assert_eq!(clamp_range_days(365), 365, "近一年在允许档位里");
         assert_eq!(clamp_range_days(0), DEFAULT_RANGE_DAYS);
-        assert_eq!(clamp_range_days(365), DEFAULT_RANGE_DAYS);
+        assert_eq!(clamp_range_days(120), DEFAULT_RANGE_DAYS);
         assert_eq!(clamp_range_days(-1), DEFAULT_RANGE_DAYS);
+    }
+
+    /// 365 这一档与其它档同一口径：逐日零填充 365 条，合计不因为范围变大而变。
+    #[test]
+    fn the_year_range_is_zero_filled_like_the_others() {
+        let root = home();
+        write_session(
+            &sessions_dir(root.path()),
+            "rollout-i.jsonl",
+            &[
+                meta("OpenAI"),
+                turn("gpt-5.5"),
+                token_count("2026-05-25T02:10:00.000Z", (1_000, 0, 100, 0), None, None),
+            ],
+        );
+
+        let month = collect_usage_at(root.path(), 30, NOW, OFFSET);
+        let year = collect_usage_at(root.path(), 365, NOW, OFFSET);
+        assert_eq!(year.range_days, 365);
+        assert_eq!(year.daily.len(), 365, "逐日零填充要凑满 365 条");
+        assert_eq!(year.daily.first().unwrap().date, "2025-05-26");
+        assert_eq!(year.daily.last().unwrap().date, "2026-05-25");
+        assert_eq!(year.daily[0].totals, UsageTotals::default());
+        assert_eq!(year.daily[364].totals.input_tokens, 1_000);
+        // 范围内那一天的用量与 30 天档完全一致（口径不随档位变）。
+        assert_eq!(year.totals, month.totals);
+        assert_eq!(year.sessions, month.sessions);
+        let sum_daily: u64 = year.daily.iter().map(|day| day.totals.total_tokens).sum();
+        assert_eq!(sum_daily, year.totals.total_tokens);
     }
 }

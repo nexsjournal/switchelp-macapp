@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it, vi } from 'vitest';
@@ -51,6 +53,46 @@ function report(overrides: Partial<UsageReport> = {}): UsageReport {
     planWindow: { planType: 'plus', usedPercent: 35.4, windowMinutes: 300, resetsAt: 1_790_246_266 },
     ...overrides,
   });
+}
+
+/** 近 7 天，逐日递增到 9K：用来量悬停读数、折线的峰值点与「移开后退回范围」。 */
+function week(): UsageDay[] {
+  const values = [1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 9_000];
+  return values.map((value, index) => ({
+    date: `2026-09-${String(18 + index).padStart(2, '0')}`,
+    sessions: 2,
+    totals: totals({ totalTokens: value }),
+  }));
+}
+
+/**
+ * 近一年逐日：365 天（2025-10-01 起，首日是周三），每七天一个循环。
+ * 一列一周的排法下正好铺成 53 列——这一档就是 GitHub 贡献图那副形状。
+ */
+function year(): UsageDay[] {
+  const end = Date.UTC(2026, 8, 30);
+  const days: UsageDay[] = [];
+  for (let back = 364; back >= 0; back--) {
+    days.push({
+      date: new Date(end - back * 86_400_000).toISOString().slice(0, 10),
+      sessions: 1,
+      totals: totals({ totalTokens: (back % 7) * 10_000 }),
+    });
+  }
+  return days;
+}
+
+/**
+ * 分段控件的页签按位置取。
+ *
+ * 范围那一档里 `usage.range365`（以及三个画法标签）的文案在 locales 里，测试不该绑死文案——
+ * 换语言、换措辞都会让按名字取的查询失效。第 0 组是时间范围（页脚工具栏），第 1 组是画法（卡片头部）。
+ */
+function rangeTabs(): HTMLElement[] {
+  return within(screen.getAllByRole('tablist')[0]!).getAllByRole('tab');
+}
+function chartTabs(): HTMLElement[] {
+  return within(screen.getAllByRole('tablist')[1]!).getAllByRole('tab');
 }
 
 it('本机没有任何会话记录时给出空态，并说明扫的是哪个目录', async () => {
@@ -115,33 +157,47 @@ it('全页不出现成本、金额或汇率：没有可靠单价来源就不给�
   }
 });
 
-it('近 30 天用热力图：一天一格，分档随用量变化，另附少 / 多图例', async () => {
-  renderWithToasts(<UsagePage client={testClient({ usageReport: vi.fn().mockResolvedValue(report({ daily: month() })) })} />);
+it('热力图：一天一格、一列一周，分档随用量变化，另附少 / 多图例', async () => {
+  const { container } = renderWithToasts(
+    <UsagePage client={testClient({ usageReport: vi.fn().mockResolvedValue(report({ daily: month() })) })} />,
+  );
+
+  // 30 天档默认柱状图，热力图是切过去的那一档。
+  await screen.findByRole('img', { name: '每日 Token 用量柱状图' });
+  await userEvent.click(chartTabs()[0]!);
 
   const grid = await screen.findByRole('img', { name: '每日 Token 用量热力图' });
   const cells = [...grid.querySelectorAll('[data-level]')];
   // 逐日零填充：范围内 30 天就是 30 格，一格不多一格不少。
   expect(cells).toHaveLength(30);
+  // 一列一周（GitHub 那副形状）：2026-09-01 是周二，30 天铺成 5 列 × 7 行。
+  expect(grid.style.getPropertyValue('--heat-cols')).toBe('5');
+  // 第一格按星期占位、不补造日期格：09-01 落在第 1 个数据列的第 2 行（行 1 = 周一）。
+  expect(cells[0]).toHaveStyle({ gridColumn: '2', gridRow: '2' });
   // 分档相对本范围峰值（1,000,000）：100% / 60% / 30% / 10% / 0% 依次落到 4 / 3 / 2 / 1 / 0 档。
   expect(cells.slice(0, 5).map(cell => cell.getAttribute('data-level'))).toEqual(['4', '3', '2', '1', '0']);
   // 逐日数字走 title：日期 · 完整用量 · 会话数。
   expect(cells[0]).toHaveAttribute('title', '2026-09-01 · 1,000,000 · 会话 2 个');
   expect(screen.getByText('少')).toBeInTheDocument();
   expect(screen.getByText('多')).toBeInTheDocument();
-  // 30 天里不出现柱状图：两种图形互斥，同一份数据不会画两遍。
+  // 同一份数据不会画两遍：切到热力之后柱状图就不在页面上了。
+  expect(container.querySelector('[data-chart]')).toHaveAttribute('data-chart', 'heat');
   expect(screen.queryByRole('img', { name: '每日 Token 用量柱状图' })).not.toBeInTheDocument();
 });
 
-it('近 7 天仍是柱状图：天数少，柱子还看得清', async () => {
-  const usageReport = vi.fn().mockResolvedValue(report({ rangeDays: 7, daily: month().slice(23) }));
-  renderWithToasts(<UsagePage client={testClient({ usageReport })} />);
+it('近 7 天默认柱状图：天数少，柱子还看得清', async () => {
+  const usageReport = vi.fn().mockResolvedValue(report({ rangeDays: 7, daily: week() }));
+  const { container } = renderWithToasts(<UsagePage client={testClient({ usageReport })} />);
 
-  // 默认 30 天是热力图，切到 7 天才换成柱状图。峰值那行仍由页面拼好交给图。
-  await screen.findByRole('img', { name: '每日 Token 用量热力图' });
+  // 先等 30 天那一档画出来，再切到 7 天：7 天一天一根柱子。
+  await screen.findByRole('img', { name: '每日 Token 用量柱状图' });
   await userEvent.click(screen.getByRole('tab', { name: '近 7 天' }));
+  await waitFor(() => expect(usageReport).toHaveBeenCalledWith(7));
 
   expect(await screen.findByRole('img', { name: '每日 Token 用量柱状图' })).toBeInTheDocument();
   expect(screen.queryByRole('img', { name: '每日 Token 用量热力图' })).not.toBeInTheDocument();
+  // 横轴按天连续：7 天就是 7 个命中列。
+  expect(container.querySelectorAll('[data-chart="bar"] [data-date]')).toHaveLength(7);
 });
 
 it('按模型与按供应商两张表的表头都带 scope，占比按总量算', async () => {
@@ -163,17 +219,21 @@ it('按模型与按供应商两张表的表头都带 scope，占比按总量算'
   expect(within(tables[1]!).getByText('gptswitch')).toBeInTheDocument();
 });
 
-it('切换时间范围会按 7 / 30 / 90 重新请求', async () => {
+it('切换时间范围会按 7 / 30 / 90 / 365 重新请求', async () => {
   const usageReport = vi.fn().mockResolvedValue(report());
   renderWithToasts(<UsagePage client={testClient({ usageReport })} />);
 
   await waitFor(() => expect(usageReport).toHaveBeenCalledWith(30));
+  // 分段控件是 role=tab，不是裸按钮组：四档时间范围 + 三个画法。
+  expect(rangeTabs()).toHaveLength(4);
+  expect(chartTabs()).toHaveLength(3);
   await userEvent.click(screen.getByRole('tab', { name: '近 7 天' }));
   await waitFor(() => expect(usageReport).toHaveBeenCalledWith(7));
   await userEvent.click(screen.getByRole('tab', { name: '近 90 天' }));
   await waitFor(() => expect(usageReport).toHaveBeenCalledWith(90));
-  // 分段控件是 role=tab，不是裸按钮组。
-  expect(screen.getAllByRole('tab')).toHaveLength(3);
+  // 第四档是近一年（标签文案在 locales 里，按位置点，不绑死文案）。
+  await userEvent.click(rangeTabs()[3]!);
+  await waitFor(() => expect(usageReport).toHaveBeenCalledWith(365));
 });
 
 it('计划额度：读得到时环形按取整后的百分比画、时长按时长说；读不到时整卡换成说明', async () => {
@@ -253,4 +313,109 @@ it('本机有会话但所选范围没数据时，结论带仍渲染并给出一�
   expect(screen.queryByText(/峰值日/)).not.toBeInTheDocument();
   // 两张表各有一句空提示，不是重复渲染。
   expect(screen.getAllByText('这个范围内没有记录。')).toHaveLength(2);
+});
+
+it('近一年档：365 天铺成 53 列（一列一周），这一档只给热力图', async () => {
+  const usageReport = vi.fn().mockResolvedValue(report({ rangeDays: 365, daily: year() }));
+  renderWithToasts(<UsagePage client={testClient({ usageReport })} />);
+
+  await waitFor(() => expect(usageReport).toHaveBeenCalledWith(30));
+  await userEvent.click(rangeTabs()[3]!);
+  await waitFor(() => expect(usageReport).toHaveBeenCalledWith(365));
+
+  const grid = await screen.findByRole('img', { name: '每日 Token 用量热力图' });
+  // 一天一格，一年 365 格；一列一周，首日 2025-10-01 是周三，正好 53 列。
+  expect(grid.querySelectorAll('[data-level]')).toHaveLength(365);
+  expect(grid.style.getPropertyValue('--heat-cols')).toBe('53');
+  // 柱状与折线在 365 天上没有可读性：这一档不给这两个选项，整页只剩时间范围那组分段控件。
+  expect(screen.getAllByRole('tablist')).toHaveLength(1);
+  expect(screen.queryByRole('img', { name: '每日 Token 用量柱状图' })).not.toBeInTheDocument();
+});
+
+it('画法三选一：热力 / 柱状 / 折线切过去图就换了，同一份数据不会画两遍', async () => {
+  const { container } = renderWithToasts(
+    <UsagePage client={testClient({ usageReport: vi.fn().mockResolvedValue(report({ daily: month() })) })} />,
+  );
+
+  // 30 天默认柱状图：短期一天一根，最好量。
+  await screen.findByRole('img', { name: '每日 Token 用量柱状图' });
+  expect(container.querySelector('[data-chart]')).toHaveAttribute('data-chart', 'bar');
+  expect(chartTabs().map(tab => tab.getAttribute('aria-selected'))).toEqual(['false', 'true', 'false']);
+
+  await userEvent.click(chartTabs()[0]!);
+  expect((await screen.findByRole('img', { name: '每日 Token 用量热力图' })).querySelectorAll('[data-level]')).toHaveLength(30);
+
+  await userEvent.click(chartTabs()[2]!);
+  // 折线的可访问名称走新键 `usage.lineAria`（由主 Agent 补进 locales），
+  // 所以这里按画法本身断言；换过画法之后上一张图必须消失。
+  await waitFor(() => expect(container.querySelector('[data-chart]')).toHaveAttribute('data-chart', 'line'));
+  expect(container.querySelector('[data-chart="line"] svg')!.querySelectorAll('line')).toHaveLength(29);
+  expect(screen.queryByRole('img', { name: '每日 Token 用量热力图' })).not.toBeInTheDocument();
+  expect(chartTabs().map(tab => tab.getAttribute('aria-selected'))).toEqual(['false', 'false', 'true']);
+});
+
+it('悬停某天就在读数行给出那天的用量与会话数；折线上另标出峰值点', async () => {
+  const usageReport = vi.fn().mockResolvedValue(report({ rangeDays: 7, daily: week() }));
+  const { container } = renderWithToasts(<UsagePage client={testClient({ usageReport })} />);
+
+  await screen.findByRole('img', { name: '每日 Token 用量柱状图' });
+  await userEvent.click(screen.getByRole('tab', { name: '近 7 天' }));
+  await waitFor(() => expect(usageReport).toHaveBeenCalledWith(7));
+  // 没有悬停时读数行给的是这一档覆盖的起止日期（常驻一行，鼠标扫过时布局不动）。
+  expect(screen.getByText('09-18 – 09-24')).toBeInTheDocument();
+
+  // 柱状图：悬停最后一列，读数换成那一天，且被提亮的就是这一列。
+  const lastBar = container.querySelector('[data-date="2026-09-24"]')!;
+  await userEvent.hover(lastBar);
+  expect(screen.getByText('09-24 · 9K · 会话 2 个')).toBeInTheDocument();
+  expect(lastBar.querySelector('[data-hovered="true"]')).toBeInTheDocument();
+  await userEvent.unhover(lastBar);
+  expect(screen.getByText('09-18 – 09-24')).toBeInTheDocument();
+
+  // 折线图：同一套读数，另加峰值点（09-24 的 9K 是这一档的峰值）。
+  await userEvent.click(chartTabs()[2]!);
+  await waitFor(() => expect(container.querySelector('[data-chart]')).toHaveAttribute('data-chart', 'line'));
+  expect(container.querySelector('[data-peak]')).toHaveAttribute('data-peak', '2026-09-24');
+  await userEvent.hover(container.querySelector('[data-date="2026-09-18"]')!);
+  expect(screen.getByText('09-18 · 1K · 会话 2 个')).toBeInTheDocument();
+  expect(container.querySelector('[data-chart="line"] [data-hovered="true"]')).toBeInTheDocument();
+});
+
+it('热力图上悬停某格，读数行同样给出那一天的用量与会话数', async () => {
+  const { container } = renderWithToasts(
+    <UsagePage client={testClient({ usageReport: vi.fn().mockResolvedValue(report({ daily: month() })) })} />,
+  );
+
+  await screen.findByRole('img', { name: '每日 Token 用量柱状图' });
+  await userEvent.click(chartTabs()[0]!);
+  const grid = await screen.findByRole('img', { name: '每日 Token 用量热力图' });
+  expect(screen.getByText('09-01 – 09-30')).toBeInTheDocument();
+
+  await userEvent.hover(container.querySelector('[data-date="2026-09-02"]')!);
+  expect(screen.getByText('09-02 · 600K · 会话 2 个')).toBeInTheDocument();
+  // 读数与描边指的是同一格（描边跟着读数走，不是 CSS 的 :hover）。
+  expect(grid.querySelector('[data-date="2026-09-02"][data-hovered="true"]')).toBeInTheDocument();
+});
+
+it('按模型与按供应商各占一整行：两张卡都是页面容器的直接子元素', async () => {
+  const { container } = renderWithToasts(
+    <UsagePage client={testClient({ usageReport: vi.fn().mockResolvedValue(report()) })} />,
+  );
+
+  const trendCard = (await screen.findByText('每日 Token 用量')).closest('section')!;
+  const page = trendCard.parentElement!;
+  const cards = ['Token 构成', '按模型', '按供应商'].map(title => screen.getByText(title).closest('section')!);
+
+  /*
+   * jsdom 不做排版，`getBoundingClientRect()` 全是 0，宽度在这里量不出东西；能断言的是**结构**：
+   * 页面容器是单列 grid（下面连样式表一起核），直接子元素即整行。一旦有人把两张排行卡塞进
+   * 一个两列的包裹层里（上一版就是），它们的父节点就不再是页面容器——那正是右边空出一大块的原因。
+   */
+  for (const card of cards) expect(card.parentElement).toBe(page);
+  expect(cards[1]!.nextElementSibling).toBe(cards[2]!);
+  // 容器本身没有列定义 = 只有一个隐式列，每个直接子元素各占一行。
+  const sheet = readFileSync('src/features/usage/UsagePage.module.css', 'utf8');
+  expect(/\.page\s*\{([^}]*)\}/.exec(sheet)?.[1] ?? '').not.toContain('grid-template-columns');
+  // 量宽的只有这两张表：表内的列宽是定值（比例条长度只由占比决定），不在这里的断言范围。
+  expect(container.querySelectorAll('table')).toHaveLength(2);
 });

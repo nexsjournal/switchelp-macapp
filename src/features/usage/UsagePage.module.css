@@ -46,13 +46,20 @@
 .derivedValue { font-family: var(--font-mono); font-size: var(--font-size-card-title); line-height: var(--line-height-card-title); font-weight: 500; color: var(--text-primary); }
 .derivedNote { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 
-/* ---- 每日趋势 ---- */
-.chart { display: grid; gap: 8px; }
-.chartTop { display: flex; justify-content: flex-end; }
-.chartPeak { font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+/* ---- 每日趋势（热力图 / 柱状图 / 折线图）---- */
 /*
- * 柱状图是普通 DIV（不是 SVG）：柱子用百分比高度、圆角顶、悬停提亮都是一行 CSS 的事，
- * 悬浮提示也能直接锚在柱顶（SVG 非等比缩放会把 rx 圆角拉变形，原生 title 又慢）。
+ * 三种画法共用一副骨架：读数行 + 作图区。读数行常驻——没有悬停时显示整个范围的起止日期，
+ * 悬停时换成那一天的数字，所以鼠标扫过时这一行不会忽有忽无，也不会把图形顶下去。
+ */
+.chart { display: grid; gap: 12px; }
+.chartMeta { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+/* 读数与峰值都是数字：走等宽栈，切换画法或移动鼠标时数字不会左右跳。 */
+.chartReadout { font-family: var(--font-mono); font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); }
+.chartPeak { font-family: var(--font-mono); font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); }
+/* 卡片头部右侧：画法切换 + 会话数。窄窗口下自己换行，两样都不缩。 */
+.chartControls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+/*
+ * 柱状图是普通 DIV（不是 SVG）：柱子用百分比高度、圆角顶、悬停提亮都是一行 CSS 的事。
  * 整列都是命中区：比柱子本身宽得多，鼠标不用瞄准。
  */
 .chartPlot { position: relative; display: flex; align-items: stretch; height: 160px;
@@ -63,51 +70,71 @@
 /* 零值不是没有这一天：画一根浅色细线占住位置，横轴才连续。 */
 .chartBarZero { width: 62%; min-width: 3px; max-width: 26px; height: 2px; border-radius: 1px;
   background: var(--border-subtle); }
-/* 悬停的回应是「变亮」，不是变色：提示条已经给出了数字，柱子只需要指出「是这一根」。 */
-.chartSlot:hover .chartBar { filter: brightness(1.2); }
+/* 悬停的回应是「变亮」，不是变色：读数那行已经给出了数字，柱子只需要指出「是这一根」。
+   高亮跟着读数那一天走（同一个状态，不是 CSS 的 :hover）：鼠标滑过柱子之间的缝隙时，
+   读数与高亮不会一个留在上一天、一个消失。 */
+.chartBar[data-hovered='true'] { filter: brightness(1.2); }
 /*
- * 悬浮提示：锚在悬停那一列的柱顶，水平方向用 clamp 收在图表内（第一根与最后一根
- * 不会把提示条推出卡片）。pointer-events 必须关掉，否则提示条自己会吃掉 mouseleave。
+ * 折线：SVG 铺在作图区上，坐标用百分比（为什么不用 viewBox 见组件里的说明）；
+ * 命中区仍是整列透明的 DIV（与柱状图同一套），准线与圆点是绝对定位的 HTML——
+ * 它们不受 SVG 缩放影响，圆的始终是圆。
  */
-.chartTip { position: absolute; transform: translate(-50%, 0); pointer-events: none; z-index: 2;
-  display: grid; gap: 2px; justify-items: center; padding: 8px 12px;
-  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
-  background: var(--bg-elevated); box-shadow: var(--shadow-popover); white-space: nowrap; }
-.chartTipDate { font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
-.chartTipValue { font-family: var(--font-mono); font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-primary); font-weight: 500; }
-.chartTipMeta { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
-.chartAxis { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.linePlot { position: relative; height: 160px; border-bottom: 1px solid var(--border-subtle); }
+.lineSvg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.lineStroke { stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
+/* 峰值点常驻：折线的最高处应该一眼看得见，具体数字在读数行的「峰值」里。 */
+.linePeakDot { position: absolute; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--accent); transform: translate(-50%, 50%); pointer-events: none; }
+.lineHits { position: absolute; inset: 0; display: flex; }
+.lineHit { flex: 1 1 0; min-width: 0; }
+/* 悬停：一条竖向准线 + 一个圆点，指出读数说的是「这一天、这个值」。 */
+.lineGuide { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border-subtle);
+  transform: translateX(-0.5px); pointer-events: none; }
+.lineMark { position: absolute; width: 11px; height: 11px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg-surface); transform: translate(-50%, 50%); pointer-events: none; }
 
-/* ---- 日历热力图 ---- */
+/* ---- 日历热力图（GitHub 贡献图那副形状）---- */
 /*
- * 单元格尺寸写成本地变量：格子与列头必须同宽同缝，两处各写一遍迟早会漂移。
- * 28 是方形格子里「看得清又不会把 90 天撑成一堵墙」的一档（90 天 = 13 行 ≈ 412 高）。
+ * 格子尺寸随卡片宽度自适应：**一列 = 一周**，列用 1fr 把整行吃满，方格用 aspect-ratio 保持正方，
+ * 于是格子跟着列宽一起变密——一年 53 列正好铺满一行，就是 GitHub 那副形状。
+ *
+ * 两个上限：列少时（30 天只有 5 列）格子会被撑成 200px 的方块，用 --heat-cell-max 封顶，
+ * 到顶后右侧留白而不是把方块吹大；第 1 列是星期名，与格子同处一个网格，行高由方格决定——
+ * 分成两个网格各写一套高度，迟早会对不齐。
  */
+.heatGrid {
+  --heat-cols: 1;
+  --heat-cell-max: 28px;
+  --heat-gap: 4px;
+  --heat-label: 24px;
+  display: grid;
+  grid-template-columns: var(--heat-label) repeat(var(--heat-cols), minmax(0, 1fr));
+  grid-template-rows: repeat(7, auto);
+  /* 行缝与列缝都是 --heat-gap：封顶那行 calc 按同一个数算，两处不一致会让格子比上限小一档
+     （实测写成 6px 列缝时 90 天的格子是 26 而不是 28）。 */
+  gap: var(--heat-gap);
+  max-width: calc(var(--heat-cols) * (var(--heat-cell-max) + var(--heat-gap)) + var(--heat-label));
+}
 /*
- * 作图区：格子只有 7 列宽（一周 7 天，格子保持正方），宽卡片里右侧一定会有余量，
- * 所以把视角图收进一块有底色的区域，并让「峰值 / 覆盖日期」那一行横跨整块，右边缘才是齐的。
+ * 星期名与格子同处一个网格（分两个网格写死行高迟早会对不齐），但**行盒高度记 0**：
+ * 行高必须由正方格子决定。18px 的行盒会把 53 列那档 16px 的格子撑成瘦长条
+ * （实测 90 天档：格子 16×18，横缝 4、纵缝 6，方格不方）。高度为 0 的盒子仍把文字
+ * 居中画在该行上，越界的部分只是画出来，不参与行高。
  */
-.heatPlot { --heat-cell: 28px; --heat-gap: 4px; display: grid; gap: 12px; padding: var(--space-4);
-  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-input); }
-.heatMeta { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-.heatBlock { display: grid; gap: 8px; justify-items: start; }
-.heatWeekdays { display: grid; grid-template-columns: repeat(7, var(--heat-cell)); gap: var(--heat-gap);
-  font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); text-align: center; }
-.heatGrid { display: grid; grid-template-columns: repeat(7, var(--heat-cell)); gap: var(--heat-gap); }
+.heatWeekday { align-self: center; height: 0; display: grid; place-items: center;
+  font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 /*
  * 空格（这天没用过）与四档用量。分档只用强调色的深浅（accent 一族的底/描边），不引入新的色值：
  * 深浅是同一个色相，读起来是「多 / 少」而不是「不同的状态」。
  * 逐档用 opacity 而不是另配颜色：同一份强调色在深色与浅色主题下都不会跑出色系。
  */
-.heatCell { width: var(--heat-cell); height: var(--heat-cell); border-radius: var(--radius-xs); background: var(--bg-hover); }
+.heatCell { aspect-ratio: 1; border-radius: var(--radius-xs); background: var(--bg-hover); }
 .heatCell[data-level='1'] { background: var(--accent); opacity: 0.24; }
 .heatCell[data-level='2'] { background: var(--accent); opacity: 0.44; }
 .heatCell[data-level='3'] { background: var(--accent); opacity: 0.68; }
 .heatCell[data-level='4'] { background: var(--accent); }
-/* 悬停指出「是这一格」：颜色本身是刻度，不能再拿它当悬停反馈。 */
-.heatCell:hover { outline: 2px solid var(--accent-border); outline-offset: 1px; }
-.heatPeak { font-family: var(--font-mono); font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); }
-.heatRange { font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+/* 悬停指出「是这一格」：颜色本身是刻度，不能再拿它当悬停反馈（同柱子、折线，跟着读数走）。 */
+.heatCell[data-hovered='true'] { outline: 2px solid var(--accent-border); outline-offset: 1px; }
 .heatLegend { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 .legendSwatch { width: 12px; height: 12px; border-radius: var(--radius-xs); background: var(--bg-hover); }
 .legendSwatch[data-level='1'] { background: var(--accent); opacity: 0.24; }
@@ -143,16 +170,11 @@
 .composeNote { margin: 16px 0 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 
 /* ---- 排行（按模型 / 按供应商）---- */
-/* 两张卡等高（grid 默认 stretch）：一行里两张卡底边不齐会像没对齐。 */
 /*
- * 节奏（左窄）与构成（右宽）并排。
- * 日历热力图天生只有 7 列（220px 上下），给它一整行会在右侧空出 500px；横条正相反——
- * 越长越好读。所以左边给固定上限、右边吃掉剩余宽度。窄到放不下时落成一列。
+ * 两张表各占一整行（不再是并排两列）：模型名有的很长、供应商名很短，并排时短的那一边
+ * 下方会空出一大块；整行之后比例条也更长，同一张表里「谁占多少」量得更准。
+ * 一行的高度只由它自己的行数决定，两张表之间不再互相牵扯。
  */
-.splitRow { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 24px; align-items: start; }
-@media (max-width: 1080px) { .splitRow { grid-template-columns: minmax(0, 1fr); } }
-
-.rankRow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 /* 给焦点环留 2px：不留的话滚动容器会把外圈描边裁掉（与全局 .scroll-area 同一做法）。 */
 .tableScroll { overflow-x: auto; padding: 2px; margin: -2px; }
 /*
@@ -222,10 +244,9 @@
 @keyframes usage-spin { to { transform: rotate(360deg); } }
 
 /*
- * 最小窗口（规范 960 宽）下：结论带叠成一列（主数字不该被挤成半栏），
- * 派生指标仍是两列，两张排行表各占一行。沿用 App.module.css 的 1120 断点。
+ * 最小窗口（规范 960 宽）下：结论带叠成一列（主数字不该被挤成半栏），派生指标仍是两列。
+ * 其余卡片本来就是一行一张，不再有需要塌缩的并排结构。沿用 App.module.css 的 1120 断点。
  */
 @media (max-width: 1120px) {
   .summary { grid-template-columns: minmax(0, 1fr); }
-  .rankRow { grid-template-columns: minmax(0, 1fr); }
 }

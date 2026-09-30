@@ -406,6 +406,8 @@ export interface RepoCatalog {
   repo: string;
   /** 技能在来源平台上的页面地址（技能市场的回链要求）；GitHub 来源为 null。 */
   homepage?: string | null;
+  /** 来源平台报的总条数（技能市场才有；ClawHub 不提供时为 null）。 */
+  total?: number | null;
   commit: string;
   skills: RepoSkill[];
   fetchedAt: number;

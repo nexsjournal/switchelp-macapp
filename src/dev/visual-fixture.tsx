@@ -18,6 +18,7 @@ import { App } from '@/app/App';
 import { ProviderForm } from '@/features/providers/ProviderForm';
 import { ModelFormDialog } from '@/features/models/ModelFormDialog';
 import { ModelEditorPage } from '@/features/models/ModelEditorPage';
+import { DEFAULT_ACCENT, normalizeHex } from '@/accent';
 import { applyTheme, readThemePreference } from '@/theme';
 import { showToast } from '@/components/Toast';
 import { defaultPolicy } from '@/features/models/policy';
@@ -26,6 +27,12 @@ import '@/styles/global.css';
 
 // 与正式入口一样走主题模块；`?theme=light` 便于逐主题走查。
 const themeOverride = new URLSearchParams(window.location.search).get('theme');
+// `?accent=2563eb`（或 `default`）把主题色**写进存储**再渲染：设置页挂载时会按存储重新推导，
+// 只写在 query 上的话走到设置页就被冲掉了，量到的还是默认青绿。
+const accentOverride = new URLSearchParams(window.location.search).get('accent');
+if (accentOverride) {
+  try { localStorage.setItem('gptswitch.accent', normalizeHex(accentOverride) ?? DEFAULT_ACCENT); } catch { /* 没有存储时按默认处理 */ }
+}
 applyTheme(themeOverride === 'light' || themeOverride === 'dark' ? themeOverride : readThemePreference());
 
 const provider = (id: string, name: string, endpoint: string, active: string | null): Provider => ({
@@ -600,7 +607,8 @@ const client: DesktopClient = {
   }),
   contentGithubTokenStatus: async () => false,
   setContentGithubToken: async token => Boolean(token),
-  usageReport: async (days: number) => usageFixture(days === 7 || days === 90 ? days : 30),
+  // 范围原样透传：夹具以前把范围钳成 7/30/90，于是「近一年」只能画出一个月的格子（走查会误判）。
+  usageReport: async (days: number) => usageFixture(days),
 };
 
 const view = new URLSearchParams(window.location.search).get('view') ?? '';

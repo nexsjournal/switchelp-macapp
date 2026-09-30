@@ -112,9 +112,20 @@ export function sharePercent(part: number, whole: number): number {
  * 范围内没有任何用量（或 daily 为空）时返回 null——不指定某一天当峰值，也不编一个日期出来。
  */
 export function peakDay(days: UsageDay[]): UsageDay | null {
-  let best: UsageDay | null = null;
-  for (const day of days) {
-    if (day.totals.totalTokens > 0 && (best === null || day.totals.totalTokens > best.totals.totalTokens)) best = day;
+  const index = peakIndex(days);
+  return index < 0 ? null : days[index]!;
+}
+
+/**
+ * 峰值点在 `daily` 里的下标。规则与 `peakDay` 是同一条（并列取最早、全零不给点），
+ * 折线图要的是下标（算横坐标），结论带要的是那一天本身，两处不能各写一遍。
+ * 没有正用量时返回 -1。
+ */
+export function peakIndex(days: UsageDay[]): number {
+  let best = -1;
+  for (let index = 0; index < days.length; index++) {
+    const value = days[index]!.totals.totalTokens;
+    if (value > 0 && (best < 0 || value > days[best]!.totals.totalTokens)) best = index;
   }
   return best;
 }
@@ -138,6 +149,28 @@ export function heatLevel(value: number, peak: number): number {
 export function weekdayIndex(date: string): number {
   const day = new Date(`${date}T00:00:00`).getDay();
   return Number.isNaN(day) ? 0 : (day + 6) % 7;
+}
+
+/**
+ * 热力网格的列数（一周一列）。首列可能只有后半周，所以要把第一天占掉的格数一起算进去：
+ * offset + 天数 向上取整到整周。报告里的 daily 是逐日零填充的连续日期，日期数就是天数。
+ * 空报告返回 0——不画网格，也不凭空给一列。
+ */
+export function heatColumns(days: UsageDay[]): number {
+  const first = days[0];
+  if (!first) return 0;
+  return Math.ceil((weekdayIndex(first.date) + days.length) / 7);
+}
+
+/**
+ * 热力格里第 index 天落在第几列第几行（行 1 = 周一 … 7 = 周日，列 1 = 第一周）。
+ *
+ * 每格都显式落在行列上，不靠 `grid-auto-flow` 的自动排布：那套规则在「首个元素显式占位」
+ * 时的推进顺序各家实现细节多，显式定位没有解释空间，也便于测试直接核对坐标。
+ */
+export function heatCell(index: number, offset: number): { column: number; row: number } {
+  const slot = offset + index;
+  return { column: Math.floor(slot / 7) + 1, row: (slot % 7) + 1 };
 }
 
 /**

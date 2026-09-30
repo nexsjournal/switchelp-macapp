@@ -18,6 +18,19 @@
 //! **只装技能自己的文件**：平台的元数据（ClawHub 的 `_meta.json`、`skill-card.md` 之类）
 //! 不进清单，也不写进用户的技能目录。
 //!
+//! # 目录阶段只打列表，不逐个技能拉详情
+//!
+//! 列表 / 搜索响应本来就带着技能名与描述（2026-09-30 实测：ClawHub 列表与搜索的
+//! `displayName` + `summary` 每条都有，SkillHub 的 `name` + `description_zh` 也是），
+//! 界面的卡片要的正好是这两样。所以目录页只用这**一次**列表请求组装（见
+//! [`market_catalog`]）：从前是「1 次列表 + 每个技能 1～2 次详情」，一次浏览 31 次
+//! （ClawHub）到 61 次（SkillHub）请求，实测好几秒——那是用户看到的「进插件中心一直加载」。
+//!
+//! `SKILL.md` 正文与文件清单留到**用户真正打开某个技能或安装它**时才取
+//! （[`expand_skill`]，预览与安装都会走），所以目录里的 `document` 是列表字段拼的：
+//! `id` 是目录名、`description` 是市场给的描述、`body` 是空的。卡片够用，
+//! 详情页与安装路径按需取回真身。
+//!
 //! 来源写法（界面与 `PluginService` 都用这一套；市场来源里没有 `/`，界面正是据此把
 //! 它与 `owner/repo` 分开的）：
 //!
@@ -31,8 +44,8 @@
 //!
 //! **搜索词为什么编在来源写法里**：界面装技能时只把目录里的 `repo` 原样交回来
 //! （`plugins_preview` 的请求里只有 repo 与技能目录名，没有再带搜索词）。词一旦丢了，
-//! 从搜索结果里点「添加技能」就会变成「拿默认目录去找这个技能」，排在 30 名之外的技能
-//! 直接装不上。编进去之后，目录、预览、安装看到的始终是同一份结果。
+//! 从搜索结果里点「添加技能」就会变成「拿默认目录去找这个技能」，排在 `MAX_PAGE`
+//! 名之外的技能直接装不上。编进去之后，目录、预览、安装看到的始终是同一份结果。
 
 use std::{collections::HashMap, sync::Mutex, time::Duration};
 
@@ -41,8 +54,8 @@ use serde_json::Value;
 use crate::domain::error::{CoreError, ErrorCode};
 
 use super::{
-    skill::MAX_FILE_BYTES,
-    source::{RepoBlob, RepoFetcher},
+    skill::{SkillDocument, MAX_FILE_BYTES},
+    source::{assemble, RepoBlob, RepoCatalog, RepoFetcher, RepoFile, RepoSkill},
 };
 
 /// URL 里的百分号编码集合。
@@ -81,15 +94,30 @@ pub const SKILLHUB_SOURCE: &str = "skillhub";
 
 /// 一次列表/搜索最多取多少条，两个市场共用。
 ///
-/// 目录阶段之后每个技能还要再打一次详情（SkillHub 还要打一次文件清单，装的时候再读一次
-/// 正文），30 条已经是一次浏览 60 次上下的请求。再多就是白烧对方的限额——ClawHub 的读
-/// 限额是每 IP 3000 次/分钟，但没人会在一页结果里往下翻，取多了只是让它更早被限。
-const MAX_PAGE: usize = 30;
+/// **目录阶段只要这一次请求**（见模块说明）：列表响应里已经有名字与描述，不再逐个技能
+/// 拉详情，所以这里放宽到 60 只是「一页看得到多少」，不再是「一次浏览多少个来回」。
+/// 60 与 `source::MAX_SKILLS_PER_REPO` 一致，界面拿到的一页正好一次装得完。
+///
+/// 上限仍然要有：ClawHub 的读限额是每 IP 3000 次/分钟，两个市场都不喜欢有人一页页翻到底，
+/// 而界面是一页结果、靠关键词收窄——没有「翻页」这个动作。
+const MAX_PAGE: usize = 60;
+
+/// 目录页的清单（保留路径）。
+///
+/// 目录阶段要的四样东西——技能名、描述、总数、版本标记——都在市场的**列表响应**里，
+/// 而 [`RepoFetcher`] 是仓库与市场共用的只读字节接口（`resolve_commit` / `list_blobs` /
+/// `read_file`），不该为某个来源长出专用方法。这里把整个目录页当成一个「文件」交给上层：
+/// `read_file(目录页写法, _, CATALOG_BLOB)` 返回一份组装好的 [`RepoCatalog`] JSON
+/// （`homepage` 与 `fetched_at` 由调用方补，见 [`market_catalog`]）。
+///
+/// 它不会与任何技能文件重名：技能目录名不允许以 `.` 开头（见 [`validate_segment`]），
+/// `{slug}/…` 的形状永远碰不到这个路径；它是目录页专有的，单个技能的写法上读它会报错。
+pub const CATALOG_BLOB: &str = ".catalog.json";
 
 /// 列表/详情 JSON 的读取上限。
 ///
-/// 明显大于单个技能文件的上限（[`MAX_FILE_BYTES`]）：SkillHub 一页 30 条的中文描述
-/// 实测能到上百 KB，而 ClawHub 的详情响应把整篇 `SKILL.md` 包在里面。
+/// 明显大于单个技能文件的上限（[`MAX_FILE_BYTES`]）：SkillHub 一页 60 条的中文描述
+/// 实测上百 KB，而 ClawHub 的详情响应把整篇 `SKILL.md` 包在里面。
 /// 正文本身的长度由 `assemble` 按 [`MAX_FILE_BYTES`] 判（超了就跳过这个技能），
 /// 不在这里判——在这里判会让整个目录页因为一个超大技能而打不开。
 const MAX_JSON_BYTES: usize = 4 * 1024 * 1024;
@@ -106,13 +134,13 @@ const LIST_CONCURRENCY: usize = 6;
 
 /// 列表页的短期备忘（秒）。
 ///
-/// `resolve_commit` 与 `list_blobs` 是同一次浏览的两步：前者要目录里最新的更新时间当
-/// 版本标记，后者要全部条目。中间不该把同一页列表再打一遍——一页最多 30 条，
-/// SkillHub 的响应能到上百 KB。TTL 很短，只是把这两步撮合到一起。
+/// 目录页的清单、版本标记与「按需补的一条技能」都从同一页列表里出：前两者各要一次列表，
+/// 后者（`expand_skill` 的单技能写法）也要它。中间不该把同一页列表再打一遍——一页最多
+/// 60 条，SkillHub 的响应能到几百 KB。TTL 很短，只是把这几步撮合到一起。
 const LISTING_MEMO_SECONDS: i64 = 20;
 
 /// 文件正文缓存（秒）。预览与安装是同一次浏览里的两个动作，两次都要读同一批文件；
-/// 装完再点一次「添加技能」也在缓存期内——一次市场浏览最多 30 个技能，
+/// 装完再点一次「添加技能」也在缓存期内——一次市场浏览最多 [`MAX_PAGE`] 个技能，
 /// 重读一轮就是几十次请求。
 const FILE_CACHE_SECONDS: i64 = 300;
 
@@ -305,19 +333,74 @@ pub fn homepage_of(spec: &str) -> Option<String> {
 
 /* ------------------------------------------------------------------ 列表里的条目 */
 
-/// 市场列表里的一个技能：够用来拼文件清单、版本标记与回链。
+/// 市场列表里的一个技能：够用来拼目录卡片、文件清单、版本标记与回链。
 ///
-/// 名字与描述不从这里取——它们由 `SKILL.md` 的 front-matter 决定（`skill::parse`），
-/// 与仓库来源走同一条路，界面显示的两者因此不会有差别。
+/// 名字与描述直接来自列表 / 搜索响应（2026-09-30 实测两条接口都带）：ClawHub 是
+/// `displayName` + `summary`，SkillHub 是 `name` + `description_zh`。从前这两样要读完
+/// `SKILL.md` 才有——目录阶段于是每个技能打一次详情，那是「进插件中心一直加载」的来源。
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MarketEntry {
     slug: String,
     /// ClawHub 的归属者（`ownerHandle`）；SkillHub 按 slug 定位，这里是 `None`。
     owner: Option<String>,
+    /// 平台给的**显示名**（ClawHub `displayName`、SkillHub `name`）。缺了就是 `None`。
+    ///
+    /// 它是目录卡片上想显示的那句话，但**不是**技能身份：目录名与已装记录用 slug，
+    /// 而 `SKILL.md` 的 front-matter `name` 可能两者都不同（实测 SkillHub 的
+    /// `skill-creator-agent` 里写的是 `skill-creator`）。所以显示名进 `document.title`，
+    /// 不进 `document.id`。
+    name: Option<String>,
+    /// 平台给的描述（ClawHub `summary`、SkillHub `description_zh`，都没有再退回
+    /// `description`）。目录卡片的第二行就是它。
+    description: Option<String>,
     /// 平台侧的版本号。
     version: Option<String>,
     /// 平台侧的更新时间（Unix 毫秒）。
     updated_at: Option<i64>,
+}
+
+impl MarketEntry {
+    /// 目录阶段的技能文档：列表字段拼的，正文是空的（要正文得 [`expand_skill`]）。
+    ///
+    /// `id` 取目录名而不是平台的显示名：安装目录、已装记录、`dirName` 都以 slug 为准，
+    /// 显示名放 `title`，界面要更漂亮的名字时用它。`front_matter_parsed` 如实报 `false`——
+    /// 这份文档确实不是从 front-matter 解析出来的（正文还没取）。
+    fn document(&self) -> SkillDocument {
+        SkillDocument {
+            id: self.slug.clone(),
+            title: self.name.clone(),
+            description: self.description.clone(),
+            // 列表响应里没有「需要哪些命令」这一项，不猜。
+            requires_bins: Vec::new(),
+            body: String::new(),
+            front_matter_parsed: false,
+        }
+    }
+
+    /// 目录阶段的技能：只有 `SKILL.md` 这一条清单项，正文与同目录文件都还没取。
+    fn skill(&self) -> RepoSkill {
+        RepoSkill {
+            dir_name: self.slug.clone(),
+            source_path: self.slug.clone(),
+            document: self.document(),
+            files: vec![RepoFile {
+                path: "SKILL.md".to_owned(),
+                bytes: 0,
+                text: String::new(),
+            }],
+        }
+    }
+}
+
+/// 一次列表 / 搜索的结果：这一页的条目 + 来源自己给出的总数。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct MarketPage {
+    entries: Vec<MarketEntry>,
+    /// 响应里的总数（SkillHub 的 `data.total`）。响应里没有这个字段就是 `None`。
+    ///
+    /// **是「当前关键词下市场里一共有多少条」，不是「这一页有多少条」**：实测
+    /// SkillHub 空词 176379、`pdf` 4012、`cloudbase` 57、编一个不存在的词 0。
+    total: Option<usize>,
 }
 
 /* ------------------------------------------------------------------ 抓取器 */
@@ -333,7 +416,7 @@ pub struct RegistryFetcher {
     clawhub_base: String,
     skillhub_base: String,
     /// 列表页备忘，键是来源写法（含搜索词）。
-    listings: Mutex<HashMap<String, (i64, Vec<MarketEntry>)>>,
+    listings: Mutex<HashMap<String, (i64, MarketPage)>>,
     /// 文件正文缓存，键是「来源写法 + 版本标记 + 路径」。
     files: Mutex<HashMap<String, (i64, Vec<u8>)>>,
     /// slug → 归属者（ClawHub 专用）。目录页里读某个技能的文件时，归属者只能从这里找；
@@ -458,33 +541,32 @@ impl RegistryFetcher {
     /* ---------------------------------------------------------------- 列表 */
 
     /// 列出一页市场技能（最多 [`MAX_PAGE`] 条）：有搜索词走搜索接口，否则走列表接口。
-    fn listing(&self, spec: &Spec, raw: &str) -> Result<Vec<MarketEntry>, CoreError> {
-        if let Some(entries) = self.memo_listing(raw) {
-            return Ok(entries);
+    fn listing(&self, spec: &Spec, raw: &str) -> Result<MarketPage, CoreError> {
+        if let Some(page) = self.memo_listing(raw) {
+            return Ok(page);
         }
-        let entries = match spec.source {
+        let page = match spec.source {
             RegistrySource::Clawhub => self.clawhub_listing(spec)?,
             RegistrySource::Skillhub => self.skillhub_listing(spec)?,
         };
-        self.remember_listing(raw, entries.clone());
-        Ok(entries)
+        self.remember_listing(raw, page.clone());
+        Ok(page)
     }
 
-    fn memo_listing(&self, raw: &str) -> Option<Vec<MarketEntry>> {
+    fn memo_listing(&self, raw: &str) -> Option<MarketPage> {
         let listings = self.listings.lock().ok()?;
-        let (fetched_at, entries) = listings.get(raw.trim())?;
-        (crate::time_now().saturating_sub(*fetched_at) < LISTING_MEMO_SECONDS)
-            .then(|| entries.clone())
+        let (fetched_at, page) = listings.get(raw.trim())?;
+        (crate::time_now().saturating_sub(*fetched_at) < LISTING_MEMO_SECONDS).then(|| page.clone())
     }
 
-    fn remember_listing(&self, raw: &str, entries: Vec<MarketEntry>) {
+    fn remember_listing(&self, raw: &str, page: MarketPage) {
         let Ok(mut listings) = self.listings.lock() else {
             return;
         };
-        listings.insert(raw.trim().to_owned(), (crate::time_now(), entries));
+        listings.insert(raw.trim().to_owned(), (crate::time_now(), page));
     }
 
-    fn clawhub_listing(&self, spec: &Spec) -> Result<Vec<MarketEntry>, CoreError> {
+    fn clawhub_listing(&self, spec: &Spec) -> Result<MarketPage, CoreError> {
         let url = match spec.query.as_deref() {
             Some(query) => format!(
                 "{}/api/v1/search?q={}&limit={MAX_PAGE}",
@@ -529,14 +611,21 @@ impl RegistryFetcher {
             entries.push(MarketEntry {
                 slug,
                 owner,
+                name: clawhub_name_field(item),
+                description: clawhub_description_field(item),
                 version: clawhub_version_field(item),
                 updated_at: item.get("updatedAt").and_then(Value::as_i64),
             });
         }
-        Ok(entries)
+        Ok(MarketPage {
+            entries,
+            // ClawHub 的两个响应里都没有总数：列表响应只有 `nextCursor`（它只能说明
+            // 「还有下一页」，不是条数），搜索响应只有 `results`。读不到就留 None，不猜。
+            total: None,
+        })
     }
 
-    fn skillhub_listing(&self, spec: &Spec) -> Result<Vec<MarketEntry>, CoreError> {
+    fn skillhub_listing(&self, spec: &Spec) -> Result<MarketPage, CoreError> {
         let mut url = format!("{}/api/skills?pageSize={MAX_PAGE}", self.skillhub_base);
         if let Some(query) = spec.query.as_deref() {
             url.push_str(&format!("&keyword={}", encode(query)));
@@ -550,9 +639,11 @@ impl RegistryFetcher {
                 .unwrap_or("平台没有给出原因");
             return Err(bad_response(&url, &format!("平台返回 code={message}")));
         }
-        let items = payload
+        let data = payload
             .get("data")
-            .and_then(|data| data.get("skills"))
+            .ok_or_else(|| bad_response(&url, "响应里没有 data"))?;
+        let items = data
+            .get("skills")
             .and_then(Value::as_array)
             .ok_or_else(|| bad_response(&url, "响应里没有 data.skills"))?;
         let mut entries: Vec<MarketEntry> = Vec::new();
@@ -569,6 +660,8 @@ impl RegistryFetcher {
             entries.push(MarketEntry {
                 slug,
                 owner: None,
+                name: non_empty_text(item.get("name")),
+                description: skillhub_description_field(item),
                 version: item
                     .get("version")
                     .and_then(Value::as_str)
@@ -577,7 +670,15 @@ impl RegistryFetcher {
                 updated_at: item.get("updated_at").and_then(Value::as_i64),
             });
         }
-        Ok(entries)
+        Ok(MarketPage {
+            entries,
+            // `data.total` 是**当前关键词下**的总条数（实测：空词 176379、`pdf` 4012、
+            // `cloudbase` 57、不存在的词 0）。界面上就是「共 N 条，已列出 M」的 N。
+            total: data
+                .get("total")
+                .and_then(Value::as_u64)
+                .map(|n| n as usize),
+        })
     }
 
     /* ---------------------------------------------------------------- 详情 */
@@ -776,7 +877,7 @@ impl RepoFetcher for RegistryFetcher {
                 commit
             }
             (Some(skill), RegistrySource::Skillhub) => self.skillhub_version(skill)?,
-            (None, source) => listing_marker(source, &self.listing(&spec, repo)?),
+            (None, source) => listing_marker(source, &self.listing(&spec, repo)?.entries),
         };
         Ok(commit)
     }
@@ -788,6 +889,10 @@ impl RepoFetcher for RegistryFetcher {
     ///   的大小取自正文本身，所以这里给 0 不影响任何显示。
     /// - SkillHub 按技能的 files 接口取它自己的文件：目录阶段就带上了真实大小，
     ///   `assemble` 据此把超过上限的附件挡在清单之外。
+    ///
+    /// **目录页的目录不再走这里**（见模块说明）：一份目录要的是名字与描述，列表响应里
+    /// 就有，所以 [`market_catalog`] 只打一次列表接口。这个方法保留给「确实要一整页的
+    /// 文件清单」的调用方（单个技能那一趟照旧），行为与从前一致。
     fn list_blobs(&self, repo: &str, _commit: &str) -> Result<Vec<RepoBlob>, CoreError> {
         let spec = Spec::parse(repo)?;
         match (&spec.skill, spec.source) {
@@ -798,12 +903,14 @@ impl RepoFetcher for RegistryFetcher {
             )),
             (None, RegistrySource::Clawhub) => Ok(self
                 .listing(&spec, repo)?
+                .entries
                 .iter()
                 .map(|entry| skill_md_blob(&entry.slug))
                 .collect()),
             (None, RegistrySource::Skillhub) => {
-                let entries = self.listing(&spec, repo)?;
-                // 按技能逐个取文件清单（最多 30 个），并发跑：串行就是用户看到的「一直在读取」。
+                let entries = self.listing(&spec, repo)?.entries;
+                // 按技能逐个取文件清单（最多 `MAX_PAGE` 个），并发跑：串行就是用户看到的
+                // 「一直在读取」。目录页本身不走这条（见 [`market_catalog`]）。
                 let fetched = concurrent_map(entries.len(), |index| {
                     let slug = entries[index].slug.clone();
                     self.skillhub_files(&slug).map(|files| (slug, files))
@@ -829,7 +936,20 @@ impl RepoFetcher for RegistryFetcher {
     }
 
     /// 读一个文件。`path` 的第一段是 slug，其余是技能目录里的相对路径。
+    ///
+    /// [`CATALOG_BLOB`] 是唯一的例外：那是**目录页的清单**（整个目录的 JSON），
+    /// 不是技能文件，理由写在常量的说明里。
     fn read_file(&self, repo: &str, commit: &str, path: &str) -> Result<Vec<u8>, CoreError> {
+        if path == CATALOG_BLOB {
+            let spec = Spec::parse(repo)?;
+            // 单个技能的写法上没有「整页清单」这回事：那一趟要的是这个技能的正文。
+            if spec.skill.is_some() {
+                return Err(bad_path(path));
+            }
+            // 不进文件缓存：清单跟着列表备忘走（`LISTING_MEMO_SECONDS`），
+            // 缓存键里的版本标记对它也没有意义。
+            return self.catalog_page(&spec, repo);
+        }
         let key = cache_key(repo, commit, path);
         if let Some(bytes) = self.cached_file(&key) {
             return Ok(bytes);
@@ -858,6 +978,101 @@ impl RepoFetcher for RegistryFetcher {
         self.remember_file(&key, &bytes);
         Ok(bytes)
     }
+}
+
+impl RegistryFetcher {
+    /* ---------------------------------------------------------------- 目录页 */
+
+    /// 目录页的清单：用列表 / 搜索响应自带的字段拼出一份 [`RepoCatalog`]。
+    ///
+    /// **只打一次列表接口**（`listing` 有短期备忘，同一页的第二三次都是复用）。
+    /// 每个技能的正文与文件清单这里**不取**——那是 [`expand_skill`] 的活，
+    /// 只在用户打开某个技能或安装它时才发生。所以目录里的 `document` 是列表字段拼的
+    /// （见 [`MarketEntry::document`]）：`body` 空、`front_matter_parsed` 为 false。
+    ///
+    /// `RepoSkill.files` 只有 `SKILL.md` 这一条（正文还没取）：卡片不用文件清单，
+    /// 详情与安装会先 [`expand_skill`] 把它换成真的。
+    fn catalog_page(&self, spec: &Spec, raw: &str) -> Result<Vec<u8>, CoreError> {
+        let page = self.listing(spec, raw)?;
+        let catalog = RepoCatalog {
+            repo: raw.trim().to_owned(),
+            commit: listing_marker(spec.source, &page.entries),
+            // 平台页面由调用方补（`homepage_of` 是纯函数，不需要网络）。
+            homepage: None,
+            skills: page.entries.iter().map(MarketEntry::skill).collect(),
+            // 拿不到总数的市场（ClawHub）留 None，界面只说「已列出 M」。
+            total: page.total,
+            // 时间戳由调用方盖（`market_catalog`）：这里是「市场给了什么」，不含本机时刻。
+            fetched_at: 0,
+            truncated: false,
+        };
+        serde_json::to_vec(&catalog)
+            .map_err(|error| bad_response(raw, &format!("目录清单没法序列化：{error}")))
+    }
+}
+
+/* ------------------------------------------------------------------ 目录与按需取正文 */
+
+/// 市场目录页的目录：**只用一次列表 / 搜索请求**（见模块说明）。
+///
+/// `repo_spec` 是已经编好搜索词的来源写法（`registry::compose_spec`）。返回的目录里
+/// `homepage` 与 `fetched_at` 还没填——前者是纯函数（[`homepage_of`]），后者由调用方
+/// 决定（界面上的「取目录时刻」），两者都不该在这里编。
+///
+/// 目录里的 `document` 只有列表字段（名字、描述、ID 是目录名），`files[].text` 是空的：
+/// 正文与文件清单在用户真正打开某个技能或安装它时由 [`expand_skill`] 补。
+pub fn market_catalog(
+    fetcher: &dyn RepoFetcher,
+    repo_spec: &str,
+    now: i64,
+) -> Result<RepoCatalog, CoreError> {
+    let bytes = fetcher.read_file(repo_spec, "", CATALOG_BLOB)?;
+    let mut catalog: RepoCatalog = serde_json::from_slice(&bytes)
+        .map_err(|error| bad_response(repo_spec, &format!("市场目录清单不是合法 JSON：{error}")))?;
+    catalog.fetched_at = now;
+    Ok(catalog)
+}
+
+/// 把一个市场技能补全：`SKILL.md` 正文 + 文件清单（同目录文件的正文留给
+/// `source::hydrate`，装的时候才读）。
+///
+/// 目录阶段只有列表字段（[`market_catalog`]），用户打开这个技能或安装它时才走这里：
+///
+/// - ClawHub：详情接口（`{slug}/SKILL.md` 就是详情里的 `skill.description`），
+///   归属者从列表响应里记下的那一份取（`?owner=`，否则同名 slug 会 409）。
+/// - SkillHub：**单技能**写法取文件清单（`skillhub:{slug}`；整页写法会把这一页的
+///   60 个技能全取一遍），再按 `{slug}/SKILL.md` 读正文。
+///
+/// 返回的文档是**真身**：`skill::parse` 从 `SKILL.md` 的 front-matter 解出
+/// `id`/`description`/`requires_bins`，与仓库来源同一条路——详情页与安装看到的
+/// 因此与从前完全一样。取不到正文时报错而不是退回空正文：装一份没有内容的技能
+/// 比装失败更糟。
+pub fn expand_skill(
+    fetcher: &dyn RepoFetcher,
+    repo_spec: &str,
+    commit: &str,
+    dir_name: &str,
+    now: i64,
+) -> Result<RepoSkill, CoreError> {
+    let spec = Spec::parse(repo_spec)?;
+    validate_segment(dir_name)?;
+    let blobs = match spec.source {
+        RegistrySource::Clawhub => vec![skill_md_blob(dir_name)],
+        RegistrySource::Skillhub => {
+            let single = format!("{}:{dir_name}", RegistrySource::Skillhub.id());
+            fetcher.list_blobs(&single, commit)?
+        }
+    };
+    let catalog = assemble(fetcher, repo_spec, commit, &blobs, now)?;
+    catalog.skills.into_iter().next().ok_or_else(|| {
+        bad_response(
+            repo_spec,
+            &format!(
+                "{dir_name} 的 SKILL.md 取不到（可能已下架，或正文超过 {} KB）",
+                MAX_FILE_BYTES / 1024
+            ),
+        )
+    })
 }
 
 /* ------------------------------------------------------------------ 工具函数 */
@@ -929,6 +1144,36 @@ fn clawhub_version_field(item: &Value) -> Option<String> {
         })
         .map(str::to_owned)
         .filter(|value| !value.trim().is_empty())
+}
+
+/// 列表条目里的显示名。ClawHub 两个接口都给 `displayName`（2026-09-30 实测 60/60 条都有）。
+fn clawhub_name_field(item: &Value) -> Option<String> {
+    non_empty_text(item.get("displayName")).or_else(|| non_empty_text(item.get("slug")))
+}
+
+/// 列表条目里的描述。
+///
+/// `summary` 是列表与搜索都带的字段（实测 60/60 条都有），`description` 在列表响应里
+/// 实测**全是 null**（搜索响应里干脆没有这个键）——所以顺序是 summary 优先，
+/// description 只在它非空时兜底。两个都没有就是 `None`，界面显示「没有写描述」。
+fn clawhub_description_field(item: &Value) -> Option<String> {
+    non_empty_text(item.get("summary")).or_else(|| non_empty_text(item.get("description")))
+}
+
+/// SkillHub 列表条目里的描述。
+///
+/// `description_zh` 是平台自己的中文文案（实测每条都有，比作者写的英文描述更适合
+/// 中文界面的卡片），`description` 是英文原文，兜底用。
+fn skillhub_description_field(item: &Value) -> Option<String> {
+    non_empty_text(item.get("description_zh")).or_else(|| non_empty_text(item.get("description")))
+}
+
+/// 一个 JSON 字段的文本值，空串与全空白都当没有。
+fn non_empty_text(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .filter(|text| !text.trim().is_empty())
 }
 
 /// 目录页的版本标记：这一页里最新一次更新的日期。
