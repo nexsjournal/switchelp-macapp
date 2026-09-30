@@ -47,6 +47,9 @@ const DYNAMIC_KEYS = new Set([
   ...['route', 'catalog', 'policy', 'restore', 'requiresReload', 'other'].map(name => `group.${name}`),
   ...['draft', 'validating', 'blocked', 'prepared', 'committing', 'awaitingReload', 'verified', 'pending',
     'rollingBack', 'restored', 'conflict', 'failed', 'connect', 'credential', 'model', 'generate'].map(name => `stage.${name}`),
+  // 免费额度卡片的「领取方式」按 claimFlow 取值动态查表（freeTierPolicy 的联合类型）。
+  ...['instant', 'afterLogin', 'needsVerification', 'needsEligibility', 'noAccount']
+    .map(name => `content.freeTier.flow.${name}`),
   ...['passed', 'failed', 'skipped', 'running'].map(name => `probeState.${name}`),
   ...['defaultModel', 'providerRoute', 'catalog', 'gatewayProvider', 'contextOverride', 'reasoningDefault',
     'restore', 'test', 'other'].map(name => `reason.${name}`),

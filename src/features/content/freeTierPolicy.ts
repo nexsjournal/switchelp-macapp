@@ -1,6 +1,19 @@
 /** 免费额度条目与清单的形状（docs/design/09 §3.1）。数据在 freeTierData.ts。 */
 export type FreeTierCategory = 'model_free_tier' | 'trial_credit' | 'student_dev' | 'local';
 
+/** 领取路径的四种形态（外加「本机离线」那种根本不需要账号的）。 */
+export type FreeTierClaimFlow =
+  /** 页面上就有领取入口，点一下就到手。 */
+  | 'instant'
+  /** 登录后自动到账，页面上不一定有领取按钮。 */
+  | 'afterLogin'
+  /** 要先实名或绑卡，之后才发放。 */
+  | 'needsVerification'
+  /** 要先通过学生/资格审核。 */
+  | 'needsEligibility'
+  /** 下载即用，不需要账号（本机离线那类）。 */
+  | 'noAccount';
+
 export interface FreeTierEntry {
   id: string;
   provider: string;
@@ -14,6 +27,12 @@ export interface FreeTierEntry {
   docsUrl: string;
   /** 领取/注册/控制台页；「没有免费档」这类反例条目没有。 */
   claimUrl?: string;
+  /**
+   * 点「去领取」之后会发生什么——**用户必须提前知道**：
+   * 不少厂商是「开通即到账」，页面上根本没有领取按钮，按「去领取」的预期点进去
+   * 会以为被骗了。所以每张卡都要把落点说清，而不是等用户自己发现。
+   */
+  claimFlow?: FreeTierClaimFlow;
   /** 与网关预设目录联动：有值时卡片出现「在网关中接入」。 */
   presetId?: string;
   /** 退役条目置灰保留：它是「别再信旧攻略」的教育样本，不静默删除。 */

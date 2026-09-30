@@ -464,13 +464,33 @@ const client: DesktopClient = {
   ]),
   // 插件中心：目录与已装列表都是合成数据，安装动作只改内存里的已装列表。
   listPluginSources: async () => ([
+    // 两个技能市场：来源标识里没有 `/`（GitHub 来源永远是 owner/repo 形状），界面据此走服务端搜索。
+    { repo: 'clawhub', label: 'ClawHub 技能市场', description: '社区技能注册表（ClawHub），按关键词搜索后直接安装。', builtin: true },
+    { repo: 'skillhub', label: 'SkillHub 技能市场', description: '腾讯的技能市场，按关键词搜索后直接安装。', builtin: true },
     { repo: 'anthropics/skills', label: 'Anthropic 官方技能集合', description: '官方公开的 Agent Skills，包含文档、设计与协作相关的技能。', builtin: true },
     { repo: 'obra/superpowers', label: 'Superpowers', description: '社区维护的技能框架，覆盖头脑风暴、排查与并行协作等做法。', builtin: true },
     { repo: 'wshobson/agents', label: 'Agents 插件合集', description: '面向编码 agent 的插件与技能合集，数量多但取向偏工程。', builtin: true },
   ]),
   addPluginSource: async () => ([]),
   removePluginSource: async () => ([]),
-  browsePluginRepo: async () => {
+  browsePluginRepo: async (repo: string, query?: string) => {
+    // 市场来源：夹具按关键词合成一页结果，用来走查搜索、回链按钮与「0 个技能」的空目录。
+    if (repo === 'clawhub' || repo === 'skillhub') {
+      const keyword = (query ?? '').trim();
+      // 无关键词＝平台的默认列表（真实后端就是这样）；关键词 none 用来走查「没搜到」的空状态。
+      if (!keyword) return { ...pluginCatalog, repo, homepage: null };
+      if (keyword === 'none') return { ...pluginCatalog, repo, homepage: null, skills: [] };
+      return {
+        ...pluginCatalog,
+        repo,
+        homepage: repo === 'clawhub' ? 'https://clawhub.ai/search?q=' + keyword : 'https://skillhub.cn/search?q=' + keyword,
+        skills: pluginCatalog.skills.map((skill, index) => ({
+          ...skill,
+          dirName: `${keyword}-${index + 1}`,
+          document: { ...skill.document, id: `${keyword}-${index + 1}`, description: `夹具：${repo} 里搜到「${keyword}」的第 ${index + 1} 条` },
+        })),
+      };
+    }
     if (fixtureCase === 'rateLimited') {
       throw {
         code: 'INTERNAL', messageKey: 'error.pluginRateLimited', retryable: true, recoveryActions: [],

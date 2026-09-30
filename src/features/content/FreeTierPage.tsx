@@ -55,12 +55,17 @@ export function FreeTierPage({ client, onAccessInGateway }: {
                   </header>
                   <p className={styles.title}>{entry.title}</p>
                   <p className={styles.quota}>{entry.quota}</p>
+                  {/* 落点预期：点「去领取」之后是登录就有、还是要实名/绑卡——先说清，别让用户白跑。 */}
+                  {!entry.retired && entry.claimFlow && (
+                    <p className={styles.flow}>{t(`content.freeTier.flow.${entry.claimFlow}`)}</p>
+                  )}
                   {entry.retired && <p className={styles.note}>{t('content.freeTier.retired', {
                     date: entry.retired.at, note: entry.retired.note })}</p>}
                   <div className={styles.actions}>
                     {!entry.retired && entry.claimUrl
                       && <button type="button" className="primary" onClick={() => void client.openExternalUrl(entry.claimUrl!)}>
-                        {t('content.freeTier.claim')}</button>}
+                        {/* 本机离线那档没有「领取」可言，按钮说的是下载。 */}
+                        {entry.category === 'local' ? t('content.freeTier.download') : t('content.freeTier.claim')}</button>}
                     <button type="button" onClick={() => void client.openExternalUrl(entry.docsUrl)}>
                       {t('content.freeTier.docs')}</button>
                     {!entry.retired && entry.presetId && onAccessInGateway

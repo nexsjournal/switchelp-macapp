@@ -404,6 +404,8 @@ export interface RepoSkill {
 
 export interface RepoCatalog {
   repo: string;
+  /** 技能在来源平台上的页面地址（技能市场的回链要求）；GitHub 来源为 null。 */
+  homepage?: string | null;
   commit: string;
   skills: RepoSkill[];
   fetchedAt: number;

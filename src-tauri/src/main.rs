@@ -14,7 +14,7 @@ use switch_core::{
     gateway::{
         self, helper_path, install_auth_helper, Gateway, GatewayConfig, GatewayRouter, GatewayToken,
     },
-    plugins::{GithubFetcher, PluginService},
+    plugins::{GithubFetcher, PluginService, RegistryFetcher, RepoFetcher, TarballFetcher},
     storage::{
         HubStore, OperationStore, Repository, SqliteHubStore, SqliteOperationStore,
         SqliteRepository,
@@ -322,16 +322,30 @@ fn main() {
                     error.message_key, error.safe_details
                 );
             }
-            // 插件目录来自公开仓库：只读 GET，令牌可缺省。
+            // 插件目录来自公开仓库：只读 GET。
             //
-            // 抓取器在这里装配、而令牌是用户之后才在设置里填的，所以传的是**来源**而不是
-            // 令牌本身：每次请求现读一次，填完令牌不必重启。用户越是没填，越容易被
-            // 匿名的 60 次/小时挡住，这个顺序不能反过来。
+            // **没配令牌时走 codeload 的整仓下载**（默认路径）：浏览一个来源在 REST 上要三次
+            // 调用（仓库信息取默认分支 → 解析 commit → git tree），而匿名限额只有 60 次/小时
+            // ——用户来回十几趟就把一小时打光，界面停在「访问频率已用尽」。整仓下载是另一条
+            // 计费路径：匿名可下、响应里没有限额头，一次下载还能回答后面全部读取（提交号来自
+            // 归档的顶层目录名，正文已经在包里，预览与安装不再各打一次网络）。代价是整仓进
+            // 内存，上限写在 `plugins::tarball` 的常量里。
+            //
+            // 配了令牌的用户仍旧走 REST：5000 次/小时一个人用不完，行为与历史版本一致，
+            // 令牌来源也仍是「每次请求现读」（没配的人之后填了令牌不会切回 REST——tarball
+            // 本来就比 REST 省，这不是倒退）。
             let github_token = Arc::new(GithubToken::new(vault.clone()));
-            let fetcher = Arc::new(GithubFetcher::with_token_source(
-                github_token.source(),
-                switch_core::content::DEFAULT_USER_AGENT.to_owned(),
-            ));
+            let user_agent = switch_core::content::DEFAULT_USER_AGENT.to_owned();
+            let fetcher: Arc<dyn RepoFetcher> = match github_token.resolve() {
+                Some(_) => Arc::new(GithubFetcher::with_token_source(
+                    github_token.source(),
+                    user_agent.clone(),
+                )),
+                None => Arc::new(TarballFetcher::new(user_agent.clone())),
+            };
+            // 两个技能市场（ClawHub / 腾讯 SkillHub）的抓取器：匿名只读 JSON 接口，
+            // 不需要令牌，与上面的仓库抓取器各管一半来源（见 `plugins::registry`）。
+            let registries: Arc<dyn RepoFetcher> = Arc::new(RegistryFetcher::new(user_agent));
             let plugins = Arc::new(PluginService::new(
                 hub.clone(),
                 repository.clone(),
@@ -345,6 +359,7 @@ fn main() {
                     ))
                 }),
                 fetcher,
+                registries,
             ));
 
             // 首次运行时写入预置订阅源（已有源不动）。

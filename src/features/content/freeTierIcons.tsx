@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import {
-  Baidu, Cloudflare, Cerebras, Cohere, DeepSeek, Fireworks, Github, Google,
+  Ai21, AssemblyAI, Aws, Azure, Baidu, Cloudflare, Cerebras, Cohere, Colab, DeepInfra, DeepSeek,
+  Fal, Fireworks, Github, Google, Jina, ModelScope, PPIO, SenseNova, Spark, Stepfun,
   Groq, HuggingFace, Hunyuan, Mistral, Moonshot, Nvidia, Ollama, OpenRouter, Qwen, SiliconCloud, Zhipu,
 } from '@lobehub/icons';
 
@@ -35,6 +36,21 @@ const FREE_TIER_ICONS: Record<string, AnyIcon> = {
   moonshot: Moonshot,
   github: Github,
   ollama: Ollama,
+  // 2026-09-30 扩充进来的厂商：库里只有这些；其余（Modal、ElevenLabs、Voyage、Deepgram、
+  // IBM、Oracle、Paperspace、Scaleway、OVH、金山云、华为云、蚂蚁百灵）没有品牌图标，按惯例回退首字方块。
+  assemblyai: AssemblyAI.Color,
+  colab: Colab.Color,
+  deepinfra: DeepInfra.Color,
+  jina: Jina,
+  modelscope: ModelScope.Color,
+  aws: Aws.Color,
+  azure: Azure.Color,
+  sensenova: SenseNova.Color,
+  stepfun: Stepfun.Color,
+  spark: Spark.Color,
+  ppio: PPIO.Color,
+  ai21: Ai21,
+  fal: Fal,
 };
 
 /** 有品牌图标返回元素（彩色的用官方色），没有返回 null 让调用方回退。 */

@@ -20,13 +20,20 @@ import styles from './PluginHubPage.module.css';
  * 所以摘要不能合并成一句「加载失败」。核心给的完整原因放详情里，不铺在页面上。
  */
 function catalogSummary(error: CoreError): string {
-  return error.messageKey === 'error.pluginRateLimited'
-    ? t('plugins.catalog.rateLimited')
-    : t('plugins.catalog.failed');
+  if (error.messageKey === 'error.pluginRateLimited') return t('plugins.catalog.rateLimited');
+  // 技能市场自己也会限流，但那跟 GitHub 限额是两件事，别共用一句话。
+  if (error.messageKey === 'error.pluginRegistryRateLimited') return t('plugins.catalog.registryRateLimited');
+  return t('plugins.catalog.failed');
 }
 
-/** 限额是唯一能靠令牌解决的失败。其它失败也给令牌按钮，等于让人去做一件没用的事。 */
+/** 会被限流「等一会儿就好」的失败：这类用会自动消失的提示，不拿 danger 吓人。 */
 function isRateLimited(error: CoreError): boolean {
+  return error.messageKey === 'error.pluginRateLimited'
+    || error.messageKey === 'error.pluginRegistryRateLimited';
+}
+
+/** 只有 GitHub 的限额能靠填令牌解决。技能市场不认 GitHub 令牌，给它按钮等于让人白做一件事。 */
+function tokenHelps(error: CoreError): boolean {
   return error.messageKey === 'error.pluginRateLimited';
 }
 
@@ -116,13 +123,13 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
     }).catch(() => setTargets([]));
   }, [client]);
 
-  const browse = useCallback(async (target: string) => {
+  const browse = useCallback(async (target: string, search?: string) => {
     if (!target) return;
     setLoadingCatalog(true);
     setCatalogError(null);
     setReport(null);
     try {
-      const result = await client.browsePluginRepo(target);
+      const result = await client.browsePluginRepo(target, search);
       setCatalog(result);
       setSelected(result.skills[0]?.dirName ?? '');
       setMarkdownOpen(false);
@@ -142,6 +149,19 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
   }, [client]);
 
   useEffect(() => { if (repo) void browse(repo); }, [repo, browse]);
+
+  /**
+   * 技能市场（ClawHub / SkillHub）的目录有几千条，本地筛没有意义：搜索框要把关键词送到
+   * 对方的搜索接口。GitHub 来源保持原来的本地筛，不额外打网络。
+   * 判据是来源标识里没有 `/`——GitHub 来源永远是 `owner/repo` 形状。
+   */
+  const isRegistry = !repo.includes('/');
+  useEffect(() => {
+    if (!repo || !isRegistry) return;
+    const timer = window.setTimeout(() => { void browse(repo, query.trim()); }, 400);
+    return () => window.clearTimeout(timer);
+  }, [query, repo, isRegistry, browse]);
+
   useEffect(() => {
     void client.contentGithubTokenStatus().then(setTokenConfigured).catch(() => setTokenConfigured(false));
   }, [client]);
@@ -149,12 +169,13 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
   const skills = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     if (!catalog) return [];
-    if (!needle) return catalog.skills;
+    // 市场来源的结果已经是按关键词搜出来的，再筛一遍只会把对方的相关性命中滤掉。
+    if (!needle || isRegistry) return catalog.skills;
     return catalog.skills.filter(skill =>
       `${skill.dirName} ${skill.document.id} ${skill.document.description ?? ''}`
         .toLocaleLowerCase()
         .includes(needle));
-  }, [catalog, query]);
+  }, [catalog, query, isRegistry]);
 
   const current: RepoSkill | undefined = useMemo(
     () => catalog?.skills.find(skill => skill.dirName === selected),
@@ -254,8 +275,10 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
    */
   const openRepo = async () => {
     if (!catalog) return;
+    // 技能市场（ClawHub）要求回链到它自己的技能页；GitHub 来源没有这个字段，回落到仓库地址。
+    const url = catalog.homepage ?? `https://github.com/${catalog.repo}`;
     try {
-      await client.openExternalUrl(`https://github.com/${catalog.repo}`);
+      await client.openExternalUrl(url);
     } catch (cause) {
       const core = toCoreError(cause);
       showToast(core.safeDetails[0] ?? t(core.messageKey), 'danger');
@@ -371,17 +394,20 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
             {catalog && (
               <p className={styles.commit}>{t('plugins.source.commit', { commit: catalog.commit.slice(0, 8), count: catalog.skills.length })}</p>
             )}
+            {/* 提醒与上面的来源行之间要有间距：卡片自身没有行间距，直接相邻会贴在一起。 */}
             {catalogError && (
+              <div className={styles.catalogNotice}>
               <Notice tone="warning" summary={catalogSummary(catalogError)}
                 details={catalogError.safeDetails[0] ?? t(catalogError.messageKey)}
                 actions={<>
                   <button type="button" onClick={() => void browse(repo)}>{t('action.retry')}</button>
-                  {isRateLimited(catalogError) && (
+                  {tokenHelps(catalogError) && (
                     <button type="button" onClick={() => setTokenDialog(true)}>
                       {tokenConfigured ? t('github.token.update') : t('github.token.set')}
                     </button>
                   )}
                 </>} />
+              </div>
             )}
           </section>
 
@@ -467,7 +493,7 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
                         {t('plugins.install')}
                       </button>
                       <button type="button" onClick={() => void openRepo()}>
-                        <ExternalLink size={15} />{t('plugins.openRepo')}
+                        <ExternalLink size={15} />{catalog?.homepage ? t('plugins.openSource') : t('plugins.openRepo')}
                       </button>
                     </div>
                   </>
@@ -477,8 +503,11 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
               </section>
             </div>
           ) : (
-            /* 空状态只在「真的取到了目录、里面没有技能」时说，取不到时说它会让人以为仓库是空的。 */
-            <EmptyState icon={PackageOpen} title={t('plugins.market.empty.title')} description={t('plugins.market.empty.body')} />
+            /* 空状态只在「真的取到了目录、里面没有技能」时说，取不到时说它会让人以为仓库是空的。
+               技能市场要另说一套：它不是「没选来源」，而是「这个关键词没搜到」。 */
+            <EmptyState icon={PackageOpen}
+              title={t(isRegistry ? 'plugins.market.emptyRegistry.title' : 'plugins.market.empty.title')}
+              description={t(isRegistry ? 'plugins.market.emptyRegistry.body' : 'plugins.market.empty.body')} />
           )}
         </>
       ) : (
