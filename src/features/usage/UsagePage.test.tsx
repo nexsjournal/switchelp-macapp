@@ -173,8 +173,8 @@ it('热力图：一天一格、一列一周，分档随用量变化，另附少 
   // 90 天及以内是「一天一格、一行铺满」：30 天就是 30 列（一周一列时只有 5 列，右侧会空一大片）。
   expect(grid.style.getPropertyValue('--heat-cols')).toBe('30');
   // 一天一格：30 天铺成一行，第一格在第 1 列、最后一格在第 30 列（这一档没有星期名列）。
-  expect(cells[0]!.style.gridColumn).toBe('1');
-  expect(cells[cells.length - 1]!.style.gridColumn).toBe('30');
+  expect((cells[0] as HTMLElement).style.gridColumn).toBe('1');
+  expect((cells[cells.length - 1] as HTMLElement).style.gridColumn).toBe('30');
   // 分档相对本范围峰值（1,000,000）：100% / 60% / 30% / 10% / 0% 依次落到 4 / 3 / 2 / 1 / 0 档。
   expect(cells.slice(0, 5).map(cell => cell.getAttribute('data-level'))).toEqual(['4', '3', '2', '1', '0']);
   // 逐日数字走 title：日期 · 完整用量 · 会话数。
