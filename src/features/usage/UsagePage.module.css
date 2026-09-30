@@ -128,6 +128,14 @@
  * 深浅是同一个色相，读起来是「多 / 少」而不是「不同的状态」。
  * 逐档用 opacity 而不是另配颜色：同一份强调色在深色与浅色主题下都不会跑出色系。
  */
+/*
+ * 一天一格、一行铺到底（90 天及以内）：去掉列标签与单元格上限，让列轨道把整行吃满。
+ * 一年档仍走周网格（`--heat-label` 那一列留给星期名），两套都铺满，只是铺法不同。
+ */
+/* 直接重写列模板：不要那一列星期名（0 宽也会占一个列号，格子会整体错位一列）。 */
+.heatGridStrip { grid-template-columns: repeat(var(--heat-cols), minmax(0, 1fr));
+  grid-template-rows: auto; max-width: none; }
+
 .heatCell { aspect-ratio: 1; border-radius: var(--radius-xs); background: var(--bg-hover); }
 .heatCell[data-level='1'] { background: var(--accent); opacity: 0.24; }
 .heatCell[data-level='2'] { background: var(--accent); opacity: 0.44; }
