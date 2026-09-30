@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Switchelp × 决策模型：六个能立刻用上的玩法（可点 Demo）</title>
+<style>
+  :root{
+    --bg:#0d0e10; --panel:#16181b; --panel-2:#1c1f23; --panel-3:#22262b;
+    --line:rgba(255,255,255,.08); --line-2:rgba(255,255,255,.14);
+    --fg:#e9ebee; --fg-2:#b6bcc4; --muted:#8b929b; --dim:#6b727b;
+    --green:#6ee7a8; --amber:#f5b95c; --rose:#f4737a; --violet:#b8a2f0;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:48px 24px 96px}
+  code,kbd,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"PingFang SC","Microsoft YaHei",monospace;font-size:clamp(11px,.88em,13px)}
+  h1{font-size:30px;line-height:1.3;margin:0 0 12px;letter-spacing:-.02em}
+  h2{font-size:20px;margin:0 0 6px;letter-spacing:-.01em}
+  h3{font-size:15px;margin:0 0 8px}
+  p{margin:0 0 12px;color:var(--fg-2)}
+  a{color:var(--fg);text-decoration-color:var(--line-2)}
+  .lead{color:var(--fg-2);max-width:760px}
+  .badges{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 6px}
+  .badge{border:1px solid var(--line);background:var(--panel);color:var(--fg-2);
+    border-radius:999px;padding:4px 12px;font-size:12.5px}
+  .badge.g{color:var(--green);border-color:rgba(110,231,168,.28);background:rgba(110,231,168,.07)}
+  .badge.a{color:var(--amber);border-color:rgba(245,185,92,.28);background:rgba(245,185,92,.07)}
+  section{margin-top:44px}
+  .sect-head{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:20px}
+  .sect-head .idx{color:var(--dim);font-size:12.5px;letter-spacing:.08em}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;margin-bottom:22px}
+  .card-top{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start}
+  .slogan{color:var(--muted);font-size:13.5px;margin:2px 0 0}
+  .pills{display:flex;gap:6px;flex-wrap:wrap}
+  .pill{font-size:12px;color:var(--fg-2);border:1px solid var(--line);border-radius:8px;padding:3px 9px;background:var(--panel-2)}
+  .pill.where{color:var(--green);border-color:rgba(110,231,168,.22);background:rgba(110,231,168,.06)}
+  .demo{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:16px;margin:16px 0 14px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  button{font:inherit;font-size:13.5px;background:var(--panel-3);color:var(--fg);
+    border:1px solid var(--line-2);border-radius:9px;padding:7px 14px;cursor:pointer}
+  button:hover{background:#2a2f35}
+  button.primary{background:#f2f4f6;color:#101214;border-color:#f2f4f6;font-weight:600}
+  button.primary:hover{background:#fff}
+  button.chip{border-radius:999px;padding:5px 12px;font-size:12.5px;color:var(--fg-2)}
+  button.chip[aria-pressed="true"]{background:rgba(110,231,168,.12);border-color:rgba(110,231,168,.35);color:var(--green)}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:4px;background:var(--line-2);border-radius:3px;outline:none;flex:1;min-width:180px}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#f2f4f6;cursor:pointer}
+  textarea{width:100%;background:#101214;color:var(--fg);border:1px solid var(--line);
+    border-radius:10px;padding:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.6px;line-height:1.6;resize:vertical}
+  .kv{display:flex;gap:18px;flex-wrap:wrap;margin:10px 0 0}
+  .kv div{min-width:104px}
+  .kv .k{font-size:12px;color:var(--muted)}
+  .kv .v{font-size:19px;font-variant-numeric:tabular-nums}
+  .bar{height:6px;border-radius:4px;background:var(--panel-3);overflow:hidden;margin-top:8px}
+  .bar > i{display:block;height:100%;background:var(--green);width:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  @media (max-width:760px){.grid2,.grid3{grid-template-columns:1fr}}
+  .mini{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:13px}
+  .mini h4{margin:0 0 6px;font-size:13.5px}
+  .mini p{font-size:12.6px;margin:0;color:var(--muted)}
+  .scoreline{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);margin-top:6px}
+  .scoreline .num{color:var(--fg);font-variant-numeric:tabular-nums;min-width:34px}
+  .verdict{border-left:2px solid var(--green);padding:10px 0 10px 12px;margin-top:12px;color:var(--fg-2);font-size:13.5px}
+  .verdict.warn{border-color:var(--amber)}
+  .verdict.bad{border-color:var(--rose)}
+  .why{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:4px}
+  @media (max-width:760px){.why{grid-template-columns:1fr}}
+  .why div{font-size:12.8px;color:var(--muted)}
+  .why b{display:block;color:var(--fg-2);font-weight:600;font-size:12px;letter-spacing:.04em;margin-bottom:2px}
+  .feed-item{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:12px;margin-bottom:9px;transition:opacity .25s,transform .25s}
+  .feed-item.sunk{opacity:.42}
+  .feed-item h4{margin:0 0 4px;font-size:14px}
+  .feed-item p{font-size:12.6px;margin:0 0 8px}
+  .tag{font-size:11.5px;border-radius:6px;padding:2px 7px;border:1px solid var(--line-2);color:var(--fg-2)}
+  .tag.g{color:var(--green);border-color:rgba(110,231,168,.3)}
+  .tag.a{color:var(--amber);border-color:rgba(245,185,92,.3)}
+  .tag.r{color:var(--rose);border-color:rgba(244,115,122,.3)}
+  mark{background:rgba(244,115,122,.18);color:#ffd7d9;border-radius:4px;padding:0 3px}
+  mark.a{background:rgba(245,185,92,.18);color:#ffe6bd}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:500;font-size:12px}
+  ul{margin:0 0 12px;padding-left:20px;color:var(--fg-2)}
+  li{margin-bottom:6px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap}
+  .chips span{font-size:12.4px;color:var(--fg-2);border:1px solid var(--line);border-radius:999px;padding:5px 11px;background:var(--panel)}
+  .note{font-size:12.2px;color:var(--dim);margin-top:8px}
+  .foot{margin-top:56px;border-top:1px solid var(--line);padding-top:18px;color:var(--dim);font-size:12.4px}
+  .dots{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}
+  .dot{width:11px;height:11px;border-radius:3px;background:var(--panel-3);border:1px solid var(--line-2)}
+  .dot.hit{background:rgba(110,231,168,.85);border-color:transparent}
+  .dot.miss{background:rgba(244,115,122,.8);border-color:transparent}
+  .mono-sm{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:var(--muted)}
+  details{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:12px 14px;margin-bottom:10px}
+  summary{cursor:pointer;color:var(--fg-2);font-size:13.5px}
+  details p,details ul{margin-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Switchelp × 决策模型：六个可以立刻加进去的玩法</h1>
+<p class="lead">
+  Jev（TypeSafe）与前天 OpenAI DevDay 的 <b>Decisions API（Luna）</b>把「只做判断、不写作文」的模型变成了一个独立品类。
+  对 Switchelp 来说，这类模型不需要联网、不需要 TypeSafe 账号：<b>把开源 Laya 下载一次放进应用（约 260&nbsp;MB，Apache-2.0），
+  它就是你的本地裁判、本地守门员、本地雷达</b>。下面每张卡都是一个能加进现有页面的功能，都配了一个能点的 Demo。
+</p>
+<div class="badges">
+  <span class="badge g">本地推理，判断不出网</span>
+  <span class="badge g">零新增费用（自带模型）</span>
+  <span class="badge">不读你的会话内容</span>
+  <span class="badge a">Demo 数据为模拟，已标注</span>
+</div>
+
+<section>
+  <div class="sect-head"><span class="idx">玩法 01</span><h2>模型擂台：让别人说"哪个模型好"，你用自己的题说话</h2></div>
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <p class="slogan">同一个问题，并排发给 2–4 个供应商，本地小模型当裁判，按你自己的偏好打分出榜。</p>
+        <div class="pills" style="margin-top:8px">
+          <span class="pill where">落在：概览页 / 网关页（新增「擂台」页签）</span>
+          <span class="pill">用你已有的 Key</span>
+          <span class="pill">榜单存在本机</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="demo">
+      <div class="row" style="margin-bottom:12px">
+        <span class="mono-sm">题目：把这段 Python 改成类型安全写法，并解释为什么</span>
+      </div>
+      <div class="row" style="margin-bottom:12px">
+        <span class="mono-sm">裁判偏好</span>
+        <button class="chip" data-pref="concise" aria-pressed="true">省字派</button>
+        <button class="chip" data-pref="rigor" aria-pressed="false">严谨派</button>
+        <button class="chip" data-pref="zh" aria-pressed="false">中文可读优先</button>
+      </div>
+      <div class="grid3" id="arena-cards"></div>
+      <div class="verdict" id="arena-verdict">点右侧按钮开始对打，看裁判怎么打分与排名。</div>
+      <div class="row" style="margin-top:12px">
+        <button class="primary" id="arena-run">开始对打</button>
+        <span class="note">每个回答的 token 数与耗时是模拟值；裁判分数由偏好权重实时算出——真实实现里这一步由本地 Laya 出分。</span>
+      </div>
+    </div>
+
+    <div class="why">
+      <div><b>为什么好玩</b>公开榜单跟你的活儿无关；自己跑一次，答案常常反直觉（贵的不一定赢）。</div>
+      <div><b>推广点</b>"我用 Switchelp 跑了私有擂台，XX 输给了免费模型"——天然可晒、可截图。</div>
+      <div><b>诚实提醒</b>裁判也会看走眼：分数旁必须带置信度，低置信标「难分」。别把它当真理。</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sect-head"><span class="idx">玩法 02</span><h2>闸门：八成请求根本不值得惊动大模型</h2></div>
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <p class="slogan">网关里加一道本地闸门：把握够高就直接放行（不转发），拿不准才交给大模型。</p>
+        <div class="pills" style="margin-top:8px">
+          <span class="pill where">落在：网关页（默认 shadow，只记录不拦）</span>
+          <span class="pill">这是社区实测唯一真正值钱的用法</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="demo">
+      <div class="row" style="margin-bottom:8px">
+        <span class="mono-sm" style="min-width:120px">自动放行阈值</span>
+        <input type="range" id="gate-slider" min="50" max="99" value="90" step="1">
+        <span class="mono-sm" id="gate-th"><b>0.90</b></span>
+      </div>
+      <div class="kv">
+        <div><div class="k">自动放行</div><div class="v" id="gate-pass">—</div></div>
+        <div><div class="k">放行里判错</div><div class="v" id="gate-err">—</div></div>
+        <div><div class="k">转给大模型</div><div class="v" id="gate-esc">—</div></div>
+        <div><div class="k">这一步省下的钱</div><div class="v" id="gate-save">—</div></div>
+      </div>
+      <div class="bar"><i id="gate-bar"></i></div>
+      <div class="verdict warn" id="gate-verdict">拖动阈值：越保守，放行越少、错得越少、省钱越少。</div>
+      <div class="dots" id="gate-dots"></div>
+      <p class="note">模拟数据按实测形状构造（40 个判断）：≥0.90 档全对；0.80–0.90 只错 1 个；越低越浑。真实数字来自 X 上那篇长文的第二轮实测：<b>255/255 全对、阈值 0.80 可放行 89%、只错 1 个</b>；同一批测试里它的中位延迟约 0.7 秒，而且最慢也只有 1.5 秒（对照的轻量大模型中位相近但最慢 32 秒）。</p>
+    </div>
+
+    <div class="why">
+      <div><b>为什么好玩</b>它把"要不要花大钱"变成一个可以在滑块上看见的取舍，而不是玄学。</div>
+      <div><b>推广点</b>"我的 Codex 里 8 成请求根本没花钱"——比任何性能数字都好懂。</div>
+      <div><b>诚实提醒</b>同一批实测里，<b>把决策模型插进 Codex 做模型路由反而多花 59%–184%</b>（代理把请求变重、还弄丢缓存）。所以闸门只做"放行/转交"，<b>不做模型路由</b>。</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sect-head"><span class="idx">玩法 03</span><h2>灵感雷达：给你的资讯流装一个挑食的胃</h2></div>
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <p class="slogan">内容中心每条资讯先过一遍本地判断：真干货 / 标题党 / 情绪诱导 / 广告，按你的挑食度沉底。</p>
+        <div class="pills" style="margin-top:8px">
+          <span class="pill where">落在：内容中心</span>
+          <span class="pill">只排序，不删除</span>
+          <span class="pill">小红书同款玩法已有两万赞</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="demo">
+      <div class="row" style="margin-bottom:10px">
+        <span class="mono-sm" style="min-width:120px">挑食程度</span>
+        <input type="range" id="radar-slider" min="30" max="90" value="60" step="1">
+        <span class="mono-sm" id="radar-th"><b>0.60</b></span>
+      </div>
+      <div id="radar-list"></div>
+      <p class="note">每条带概率与一句理由；低于阈值的只是沉底（半透明），一条都不会消失——这跟"信息流里被静默吞掉"是两件事。</p>
+    </div>
+
+    <div class="why">
+      <div><b>为什么好玩</b>每个人关心的东西不一样，雷达是"你的口味"，越用越合口味（纠错一条就写进规则）。</div>
+      <div><b>推广点</b>博主自己做的同类小工具已经在小红书拿到两万赞；Switchelp 把它做进桌面端，且判断不出网。</div>
+      <div><b>诚实提醒</b>中文场景要选多语言版模型；它擅长"这条像不像广告"，不擅长精确的事实核查。</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sect-head"><span class="idx">玩法 04</span><h2>训练你的小裁判：它的本事是你说清楚的，不是它自己会的</h2></div>
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <p class="slogan">你说"这条该这样判"，分歧就写成一条规则；三条规则下去，它从 1/3 对变成 3/3 对。</p>
+        <div class="pills" style="margin-top:8px">
+          <span class="pill where">落在：设置页 → 决策服务（新增「规则工作台」）</span>
+          <span class="pill">对应社区公认的核心难点</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="demo">
+      <div class="row" style="margin-bottom:10px">
+        <span class="mono-sm">任务：这条 issue 该不该进我的待办？</span>
+        <button class="chip" id="rule-reset">重置</button>
+      </div>
+      <div id="rule-items"></div>
+      <div class="mini" style="margin-top:12px">
+        <h4>当前规则集 <span class="mono-sm" id="rule-count">（0 条）</span></h4>
+        <div id="rule-list"><p class="note">点任意一条的「判错了」按钮，把它变成一条规则。</p></div>
+      </div>
+      <div class="verdict" id="rule-verdict">一致度 1/3 —— 你纠错几条，它就跟着变。</div>
+    </div>
+
+    <div class="why">
+      <div><b>为什么好玩</b>像一个"教会实习生"的小游戏，看得见每次纠错的效果。</div>
+      <div><b>推广点</b>这是把小红书上作者亲口说的经验（"判错的地方全部写回规则，要多次校对"）做成了产品里的一个界面。</div>
+      <div><b>诚实提醒</b>它不会自己想明白你的偏好；如果你懒得写规则，这个功能就不该开。</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sect-head"><span class="idx">玩法 05</span><h2>发出去之前：先体检，再决定发给谁</h2></div>
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <p class="slogan">把要发出去的提示词先过一遍：已知密钥格式用规则硬挡（真的在跑），模糊情况才让本地模型判断。</p>
+        <div class="pills" style="margin-top:8px">
+          <span class="pill where">落在：网关页（出站体检，可关）</span>
+          <span class="pill">规则先行，模型只处理灰区</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="demo">
+      <textarea id="scan-input" rows="7">帮我把这段配置接进项目：
+OPENAI_API_KEY=sk-proj-EXAMPLE-not-a-real-key-0001
+DB_HOST=db.internal.corp
+客户「海岬科技」要求本周五前上线。
+参考文件：/Users/demo/内部报价/海岬-2026Q4.xlsx</textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="primary" id="scan-run">体检</button>
+        <span class="note">右侧高亮为真实正则命中；下面的判断卡为本地模型的示意输出。</span>
+      </div>
+      <div id="scan-out" style="margin-top:12px"></div>
+    </div>
+
+    <div class="why">
+      <div><b>为什么好玩</b>点一下就能看见"我差点把什么发出去了"，比读十页隐私政策有用。</div>
+      <div><b>推广点</b>"Switchelp 会在你把它发给第三方中转之前提醒你"——这是切换供应商场景里真实存在的风险。</div>
+      <div><b>诚实提醒</b>它只能减少、不能消灭泄露；规则命中要 100% 拦，模型判断只在 0.30–0.80 之间问你，超过 0.80 建议拦。</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sect-head"><span class="idx">玩法 06</span><h2>和它玩一局：把「几成把握」变成能看见的东西</h2></div>
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <p class="slogan">和本地小裁判猜拳。它每局都会说"我有几成把握"，五局之后，你就能亲眼看到这个数字准不准。</p>
+        <div class="pills" style="margin-top:8px">
+          <span class="pill where">落在：设置页「决策服务」里的校准自测（游戏化）</span>
+          <span class="pill">顺手替代"贴 100 条样本"的无聊向导</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="demo">
+      <div class="grid2">
+        <div>
+          <h3>出拳</h3>
+          <div class="row">
+            <button data-move="rock">✊ 石头</button>
+            <button data-move="paper">✋ 布</button>
+            <button data-move="scissors">✌️ 剪刀</button>
+          </div>
+          <div class="verdict" id="rps-say" style="margin-top:12px">它还没说话。出拳试试。</div>
+          <div class="row" style="margin-top:10px">
+            <button class="chip" id="rps-reset">重开</button>
+            <span class="note">五局一局，看它的把握和真实命中。</span>
+          </div>
+        </div>
+        <div class="mini">
+          <h4>它的预测记账</h4>
+          <div class="kv">
+            <div><div class="k">预测命中</div><div class="v" id="rps-hit">—</div></div>
+            <div><div class="k">平均把握</div><div class="v" id="rps-conf">—</div></div>
+          </div>
+          <div class="dots" id="rps-dots"></div>
+          <p class="note" id="rps-note">每格 = 一局。绿 = 它说对了，红 = 说错了。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="why">
+      <div><b>为什么好玩</b>它天生是个可以发出去的彩蛋："我和我们应用里的小模型猜拳，它说 70% 把握，结果……"</div>
+      <div><b>推广点</b>博弈论小游戏在社区已经验证过（有人做了六个游戏的对战站）；游戏是传播"置信度≠正确率"最短的路。</div>
+      <div><b>诚实提醒</b>游戏里的小模型故意留了破绽（它出拳有偏好），正是为了让你看到"把握很足但依然会错"。</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sect-head"><span class="idx">附录 A</span><h2>社区里还有这些（灵感墙）</h2></div>
+  <div class="chips">
+    <span>🎮 用决策模型玩地铁跑酷 / 超级马里奥</span>
+    <span>🏘️ Jevton：120 人小镇，每个决定都由模型做</span>
+    <span>📂 "刚下载的那个 PDF"也能找文件</span>
+    <span>🎤 讲到哪里，PPT 就翻到哪</span>
+    <span>🕹️ 六种博弈论游戏和人类对战（扑克/囚徒困境/最后通牒）</span>
+    <span>📊 表格里读评论、做分类</span>
+    <span>🚁 无人机战术判断</span>
+    <span>📈 交易实验：每个区块做一次决策</span>
+    <span>💡 创业点子鉴定：杀了它 / 救它 / 上线它</span>
+    <span>🛡️ 提交前代码风险判断</span>
+    <span>🔌 浏览器自动化提速：先让模型选元素，再让大模型干活</span>
+    <span>🗂️ 给多个 AI 助手分配任务</span>
+  </div>
+  <p class="note" style="margin-top:12px">
+    这些来自小红书三篇（12 种玩法 / 10 种玩法 / 20 个开源项目）与 X 上的实测长文。共同点：<b>都是在"有限选项里选一个"，而不是让模型写东西。</b>
+  </p>
+</section>
+
+<section>
+  <div class="sect-head"><span class="idx">附录 B</span><h2>几个必须知道的坑（不然会白做）</h2></div>
+  <details open>
+    <summary>1. 别用它做模型路由省钱 —— 有人实测反而多花 59%–184%</summary>
+    <p>X 上那篇长文的作者把决策模型插进 Codex 做"挑便宜的模型跑"，结果中间代理把请求变重 2.5 倍、还弄丢了 cache，每步多等 1–2 秒。他自己和另一份公开 holdout 都得到同一个结论：
+      <b>按轮次换模型比一个强模型跑到底更贵</b>。闸门（放行/转交）可以，路由（换模型）不行。</p>
+  </details>
+  <details>
+    <summary>2. 别让它做压缩/"挑重点" —— 它看不到内容就只会瞎判</summary>
+    <p>同一篇实测里，把它塞进上下文压缩插件的结果是"无脑删"：为了塞进它的 3.2 万 token 上限，插件先把内容砍光了，它只看到文件名和长度。社区里另一个"用模型写会话摘要"的项目也发现，
+      摘要式交接的召回率反而低于原文。<b>要判断得先看得见；要看得见就超上限</b>——这是它天生的夹缝。</p>
+  </details>
+  <details>
+    <summary>3. "置信度 90%"不是"九成正确" —— 尤其在你自己的语料上</summary>
+    <p>官方承认校准是群体级别的，不给推荐阈值；社区实测里出现过"最错的答案置信度最高 0.86"，本地开源模型更夸张（量化后在 39 条输出里 37 条是精确的 0 或 1）。
+      所以：<b>阈值只能自己测</b>（玩法 06 就是干这个的），界面里永远写"把握/概率"，不写"正确率"。</p>
+  </details>
+  <details>
+    <summary>4. 中文要选多语言版模型，别用英文版硬撑</summary>
+    <p>TypeSafe 官方承认中文"支持但不同等好"；开源 Laya 的英文版在多语言场景明显掉点（多语言版约 524&nbsp;MB，是英文版两倍）。Whitelist 里也不要放许可证不清的权重：
+      <span class="mono">open-jev</span> 系是 <span class="mono">CC-BY-NC</span>（非商用），有个别复刻压根没有许可证。</p>
+  </details>
+  <details>
+    <summary>5. 别把 260&nbsp;MB 直接塞进安装包</summary>
+    <p>当前更新包 7.34&nbsp;MiB，塞进去会变成约 280&nbsp;MiB（36 倍），而且 macOS 上还会把最低系统版本从 12.0 抬到 14.0。做法：<b>首次使用时下载 + 用应用已有的签名校验</b>，
+      校验不过就退回"借道用户已有供应商"的在线判断。</p>
+  </details>
+</section>
+
+<section>
+  <div class="sect-head"><span class="idx">附录 C</span><h2>为什么是本地 Laya，不是 TypeSafe 的 Jev</h2></div>
+  <table>
+    <tr><th></th><th>本地 Laya（推荐默认）</th><th>借道你已有的供应商</th><th>TypeSafe Jev（可选）</th></tr>
+    <tr><td>钱</td><td>$0（只下模型）</td><td>免费档就是 $0，否则约 $0.27/天（1 万次）</td><td>输入 $0.042/百万 token，约 $0.42/天（1 万次）</td></tr>
+    <tr><td>隐私</td><td><b>判断不出网</b>（连供应商列表都不发）</td><td>要发给那家供应商</td><td>state 会上传；零数据留存只对企业版</td></tr>
+    <tr><td>体积</td><td>首次下载约 260&nbsp;MB（多语言版约 524&nbsp;MB）</td><td>0</td><td>0</td></tr>
+    <tr><td>中文</td><td>要选多语言版，仍弱于英文</td><td>看你选的那家</td><td>官方："支持但不同等好"</td></tr>
+    <tr><td>国内可用</td><td>完全离线</td><td>通常最好</td><td>走 Cloudflare，未实测；不放进关键路径</td></tr>
+    <tr><td>合规</td><td>Apache-2.0，可随闭源应用分发</td><td>用用户自己的 Key</td><td>必须用户自带 Key，不能内置共享 Key</td></tr>
+  </table>
+  <p class="note">OpenAI 的 Decisions API 是同类里的第三条路（前天才开放限量预览，Luna 模型，输入还支持图片，但没公布价格），它说明这个品类正在被主流坐实——但它是云端的，和"判断不出网"是两回事。</p>
+</section>
+
+<div class="foot">
+  资料来源：小红书《如何玩Jev🔥12种案例、模型实测、刷选题》《和 Jev 玩博弈论游戏》《Jev的10种玩法》《Jev爆火后这20个开源项目值得试》；
+  X 长文《拿到 Jev，然后呢？》（含两轮实测与四次失败记录）、@wanxubo 的地铁跑酷实测、@MengjieXvivi 的玩法汇总与 Diogo Almeida 的发布帖；
+  OpenAI DevDay 2026 官方回顾与 Decisions API 解读。产品侧结论与许可见 <span class="mono">docs/research/jev/01–06</span> 与 <span class="mono">docs/research/07</span>。<br>
+  本页所有交互仅用于说明交互形态与取舍；除"体检"里的正则命中与数字计算外，模型输出均为<b>示意数据</b>，未在本机运行任何模型。
+</div>
+
+</div>
+<script>
+"use strict";
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const pct = (x) => Math.round(x * 100) + "%";
+
+/* ============ 01 模型擂台 ============ */
+const ARENA = [
+  { name: "你配的 A 家 · 大杯", tokens: 612, ms: 4200, text: "用 dataclass + 类型注解重写，并说明为什么 dataclass 比裸 dict 更安全……", scores: { concise: .62, rigor: .88, zh: .74 } },
+  { name: "你配的 B 家 · 小杯", tokens: 288, ms: 1600, text: "直接改成 TypedDict 并给出 mypy 通过的最小示例。", scores: { concise: .91, rigor: .70, zh: .80 } },
+  { name: "本地 Llama 档（免费）", tokens: 402, ms: 2100, text: "给出 pydantic 模型 + 注释，强调运行期校验与静态检查的分工。", scores: { concise: .78, rigor: .82, zh: .86 } }
+];
+let arenaPref = "concise";
+function arenaRender(run) {
+  const host = $("#arena-cards");
+  const w = (s) => arenaPref === "concise" ? s.concise * .62 + s.rigor * .24 + s.zh * .14
+            : arenaPref === "rigor" ? s.rigor * .62 + s.zh * .22 + s.concise * .16
+            : s.zh * .58 + s.rigor * .24 + s.concise * .18;
+  const ranked = ARENA.map((m, i) => ({ ...m, i, total: w(m.scores) })).sort((a, b) => b.total - a.total);
+  const place = new Map(ranked.map((m, k) => [m.i, k + 1]));
+  host.innerHTML = ARENA.map((m, i) => `
+    <div class="mini">
+      <h4>${m.name} <span class="tag ${place.get(i) === 1 ? "g" : ""}">${run ? "第 " + place.get(i) + " 名" : "待跑"}</span></h4>
+      <p>${m.text}</p>
+      <div class="scoreline"><span>综合</span><span class="num">${run ? (m.total * 100).toFixed(0) : "—"}</span>
+        <span class="bar" style="flex:1"><i style="width:${run ? m.total * 100 : 0}%"></i></span></div>
+      <div class="scoreline"><span>省字</span><span class="num">${pct(m.scores.concise)}</span><span>严谨</span><span class="num">${pct(m.scores.rigor)}</span><span>中文</span><span class="num">${pct(m.scores.zh)}</span></div>
+      <div class="scoreline"><span class="mono-sm">${m.tokens} tok · ${(m.ms / 1000).toFixed(1)}s（模拟）</span></div>
+    </div>`).join("");
+  if (run) {
+    const win = ranked[0];
+    const rigorous = ARENA.reduce((a, b) => (b.scores.rigor > a.scores.rigor ? b : a));
+    $("#arena-verdict").textContent = `按「${{ concise: "省字派", rigor: "严谨派", zh: "中文可读优先" }[arenaPref]}」的口径，赢家是 ${win.name}（综合 ${(win.total * 100).toFixed(0)}）。` +
+      (rigorous.name === win.name ? `它在严谨度上也是最高的（${pct(rigorous.scores.rigor)}）。` : `严谨度最高的是 ${rigorous.name}（${pct(rigorous.scores.rigor)}），但综合分取决于你选的偏好——换一个偏好，名次就会变。`);
+  }
+}
+$("#arena-run").addEventListener("click", () => arenaRender(true));
+$$("[data-pref]").forEach((b) => b.addEventListener("click", () => {
+  arenaPref = b.dataset.pref;
+  $$("[data-pref]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  arenaRender($("#arena-verdict").textContent.indexOf("赢家") >= 0);
+}));
+arenaRender(false);
+
+/* ============ 02 闸门 ============ */
+/* 模拟 40 个判断：p = 模型给出的把握，ok = 事后是否正确。形状参考公开实测。 */
+const GATE = (() => {
+  const rows = [];
+  const push = (p, n, wrong) => { for (let i = 0; i < n; i++) rows.push({ p, ok: i < n - wrong }); };
+  push(.97, 10, 0); push(.93, 11, 0); push(.86, 8, 1); push(.74, 6, 2); push(.55, 5, 3);
+  return rows;
+})();
+function gateRender() {
+  const t = +$("#gate-slider").value / 100;
+  $("#gate-th").innerHTML = "<b>" + t.toFixed(2) + "</b>";
+  const pass = GATE.filter((r) => r.p >= t);
+  const err = pass.filter((r) => !r.ok).length;
+  const esc = GATE.length - pass.length;
+  const saveUsd = esc * 0.004; /* 假设每条转给大模型 0.004 美元（示例单价） */
+  $("#gate-pass").textContent = (pass.length / GATE.length * 100).toFixed(0) + "%";
+  $("#gate-err").textContent = err + " / " + pass.length;
+  $("#gate-esc").textContent = esc + " 条";
+  $("#gate-save").textContent = "$" + saveUsd.toFixed(3);
+  $("#gate-bar").style.width = (pass.length / GATE.length * 100) + "%";
+  $("#gate-dots").innerHTML = GATE.map((r) => `<span class="dot ${r.p >= t ? (r.ok ? "hit" : "miss") : ""}" title="p=${r.p} ${r.ok ? "判对" : "判错"}"></span>`).join("");
+  const v = $("#gate-verdict");
+  if (err === 0 && pass.length >= 21) { v.className = "verdict"; v.textContent = "这一档和公开实测一致：把握 ≥0.90 的判断全对，放行 " + (pass.length / GATE.length * 100).toFixed(0) + "%，一次都没错。"; }
+  else if (err === 0) { v.className = "verdict"; v.textContent = "更保守：放行 " + (pass.length / GATE.length * 100).toFixed(0) + "%，但这档样本太少，别据此下结论（实测里 0.80–0.90 那档只有 11 个样本）。"; }
+  else { v.className = "verdict warn"; v.textContent = "放行里有 " + err + " 条判错——阈值每往下挪一点，都是拿准确性换省钱，这就是为什么阈值必须自己测。"; }
+}
+$("#gate-slider").addEventListener("input", gateRender);
+gateRender();
+
+/* ============ 03 灵感雷达 ============ */
+const FEED = [
+  { t: "Anthropic 发布新的 Agent 记忆方案，附完整评测", s: "官方博客 + 复现脚本，含消融实验。", p: .92, tag: "g", why: "一手来源、有复现材料" },
+  { t: "我用这套提示词，一个月把副业做到 10 万", s: "（课程广告）扫码进群领取模板。", p: .12, tag: "r", why: "典型卖课话术" },
+  { t: "本地小模型跑决策：一次 4.9 毫秒的真实数据", s: "作者给出 Core ML 实测与机器型号。", p: .81, tag: "g", why: "有硬件与数字，可核对" },
+  { t: "震惊！大厂内部流出的模型榜单（速看，随时删）", s: "没有出处，配一张打码截图。", p: .08, tag: "r", why: "标题党 + 无来源" },
+  { t: "开源项目把决策模型接进了浏览器自动化", s: "带基准脚本，速度从 9.5s 到 7.1s。", p: .77, tag: "g", why: "带测量脚本" },
+  { t: "不转不是中国人：AI 要取代程序员了", s: "情绪化长文，无任何数据。", p: .06, tag: "r", why: "情绪诱导" }
+];
+function radarRender() {
+  const t = +$("#radar-slider").value / 100;
+  $("#radar-th").innerHTML = "<b>" + t.toFixed(2) + "</b>";
+  const sorted = FEED.map((x, i) => ({ ...x, i })).sort((a, b) => (b.p >= t) - (a.p >= t) || b.p - a.p);
+  $("#radar-list").innerHTML = sorted.map((x) => `
+    <div class="feed-item ${x.p >= t ? "" : "sunk"}">
+      <h4>${x.t} <span class="tag ${x.tag}">${x.p >= t ? "留下" : "沉底"} · ${pct(x.p)}</span></h4>
+      <p>${x.s}</p>
+      <span class="tag">${x.why}</span>
+      <span class="bar" style="display:block"><i style="width:${x.p * 100}%"></i></span>
+    </div>`).join("");
+}
+$("#radar-slider").addEventListener("input", radarRender);
+radarRender();
+
+/* ============ 04 规则工作台 ============ */
+const RULE_ITEMS = [
+  { id: 0, text: "登录页在 iOS 上偶发白屏（crash，附堆栈）", truth: "进", model: "进", rule: "含 crash / 堆栈 → 进待办" },
+  { id: 1, text: "建议支持深色模式（enhancement，无复现步骤）", truth: "不进", model: "进", rule: "只有 enhancement、没有崩溃描述 → 不进" },
+  { id: 2, text: "文档里的错别字：typo in README", truth: "不进", model: "进", rule: "typo / 文档类 → 不进（周一统一处理）" }
+];
+const fixed = new Set();
+function ruleRender() {
+  $("#rule-items").innerHTML = RULE_ITEMS.map((it) => {
+    const ok = fixed.has(it.id);
+    const cur = ok ? it.truth : it.model;
+    const right = cur === it.truth;
+    return `<div class="feed-item">
+      <h4>${it.text}</h4>
+      <div class="row">
+        <span class="tag ${right ? "g" : "r"}">它判：${cur}</span>
+        <span class="tag">你认为：${it.truth}</span>
+        ${right ? '<span class="tag g">一致</span>' : `<button class="chip" data-fix="${it.id}">判错了 → 写成规则</button>`}
+      </div></div>`;
+  }).join("");
+  $$("[data-fix]").forEach((b) => b.addEventListener("click", () => { fixed.add(+b.dataset.fix); ruleRender(); }));
+  $("#rule-count").textContent = `（${fixed.size} 条）`;
+  $("#rule-list").innerHTML = fixed.size === 0
+    ? '<p class="note">点任意一条的「判错了」按钮，把它变成一条规则。</p>'
+    : `<ul style="margin:0">${RULE_ITEMS.filter((i) => fixed.has(i.id)).map((i) => `<li class="mono-sm">${i.rule}</li>`).join("")}</ul>`;
+  const agree = RULE_ITEMS.filter((i) => (fixed.has(i.id) ? i.truth : i.model) === i.truth).length;
+  const v = $("#rule-verdict");
+  v.className = agree === 3 ? "verdict" : "verdict warn";
+  v.textContent = `一致度 ${agree}/3 —— ` + (agree === 3 ? "三条规则之后它跟你想的一样了。规则越具体，它越像你。" : "你纠错几条，它就跟着变。");
+}
+$("#rule-reset").addEventListener("click", () => { fixed.clear(); ruleRender(); });
+ruleRender();
+
+/* ============ 05 出站体检 ============ */
+/* 规则先行：已知形态直接硬挡。真实实现里这一段在本地模型之前跑，命中即拦，不问模型。
+   注意示例值一律用占位（EXAMPLE / RFC 5737 / .corp），仓库的发布门禁会检查真实内网地址与密钥形态。 */
+const SECRET_PATTERNS = [
+  { re: /sk-[A-Za-z0-9\-_]{16,}/g, kind: "疑似 API Key", cls: "" },
+  { re: /\b(?:10|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}\b/g, kind: "内网地址", cls: "a" },
+  { re: /\b[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.(?:internal|corp|lan|local)\b/g, kind: "内网主机名", cls: "a" },
+  { re: /\/Users\/[^\s，。]*?(?:报价|合同|客户|财务)[^\s，。]*/g, kind: "本机敏感路径", cls: "a" }
+];
+$("#scan-run").addEventListener("click", () => {
+  const raw = $("#scan-input").value;
+  let esc = raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const hits = [];
+  SECRET_PATTERNS.forEach((sp) => {
+    esc = esc.replace(sp.re, (m) => { hits.push(sp.kind); return `<mark class="${sp.cls}">${m}</mark>`; });
+  });
+  const clientNames = ["海岬科技"].filter((n) => raw.includes(n));
+  const out = [];
+  out.push(`<pre class="mini" style="white-space:pre-wrap">${esc}</pre>`);
+  out.push(`<div class="verdict ${hits.length ? "bad" : ""}">规则命中 ${hits.length} 处：${hits.length ? [...new Set(hits)].join("、") : "无"}。${clientNames.length ? "另检出客户名：" + clientNames.join("、") + "。" : ""}规则命中<b>直接拦</b>，不进入下面的模型判断。</div>`);
+  const qs = [
+    ["这段内容里是否含凭据或可定位到个人的信息？", 0.93, "含 1 个疑似 Key + 1 个内网地址"],
+    ["把它发给「第三方中转」是否可接受？", 0.22, "不建议：含客户名与本机路径"],
+    ["是否只发给官方供应商更合适？", 0.81, "建议改发官方端点"]
+  ];
+  out.push(`<div class="mini"><h4>本地模型判断（示意）</h4>${qs.map(([q, p, why]) => `
+    <div class="scoreline"><span style="flex:1">${q}</span><span class="num">${pct(p)}</span></div>
+    <div class="bar" style="margin:0 0 8px"><i style="width:${p * 100}%;background:${p >= .8 ? "var(--rose)" : p >= .3 ? "var(--amber)" : "var(--green)"}"></i></div>
+    <p class="note" style="margin:-4px 0 8px">${why}</p>`).join("")}</div>`);
+  out.push(`<div class="verdict warn">结论：<b>先脱敏，再选择发给谁</b>。三问里有一问落在 0.30–0.80 灰区时，界面会停下来问你——不会替你决定。</div>`);
+  $("#scan-out").innerHTML = out.join("");
+});
+
+/* ============ 06 猜拳（校准游戏） ============ */
+const MOVES = ["rock", "paper", "scissors"];
+const LABEL = { rock: "石头", paper: "布", scissors: "剪刀" };
+const BEATS = { rock: "scissors", paper: "rock", scissors: "paper" };
+const RPS = { rounds: [], dist: { rock: .45, paper: .22, scissors: .33 } };
+function rpsConfidence() { /* 它的"把握" = 它认为人类下一步出某拳的概率（故意有偏） */
+  const pred = RPS.rounds.length === 0 ? "rock" : (RPS.rounds[RPS.rounds.length - 1].human === "rock" ? "paper" : "scissors");
+  const p = RPS.rounds.length === 0 ? .62 : (RPS.rounds.length < 3 ? .71 : .58);
+  return { pred, p };
+}
+function rpsRender() {
+  const { pred, p } = rpsConfidence();
+  $("#rps-say").innerHTML = `它说：我这局出 <b>${LABEL[pred]}</b> 的概率是 <b>${pct(p)}</b>。`;
+  const hits = RPS.rounds.filter((r) => r.ok).length;
+  $("#rps-hit").textContent = RPS.rounds.length ? `${hits} / ${RPS.rounds.length}` : "—";
+  $("#rps-conf").textContent = RPS.rounds.length ? pct(RPS.rounds.reduce((a, r) => a + r.p, 0) / RPS.rounds.length) : "—";
+  $("#rps-dots").innerHTML = RPS.rounds.map((r) => `<span class="dot ${r.ok ? "hit" : "miss"}" title="把握 ${pct(r.p)} · ${r.ok ? "说对" : "说错"}"></span>`).join("");
+  if (RPS.rounds.length >= 5) {
+    const avg = RPS.rounds.reduce((a, r) => a + r.p, 0) / RPS.rounds.length;
+    $("#rps-note").innerHTML = `五局结束：它平均说 <b>${pct(avg)}</b> 把握，实际说对 <b>${hits}/5</b>。` +
+      (hits === 5 ? "看起来很准——但样本只有 5 局，什么都证明不了。" : "把握很足却依然说错，这就是「置信度≠正确率」。");
+  } else {
+    $("#rps-note").textContent = "每格 = 一局。绿 = 它说对了，红 = 说错了。";
+  }
+}
+$$("[data-move]").forEach((b) => b.addEventListener("click", () => {
+  if (RPS.rounds.length >= 5) return;
+  const human = b.dataset.move;
+  const { pred, p } = rpsConfidence();
+  RPS.rounds.push({ human, pred, p, ok: pred === human, win: BEATS[MOVES.find((m) => BEATS[m] === human)] === pred });
+  rpsRender();
+}));
+$("#rps-reset").addEventListener("click", () => { RPS.rounds.length = 0; rpsRender(); });
+rpsRender();
+</script>
+</body>
+</html>
