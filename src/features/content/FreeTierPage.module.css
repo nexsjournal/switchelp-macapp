@@ -24,6 +24,8 @@
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .quota { margin: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary);
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+/* 领取方式：与额度同档字号，但颜色更弱——它是预期说明，不是额度本身。 */
+.flow { margin: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
 .note { margin: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 .actions { margin-top: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .actions button { height: var(--control-height-compact); font-size: var(--font-size-caption); line-height: var(--line-height-caption); padding: 0 10px; }

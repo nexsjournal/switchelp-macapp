@@ -20,6 +20,11 @@ zeroize = "1"
 ureq = "3.4.2"
 # 订阅源解析（RSS/Atom）。本就在依赖图里（经 plist → tauri），不新增下载面。
 quick-xml = "0.42"
+# 整仓下载（codeload 的 tar.gz）要 gzip 解压 + tar 解析：两个包本来就在依赖图里
+# （flate2 经 ureq / png，tar 经 tauri-plugin-updater），加成直接依赖，不新增下载面。
+# tar 关掉默认特性：我们只在内存里读归档，从不往磁盘解压，不需要 xattr 那一套。
+flate2 = "1"
+tar = { version = "0.4", default-features = false }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 keyring = { version = "3.6", features = ["apple-native", "windows-native"] }

@@ -1538,14 +1538,20 @@ pub async fn plugins_remove_source(
 }
 
 /// 浏览一个来源的技能目录。这一步会联网，失败原因原样返回给界面。
+///
+/// `query` 是技能市场的搜索词（不传与传 `null` 都按「没有搜索词」处理，
+/// 行为与历史版本一致）。仓库来源忽略它：那边的筛在界面上是本地做。
 #[tauri::command]
 pub async fn plugins_browse(
     window: WebviewWindow,
     state: Desktop<'_>,
     repo: String,
+    query: Option<String>,
 ) -> Result<switch_core::plugins::RepoCatalog, CoreError> {
     run(window, state, move |desktop| {
-        desktop.plugins().browse(&repo, now_seconds())
+        desktop
+            .plugins()
+            .browse(&repo, now_seconds(), query.as_deref())
     })
     .await
 }

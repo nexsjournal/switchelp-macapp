@@ -1,12 +1,15 @@
-//! 插件中心：把公开仓库里的技能装进本机 agent 工作台。
+//! 插件中心：把公开仓库与技能市场里的技能装进本机 agent 工作台。
 //!
-//! 这个模块不碰云端目录、不做账号体系；目录来源是**用户自己填的公开仓库**，
-//! 配上三个经核实的预置来源。安装动作只有一件事——往目标工具的技能目录写文件，
+//! 这个模块不碰云端目录、不做账号体系；目录来源是**用户自己填的公开仓库**、
+//! 几个经核实的预置仓库，以及两个公开技能市场（ClawHub 与腾讯 SkillHub，见
+//! [`registry`]：同样是匿名只读接口）。安装动作只有一件事——往目标工具的技能目录写文件，
 //! 并留下可回滚的归属清单（见 `install.rs`）。
 
 pub mod install;
+pub mod registry;
 pub mod skill;
 pub mod source;
+pub mod tarball;
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -24,15 +27,20 @@ use crate::{
 pub use install::{
     FileFingerprint, ManagedManifest, PlannedAction, PlannedFile, TargetPlan, UninstallOutcome,
 };
+pub use registry::{RegistryFetcher, RegistrySource};
 pub use skill::SkillDocument;
 pub use source::{GithubFetcher, RepoCatalog, RepoFetcher, RepoSkill, SkillSourceRef, TokenSource};
+pub use tarball::TarballFetcher;
 
-/// 预置来源。四个都经实测存在且含 `SKILL.md`（2026-09-24 用 `api.github.com` 的 git tree 复核：
+/// 预置来源。前四个都经实测存在且含 `SKILL.md`（2026-09-24 用 `api.github.com` 的 git tree 复核：
 /// anthropics/skills 20 个、openai/skills 44 个、obra/superpowers 15 个、wshobson/agents 183 个）。
 ///
 /// 加 `openai/skills` 是因为它是**官方维护的技能目录**（仓库描述就是 "Skills Catalog for Codex"），
 /// 比社区聚合更稳；注意 `openai/codex` 里也有 SKILL.md，但那是它自己的产品内部技能，不是给外人装的东西。
-pub const DEFAULT_SOURCES: [(&str, &str, &str); 4] = [
+///
+/// 后两个是**技能市场**（不是仓库）：`repo` 用的是哨兵写法，内容来自平台自己的公开接口，
+/// 抓取与版本标记见 [`registry`]。文案必须说清内容来自哪个平台，别让用户以为是我们维护的。
+pub const DEFAULT_SOURCES: [(&str, &str, &str); 6] = [
     (
         "anthropics/skills",
         "Anthropic 官方技能集合",
@@ -52,6 +60,16 @@ pub const DEFAULT_SOURCES: [(&str, &str, &str); 4] = [
         "wshobson/agents",
         "Agents 插件合集",
         "面向编码 agent 的插件与技能合集，数量最多，取向偏工程。",
+    ),
+    (
+        registry::CLAWHUB_SOURCE,
+        "ClawHub 技能市场（社区）",
+        "社区技能市场 ClawHub 的公开目录，能按关键词搜；技能与文件都装在本地，内容由 ClawHub 上的作者维护。",
+    ),
+    (
+        registry::SKILLHUB_SOURCE,
+        "SkillHub 技能市场（腾讯）",
+        "腾讯 SkillHub 的公开目录，能按关键词搜；技能与文件都装在本地，内容由 SkillHub 上的发布者维护。",
     ),
 ];
 
@@ -184,7 +202,10 @@ pub struct PluginService {
     store: Arc<dyn HubStore>,
     repository: Arc<dyn Repository>,
     tools: Arc<ToolHubService>,
+    /// 公开仓库一侧的抓取器（没配令牌时是整仓下载，配了令牌是 GitHub REST）。
     fetcher: Arc<dyn RepoFetcher>,
+    /// 两个技能市场的抓取器。按来源写法分派，见 [`Self::fetcher_for`]。
+    registries: Arc<dyn RepoFetcher>,
     /// 最近一次成功浏览的结果，键是「仓库 + ref」。
     ///
     /// 只在这一层缓存，不改任何公开类型的形状：界面拿到的 `RepoCatalog` 与从前完全一样，
@@ -198,13 +219,27 @@ impl PluginService {
         repository: Arc<dyn Repository>,
         tools: Arc<ToolHubService>,
         fetcher: Arc<dyn RepoFetcher>,
+        registries: Arc<dyn RepoFetcher>,
     ) -> Self {
         Self {
             store,
             repository,
             tools,
             fetcher,
+            registries,
             catalogs: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// 这个来源写法由哪个抓取器负责。
+    ///
+    /// 判据与界面一致：技能市场的来源是 `clawhub` / `skillhub` 开头（写法里没有 `/`），
+    /// 仓库来源是 `owner/repo`（可能带 `@ref`）。
+    fn fetcher_for(&self, repo_spec: &str) -> &dyn RepoFetcher {
+        if registry::registry_source(repo_spec).is_some() {
+            self.registries.as_ref()
+        } else {
+            self.fetcher.as_ref()
         }
     }
 
@@ -273,9 +308,36 @@ impl PluginService {
     /// （实测默认源 anthropics/skills：21 次 tree 请求 + 394 个文件 10.4 MB），
     /// 页面停在「正在读取仓库」好几分钟。
     ///
+    /// `query` 是搜索词，**只有技能市场用得上**：仓库来源在界面上是本地筛，这里忽略它，
+    /// 不传/传空时的行为与从前完全一致。市场来源的搜索词会被编进来源写法再交给界面
+    /// （见 [`registry::compose_spec`]），所以从搜索结果里点「添加技能」时能够找到同一个技能。
+    ///
     /// `now` 还决定缓存是否新鲜（见 [`CATALOG_TTL_SECONDS`]）：同一个来源在 TTL 内重复浏览
     /// 直接返回上一次的成功结果，不再联网。
-    pub fn browse(&self, repo_spec: &str, now: i64) -> Result<RepoCatalog, CoreError> {
+    pub fn browse(
+        &self,
+        repo_spec: &str,
+        now: i64,
+        query: Option<&str>,
+    ) -> Result<RepoCatalog, CoreError> {
+        // 技能市场：内容来自平台自己的只读接口，[`registry`] 已经把它摆成技能目录的形状。
+        if registry::registry_source(repo_spec).is_some() {
+            let spec = registry::compose_spec(repo_spec, query);
+            let key = catalog_key(&spec, None);
+            if let Some(catalog) = self.cached_catalog(&key, now) {
+                return Ok(catalog);
+            }
+            let fetcher = self.registries.as_ref();
+            let commit = fetcher.resolve_commit(&spec, None)?;
+            let blobs = fetcher.list_blobs(&spec, &commit)?;
+            let mut catalog = source::assemble(fetcher, &spec, &commit, &blobs, now)?;
+            // 搜不到东西的市场目录是**空目录**，不是失败：界面上就是「0 个技能」，
+            // 不该弹「这个仓库里没有 SKILL.md」——那不是市场来源的说法。
+            // 平台页面在这里补上：它是 ClawHub 要求的回链，也是界面上的「在市场里查看」。
+            catalog.homepage = registry::homepage_of(&spec);
+            self.remember_catalog(&key, now, &catalog);
+            return Ok(catalog);
+        }
         let (repo, git_ref) = source::parse_repo_spec(repo_spec)?;
         let key = catalog_key(&repo, git_ref.as_deref());
         if let Some(catalog) = self.cached_catalog(&key, now) {
@@ -326,7 +388,7 @@ impl PluginService {
 
     /// 生成安装计划。**不写文件**，界面据此展示将写入什么、哪里会冲突。
     pub fn preview(&self, request: &InstallRequest) -> Result<InstallPreview, CoreError> {
-        let mut catalog = self.browse(&spec_of(request), 0)?;
+        let mut catalog = self.browse(&spec_of(request), 0, None)?;
         // 先取出仓库与提交：下面要拿 `skills` 的可变借用，同时还得知道往哪儿读文件。
         let repo = catalog.repo.clone();
         let commit = catalog.commit.clone();
@@ -348,7 +410,7 @@ impl PluginService {
         let mut skills = Vec::with_capacity(selected.len());
         for skill in selected {
             // 目录阶段只列了清单，正文在这里按**选中的技能**补——装什么读什么。
-            source::hydrate(self.fetcher.as_ref(), &repo, &commit, skill)?;
+            source::hydrate(self.fetcher_for(&repo), &repo, &commit, skill)?;
             let mut planned = Vec::new();
             for (tool_id, display_name, root) in &targets {
                 let files = to_file_pairs(skill);
@@ -389,7 +451,7 @@ impl PluginService {
     /// 执行安装。逐目标独立，失败的不会连累已成功的。
     pub fn install(&self, request: &InstallRequest, now: i64) -> Result<InstallReport, CoreError> {
         let preview = self.preview(request)?;
-        let mut catalog = self.browse(&spec_of(request), now)?;
+        let mut catalog = self.browse(&spec_of(request), now, None)?;
         let repo = catalog.repo.clone();
         let commit = catalog.commit.clone();
         // 写盘用的是文件正文，所以这里也要把选中技能的正文读回来（目录阶段只列了清单）。
@@ -399,7 +461,7 @@ impl PluginService {
                 .iter_mut()
                 .find(|skill| skill.dir_name == plan.dir_name)
             {
-                source::hydrate(self.fetcher.as_ref(), &repo, &commit, skill)?;
+                source::hydrate(self.fetcher_for(&repo), &repo, &commit, skill)?;
             }
         }
         let mut report = InstallReport {
@@ -445,7 +507,9 @@ impl PluginService {
 
                 let source_ref = SkillSourceRef {
                     skill_id: skill.document.id.clone(),
-                    repo: catalog.repo.clone(),
+                    // 市场来源在记录里只写市场本身，不写搜索词：出处是 ClawHub / SkillHub，
+                    // 不是「在 ClawHub 上搜了 pdf」——后者既不是一种出处，写进已装列表也难读。
+                    repo: record_repo_of(&catalog.repo),
                     commit: catalog.commit.clone(),
                     path: skill.source_path.clone(),
                 };
@@ -563,11 +627,18 @@ impl PluginService {
     }
 
     /// 检查更新：按仓库分组，每个仓库只解析一次最新提交。
+    ///
+    /// **技能市场不参与**：那边没有可比的版本——目录页是平台自己排的一页结果，拿页面级的
+    /// 时间戳去比，任何一个技能更新都会让所有已装的市场技能一起报「有更新」。要拿新版
+    /// 就从市场页重新装一次（与仓库来源重新装一次是同一条路）。
     pub fn check_updates(&self) -> Result<Vec<UpdateInfo>, CoreError> {
         let records = self.store.list_skills()?;
         let repos: BTreeSet<String> = records.iter().map(|r| r.source_repo.clone()).collect();
         let mut latest: BTreeMap<String, Option<String>> = BTreeMap::new();
         for repo in repos {
+            if registry::registry_source(&repo).is_some() {
+                continue;
+            }
             let resolved = self.fetcher.resolve_commit(&repo, None).ok();
             latest.insert(repo, resolved);
         }
@@ -657,6 +728,14 @@ fn spec_of(request: &InstallRequest) -> String {
     }
 }
 
+/// 写进归属清单与已装记录的来源名。市场来源只留市场标识（理由见调用的地方）。
+fn record_repo_of(catalog_repo: &str) -> String {
+    match registry::registry_source(catalog_repo) {
+        Some(source) => source.id().to_owned(),
+        None => catalog_repo.to_owned(),
+    }
+}
+
 fn to_file_pairs(skill: &RepoSkill) -> Vec<(String, Vec<u8>)> {
     skill
         .files
@@ -691,8 +770,10 @@ mod tests {
             store.clone(),
         ));
         let fetcher = Arc::new(source::fake::FakeFetcher::new(files));
+        // 市场一侧挂一个空抓取器：这几条用例走的都是仓库来源，它不该被碰到。
+        let registries = Arc::new(source::fake::FakeFetcher::new(&[]));
         (
-            PluginService::new(store, repository, tools, fetcher),
+            PluginService::new(store, repository, tools, fetcher, registries),
             tempfile::tempdir().unwrap(),
         )
     }
@@ -726,6 +807,27 @@ mod tests {
         assert!(sources
             .iter()
             .any(|source| source.repo == "anthropics/skills"));
+        // 两个技能市场也在预置来源里，说法必须点明内容来自哪个平台。
+        let clawhub = sources
+            .iter()
+            .find(|source| source.repo == "clawhub")
+            .expect("ClawHub 要出现在来源列表里");
+        assert!(clawhub.label.contains("ClawHub"), "{}", clawhub.label);
+        assert!(
+            clawhub.description.contains("ClawHub"),
+            "{}",
+            clawhub.description
+        );
+        let skillhub = sources
+            .iter()
+            .find(|source| source.repo == "skillhub")
+            .expect("SkillHub 要出现在来源列表里");
+        assert!(skillhub.label.contains("SkillHub"), "{}", skillhub.label);
+        assert!(
+            skillhub.description.contains("SkillHub"),
+            "{}",
+            skillhub.description
+        );
     }
 
     #[test]
@@ -747,7 +849,7 @@ mod tests {
     #[test]
     fn browse_lists_every_skill_in_the_repository() {
         let (service, _temp) = service_with(&repo_files(), std::path::Path::new("/tmp"));
-        let catalog = service.browse("owner/repo", 7).unwrap();
+        let catalog = service.browse("owner/repo", 7, None).unwrap();
         assert_eq!(catalog.skills.len(), 2);
         assert_eq!(catalog.commit, "deadbeef");
         assert_eq!(catalog.fetched_at, 7);
@@ -974,24 +1076,62 @@ mod tests {
         files: &[(&str, &str)],
         fail_listings: usize,
     ) -> (PluginService, Arc<Counting>) {
+        let (service, github, _registry) = service_with_two_fetchers(files, &[], fail_listings, 0);
+        (service, github)
+    }
+
+    /// 仓库侧与市场侧各挂一个计数抓取器。两边内容不同，用哪一侧一眼就能看出来。
+    fn service_with_two_fetchers(
+        repo_files: &[(&str, &str)],
+        market_files: &[(&str, &str)],
+        fail_repo_listings: usize,
+        fail_market_listings: usize,
+    ) -> (PluginService, Arc<Counting>, Arc<Counting>) {
+        let (service, github, registry, _temp) = service_with_two_fetchers_at(
+            repo_files,
+            market_files,
+            fail_repo_listings,
+            fail_market_listings,
+            std::path::Path::new("/tmp"),
+        );
+        (service, github, registry)
+    }
+
+    /// 同上，但指定技能根目录（安装类用例需要）。
+    fn service_with_two_fetchers_at(
+        repo_files: &[(&str, &str)],
+        market_files: &[(&str, &str)],
+        fail_repo_listings: usize,
+        fail_market_listings: usize,
+        home: &std::path::Path,
+    ) -> (
+        PluginService,
+        Arc<Counting>,
+        Arc<Counting>,
+        tempfile::TempDir,
+    ) {
         let store = Arc::new(InMemoryHubStore::new());
         let repository = Arc::new(crate::storage::InMemoryRepository::new());
         let catalog = ToolCatalog::embedded().unwrap();
         let tools = Arc::new(ToolHubService::new(
             catalog,
             crate::platform::Platform::Macos,
-            std::path::PathBuf::from("/tmp"),
+            home.to_path_buf(),
             store.clone(),
         ));
-        let fetcher = Arc::new(Counting {
-            inner: source::fake::FakeFetcher::new(files),
+        let github = Arc::new(Counting {
+            inner: source::fake::FakeFetcher::new(repo_files),
             calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            fail_listings: std::sync::atomic::AtomicUsize::new(fail_listings),
+            fail_listings: std::sync::atomic::AtomicUsize::new(fail_repo_listings),
         });
-        (
-            PluginService::new(store, repository, tools, fetcher.clone()),
-            fetcher,
-        )
+        let registry = Arc::new(Counting {
+            inner: source::fake::FakeFetcher::new(market_files),
+            calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            fail_listings: std::sync::atomic::AtomicUsize::new(fail_market_listings),
+        });
+        let service =
+            PluginService::new(store, repository, tools, github.clone(), registry.clone());
+        (service, github, registry, tempfile::tempdir().unwrap())
     }
 
     /// 同一个来源在 TTL 内重复浏览只打一次网络，过了 TTL 才重新取。
@@ -1002,21 +1142,21 @@ mod tests {
     fn browsing_the_same_source_twice_does_not_hit_the_network_again() {
         let (service, fetcher) = service_with_counts(&repo_files(), 0);
 
-        let first = service.browse("owner/repo", 1_000).unwrap();
+        let first = service.browse("owner/repo", 1_000, None).unwrap();
         let after_first = fetcher.calls();
         assert!(after_first > 0, "第一次浏览要联网");
 
-        let second = service.browse("owner/repo", 1_100).unwrap();
+        let second = service.browse("owner/repo", 1_100, None).unwrap();
         assert_eq!(second, first, "缓存命中的结果应当与上次完全一致");
         assert_eq!(fetcher.calls(), after_first, "TTL 内不该再打网络");
 
         // 同一个来源写成别的方式（前后带空格、带 .git 后缀）也归一化成同一个键。
-        assert!(service.browse(" owner/repo.git ", 1_200).is_ok());
+        assert!(service.browse(" owner/repo.git ", 1_200, None).is_ok());
         assert_eq!(fetcher.calls(), after_first);
 
         // 过了 TTL 就要重新取；这时也会重新读到（可能已经变了的）提交。
         assert!(service
-            .browse("owner/repo", 1_000 + CATALOG_TTL_SECONDS)
+            .browse("owner/repo", 1_000 + CATALOG_TTL_SECONDS, None)
             .is_ok());
         assert!(fetcher.calls() > after_first, "过了 TTL 之后必须重新联网");
     }
@@ -1025,9 +1165,9 @@ mod tests {
     #[test]
     fn a_pinned_ref_is_cached_separately() {
         let (service, fetcher) = service_with_counts(&repo_files(), 0);
-        service.browse("owner/repo", 1_000).unwrap();
+        service.browse("owner/repo", 1_000, None).unwrap();
         let after_first = fetcher.calls();
-        service.browse("owner/repo@v1.0", 1_000).unwrap();
+        service.browse("owner/repo@v1.0", 1_000, None).unwrap();
         assert!(
             fetcher.calls() > after_first,
             "钉了另一个 ref 就是另一个目录，不能拿默认分支的缓存顶上"
@@ -1038,15 +1178,107 @@ mod tests {
     #[test]
     fn a_failed_browse_is_retried_on_the_next_call() {
         let (service, fetcher) = service_with_counts(&repo_files(), 1);
-        assert!(service.browse("owner/repo", 1_000).is_err());
+        assert!(service.browse("owner/repo", 1_000, None).is_err());
         let after_failure = fetcher.calls();
 
-        let catalog = service.browse("owner/repo", 1_000).unwrap();
+        let catalog = service.browse("owner/repo", 1_000, None).unwrap();
         assert_eq!(catalog.skills.len(), 2);
         assert!(fetcher.calls() > after_failure, "失败过的那次不能进缓存");
 
         let replayed = fetcher.calls();
-        service.browse("owner/repo", 1_050).unwrap();
+        service.browse("owner/repo", 1_050, None).unwrap();
         assert_eq!(fetcher.calls(), replayed, "成功之后才轮到缓存生效");
+    }
+
+    fn market_files() -> Vec<(&'static str, &'static str)> {
+        vec![
+            (
+                "market-one/SKILL.md",
+                "---\nname: market-one\ndescription: 市场里的技能\n---\n正文",
+            ),
+            ("market-two/SKILL.md", "---\nname: market-two\n---\n正文"),
+        ]
+    }
+
+    /// 市场来源走市场抓取器：搜索词编进来源写法带走，目录带回平台页面。
+    ///
+    /// 「词编进来源写法」不是洁癖：界面装技能时只交回目录里的 `repo` 与技能目录名
+    /// （`plugins_preview` 的请求里没有搜索词），词丢了就会拿默认目录去找搜索结果里的技能，
+    /// 排在 30 名之外的技能直接装不上。
+    #[test]
+    fn market_sources_use_the_registry_fetcher_and_carry_the_homepage() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".codex/skills")).unwrap();
+        let (service, github, registry, _temp) =
+            service_with_two_fetchers_at(&repo_files(), &market_files(), 0, 0, home.path());
+
+        let catalog = service.browse("clawhub", 10, Some("pdf")).unwrap();
+        assert_eq!(
+            catalog.repo, "clawhub?q=pdf",
+            "搜索词编进来源写法：界面把它交回来时才找得到同一个技能"
+        );
+        assert_eq!(
+            catalog.homepage.as_deref(),
+            Some("https://clawhub.ai/skills?q=pdf"),
+            "市场来源要给平台页面（ClawHub 的回链要求）"
+        );
+        assert_eq!(catalog.skills.len(), 2);
+        assert!(registry.calls() > 0, "市场来源要打市场抓取器");
+        assert_eq!(github.calls(), 0, "市场来源不该碰 GitHub 那一侧");
+        // 契约：界面按 `homepage` 读这个字段，键名与可空性都不能变。
+        assert_eq!(
+            serde_json::to_value(&catalog).unwrap()["homepage"],
+            "https://clawhub.ai/skills?q=pdf"
+        );
+
+        // 从搜索结果点「添加技能」：界面只交回 repo 与技能目录名。
+        let report = service
+            .install(
+                &InstallRequest {
+                    repo: catalog.repo.clone(),
+                    git_ref: None,
+                    skill_dirs: vec!["market-one".to_owned()],
+                    targets: vec!["codex".to_owned()],
+                    conflict_choices: BTreeMap::new(),
+                },
+                20,
+            )
+            .unwrap();
+        assert_eq!(report.installed.len(), 1);
+        assert_eq!(
+            report.installed[0].source_repo, "clawhub",
+            "记录里写市场本身，不写搜索词"
+        );
+        assert!(home
+            .path()
+            .join(".codex/skills/market-one/SKILL.md")
+            .is_file());
+        assert!(
+            service.check_updates().unwrap().is_empty(),
+            "市场来源不参与更新比较：目录页的时间戳比不出单个技能的新旧"
+        );
+        assert_eq!(github.calls(), 0, "装市场技能也不该碰 GitHub 那一侧");
+    }
+
+    /// 仓库来源照旧：搜索词被忽略，浏览结果与从前完全一样，也不碰市场抓取器。
+    #[test]
+    fn a_query_does_not_change_repository_browsing() {
+        let (service, github, registry) =
+            service_with_two_fetchers(&repo_files(), &market_files(), 0, 0);
+
+        let catalog = service.browse("owner/repo", 10, Some("pdf")).unwrap();
+        assert_eq!(catalog.skills.len(), 2);
+        assert_eq!(catalog.repo, "owner/repo");
+        assert!(catalog.homepage.is_none(), "仓库来源没有市场页面");
+        // 契约：没有市场页面时字段仍在，值是 null（界面的 `?? 回落` 依赖它存在）。
+        assert!(serde_json::to_value(&catalog).unwrap()["homepage"].is_null());
+        assert_eq!(registry.calls(), 0, "仓库来源不该碰市场抓取器");
+        assert!(github.calls() > 0);
+
+        // 带词与不带词是同一份目录（同一个缓存键）：界面上的本地筛不该换来一次联网。
+        let calls = github.calls();
+        let again = service.browse("owner/repo", 11, None).unwrap();
+        assert_eq!(again, catalog);
+        assert_eq!(github.calls(), calls);
     }
 }

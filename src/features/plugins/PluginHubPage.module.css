@@ -20,6 +20,10 @@
 .addSource { display: flex; align-items: center; gap: 8px; }
 .addSource input { width: 260px; height: var(--control-height); padding: 0 12px; border: 1px solid var(--border-field); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-primary); font-size: var(--font-size-label); }
 .removeSource { color: var(--status-danger); }
+/* 目录报错提醒：与来源行之间留出与 .commit 一致的 12px——卡片没有行间距，
+   直接相邻时提醒的描边会和下拉框的边框粘成一条线。 */
+.catalogNotice { margin-top: 12px; }
+
 .commit { margin: 12px 0 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 
 .marketLayout { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 20px; align-items: start; }

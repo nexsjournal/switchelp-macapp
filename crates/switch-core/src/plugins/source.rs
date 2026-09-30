@@ -59,6 +59,11 @@ pub struct RepoCatalog {
     pub repo: String,
     /// 解析出的提交 SHA。目录与安装都钉在这一版上，不用浮动的分支名。
     pub commit: String,
+    /// 这份目录在来源平台上的页面地址（技能市场用它做回链，界面用它做「在市场里查看」）。
+    ///
+    /// GitHub 来源没有这个概念，固定是 `None`；取不到的来源也是 `None`，
+    /// 界面据此回落到原来的做法。见 `plugins::registry::homepage_of`。
+    pub homepage: Option<String>,
     pub skills: Vec<RepoSkill>,
     pub fetched_at: i64,
     /// 读全了多少个技能目录里的文件。超过上限时小于 `skills.len()`。
@@ -300,6 +305,8 @@ pub fn assemble(
     Ok(RepoCatalog {
         repo: repo.to_owned(),
         commit: commit.to_owned(),
+        // 仓库来源没有「平台页面」这一说；市场来源由 `PluginService::browse` 补上。
+        homepage: None,
         skills,
         fetched_at: now,
         truncated,

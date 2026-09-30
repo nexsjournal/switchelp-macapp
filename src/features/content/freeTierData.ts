@@ -3,171 +3,418 @@ import type { FreeTierCatalog } from './freeTierPolicy';
 /**
  * 随包基线清单（docs/design/09）。
  *
- * 收录规则：**只收厂商官方文档里写明的免费档**，每条必须带 docsUrl 与核实日期；
+ * 收录规则：只收厂商官方文档里写明的免费档，每条必须带 docsUrl 与核实日期；
  * 二手聚合博客不作为收录依据（它们自己都声明限额随时会变）。数字是快照——
  * 卡片上永远显示「核实于」，过期只改这份清单，不改产品。
  *
- * 核实来源：2026-09-25 逐条抓官方文档（docs/research/06 §9.2），2026-09-30 补查
- * Groq / Cerebras / Mistral / 国内四家（SiliconFlow、火山方舟、混元、千帆）的公开政策；
- * Groq 与 Cerebras 的具体数字各家按模型浮动，条目里写的是档位结构并注明以官方页为准。
+ * `claimFlow` 是给用户的前置预期：点「去领取」之后会发生什么。
+ * 用户的原话是「别让用户点进去领不到，体验会很差」——所以每条都要说清是
+ * 「点开就有入口」还是「登录后自动到账（页面上根本没有领取按钮）」还是
+ * 「要先实名/绑卡」。2026-09-30 复核时才发现：好几家是「开通即到账」，
+ * 页面里压根没有领取按钮，用户按「去领取」的预期点进去只会以为被骗了。
+ *
+ * 核实来源：2026-09-25 逐条抓官方文档（docs/research/06 §9.2）；
+ * 同日第三轮扩充（海外 + 国内各一路调研，共新增 31 条）：海外算力/语音/嵌入平台（Modal、AssemblyAI、Deepgram、Voyage、
+ * ElevenLabs、Jina、AI21、Scaleway、IBM watsonx、OVHcloud）、三大云试用金（GCP/Azure/AWS/Oracle）、
+ * 免费 GPU（Colab、HF ZeroGPU、Paperspace）、国内（国家超算互联网、商汤、蚂蚁百灵、魔搭、PPIO、阶跃、讯飞、
+ * 金山云、华为云）以及 4 条「没有免费档」的反例；所有 docsUrl / claimUrl 均实测 200。
+ * 收录时**只写今天还在架的模型名**——2026-09-30 复检就是因为百度 ERNIE-3.5、智谱 GLM-4.5-Flash、混元 Lite 都已失效。
+
+ * 2026-09-30 全量复检 22 条（每条访问 docsUrl 与 claimUrl）：本次改正 12 处，
+ * 其中「说法已失效」4 条（Cerebras 无永久免费档、Mistral 改名 Free mode、
+ * 混元 Lite、硅基流动赠额查无出处）、「引用的模型已下架」3 条
+ * （千帆 ERNIE-3.5、智谱 GLM-4.5-Flash、混元 Lite 不在免费名单里）、
+ * 「链接失效」3 条（Fireworks /account 404、NVIDIA 落地页 404、Google 学生页落登录墙）。
  */
 export const FREE_TIER_CATALOG: FreeTierCatalog = {
-  version: 1,
+  version: 3,
   verifiedAt: '2026-09-30',
   entries: [
     // ---- 模型免费档 ----
     {
       id: 'openrouter-free', provider: 'OpenRouter', icon: 'openrouter', category: 'model_free_tier',
       title: ':free 模型变体每日免费调用',
-      quota: '未购过额度 50 次/天；累计充值 ≥$10 后 1000 次/天；20 次/分。官方额度接口可直接查询剩余量',
+      quota: '未购过额度 50 次/天；终身累计充值 ≥$10 后 1000 次/天；20 次/分。官方额度接口可直接查询剩余量',
       docsUrl: 'https://openrouter.ai/docs/api-reference/limits', claimUrl: 'https://openrouter.ai/keys',
-      presetId: 'openrouter', lastVerifiedAt: '2026-09-25',
+      presetId: 'openrouter', claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'zhipu-glm-flash', provider: '智谱 BigModel', icon: 'zhipu', category: 'model_free_tier',
       title: '多个明确标注「免费」的 GLM 模型',
-      quota: 'GLM-4.5-Flash / GLM-4V-Flash 等免费模型在模型广场直接标注，无需额度',
-      docsUrl: 'https://docs.bigmodel.cn/cn/guide/start/model-overview', claimUrl: 'https://open.bigmodel.cn',
-      presetId: 'zhipu', lastVerifiedAt: '2026-09-25',
+      quota: 'GLM-4.7-Flash / GLM-4V-Flash 等在定价页直接标「免费」，无需额度；GLM-4.5-Flash 已于 2026-01-30 下线（请求会自动路由到 4.7-Flash）',
+      docsUrl: 'https://docs.bigmodel.cn/cn/guide/start/pricing', claimUrl: 'https://open.bigmodel.cn',
+      presetId: 'zhipu', claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'hunyuan-lite', provider: '腾讯混元', icon: 'hunyuan', category: 'model_free_tier',
-      title: 'Hunyuan-Lite 永久免费',
-      quota: 'Lite 档免费（QPS 有限）；首次使用另赠 10 万 token 体验额度（1 年有效）',
-      docsUrl: 'https://cloud.tencent.com/document/product/1729', claimUrl: 'https://cloud.tencent.com/product/hunyuan',
-      lastVerifiedAt: '2026-09-30',
+      title: '新用户 100 万 tokens 资源包',
+      quota: '首次开通后发放 100 万 tokens（1 年有效、多款模型共享，名单以官方页为准）；「Hunyuan-Lite 永久免费」在现行官方页已无出处',
+      docsUrl: 'https://cloud.tencent.com/document/product/1729/97731', claimUrl: 'https://cloud.tencent.com/product/hunyuan',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'qianfan-free', provider: '百度千帆', icon: 'baidu', category: 'model_free_tier',
-      title: 'ERNIE 轻量档永久免费 + 新客体验',
-      quota: 'ERNIE-3.5-8K 永久免费（QPS 50）；ERNIE-4.0 新用户 100 万 token/月',
-      docsUrl: 'https://cloud.baidu.com/doc/WENXINWORKSHOP/index.html', claimUrl: 'https://cloud.baidu.com/product/wenxinworkshop',
-      lastVerifiedAt: '2026-09-30',
+      title: 'ERNIE 新客按模型赠 100 万 tokens',
+      quota: '同意服务协议即自动开通（没有领券按钮）：ERNIE-4.5-Turbo / X1-Turbo 等各 100 万 tokens、3 个月有效；实名认证另送 20 元代金券（1 个月）。ERNIE-3.5 系列已下架',
+      docsUrl: 'https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j', claimUrl: 'https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'groq-free', provider: 'Groq', icon: 'groq', category: 'model_free_tier',
-      title: '免费档无需绑卡即可用全部模型',
-      quota: '按模型分档限速（约 30 次/分、天级请求数与 token 上限随模型不同），以官方限速页的表格为准',
+      title: '免费档无需绑卡，但只覆盖部分模型',
+      quota: '按模型分档限速（约 30 次/分起，天级请求数与 token 上限随模型不同），以官方限速页为准；Llama 3.x 已转为 Enterprise 专属，免费档覆盖 gpt-oss、Qwen 等',
       docsUrl: 'https://console.groq.com/docs/rate-limits', claimUrl: 'https://console.groq.com/keys',
-      lastVerifiedAt: '2026-09-30',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'cerebras-free', provider: 'Cerebras', icon: 'cerebras', category: 'model_free_tier',
-      title: '注册即有每日免费 token 额度',
-      quota: '约 100 万 token/天（Llama 系列等开源模型），以控制台为准',
-      docsUrl: 'https://inference-docs.cerebras.ai/support/pricing', claimUrl: 'https://cloud.cerebras.ai',
-      lastVerifiedAt: '2026-09-30',
+      title: '$5 试用金（没有永久免费档，需先绑卡）',
+      quota: '官方 FAQ 明确「没有永久免费档」：新账号需先绑定已验证的付款方式才发 $5 试用金，30 天过期；不绑卡时 Playground 与 API 都不可用',
+      docsUrl: 'https://inference-docs.cerebras.ai/support/rate-limits', claimUrl: 'https://cloud.cerebras.ai',
+      claimFlow: 'needsVerification', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'mistral-experiment', provider: 'Mistral', icon: 'mistral', category: 'model_free_tier',
-      title: 'Experiment 免费档',
-      quota: '每月约 10 亿 token；请求速率很低（约 1–2 次/分），适合批处理而非实时应用',
-      docsUrl: 'https://docs.mistral.ai/deployment/labs/', claimUrl: 'https://console.mistral.ai',
-      lastVerifiedAt: '2026-09-30',
+      title: 'Free mode（原 Experiment 档）',
+      quota: '新账号默认即 Free mode，无需绑卡、注册即可调用；官方已不再公布额度数字，实际限额在控制台 Limits 里看',
+      docsUrl: 'https://docs.mistral.ai/getting-started/quickstart/', claimUrl: 'https://console.mistral.ai',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'google-ai-studio', provider: 'Google AI Studio', icon: 'google', category: 'model_free_tier',
       title: 'Gemini API 免费档（无需绑卡）',
-      quota: '官方已不再公布固定数字，具体限额在 AI Studio 内查看；每日请求窗太平洋时间午夜重置',
+      quota: '官方已不再公布固定数字，具体限额在 AI Studio 内查看；每日请求窗按太平洋时间午夜重置。不支持中国大陆等地区，且免费档的对话内容会用于改进产品',
       docsUrl: 'https://ai.google.dev/gemini-api/docs/rate-limits', claimUrl: 'https://aistudio.google.com/apikey',
-      lastVerifiedAt: '2026-09-25',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'deepseek-none', provider: 'DeepSeek', icon: 'deepseek', category: 'model_free_tier',
       title: '没有免费档',
       quota: '官方定价仅按 token 计费；网上流传的「DeepSeek 免费额度」均非官方',
       docsUrl: 'https://api-docs.deepseek.com/quick_start/pricing',
-      lastVerifiedAt: '2026-09-25',
+      lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'kimi-none', provider: 'Moonshot Kimi', icon: 'moonshot', category: 'model_free_tier',
-      title: '没有免费档',
-      quota: '文档中未提供免费额度或免费模型',
-      docsUrl: 'https://platform.kimi.com/docs/guide/start-using-kimi-api',
-      lastVerifiedAt: '2026-09-25',
+      title: '没有免费模型档；完成认证送 15 元代金券',
+      quota: '官方文档写明：新用户完成个人或企业认证后赠送 15 元代金券（Kimi K3 不在可用范围）；没有长期免费模型或免费档',
+      docsUrl: 'https://platform.kimi.com/docs/guide/account-and-payments', claimUrl: 'https://platform.kimi.com/console/auth',
+      claimFlow: 'needsVerification', lastVerifiedAt: '2026-09-30',
     },
 
     // ---- 试用金 / 新客额度 ----
     {
       id: 'dashscope-new', provider: '阿里云百炼（千问）', icon: 'qwen', category: 'trial_credit',
       title: '新用户按模型各送免费 token',
-      quota: '每模型 100 万 token、90 天有效；仅北京地域，不可跨模型合并',
+      quota: '每模型 100 万 token、90 天有效；仅华北 2（北京）地域，不可跨模型合并。首次开通时平台自动发放，无需手动领取（页面上没有领取按钮）',
       docsUrl: 'https://help.aliyun.com/zh/model-studio/new-free-quota', claimUrl: 'https://bailian.console.aliyun.com',
-      presetId: 'qwen', lastVerifiedAt: '2026-09-25',
+      presetId: 'qwen', claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'volc-ark', provider: '火山方舟（豆包）', icon: 'doubao', category: 'trial_credit',
       title: '每款豆包模型赠免费 tokens',
-      quota: '每款豆包大模型 50 万 tokens；企业协作计划每日最高 500 万',
-      docsUrl: 'https://www.volcengine.com/docs/82379', claimUrl: 'https://console.volcengine.com/ark',
-      lastVerifiedAt: '2026-09-30',
+      quota: '每款豆包大模型 50 万 tokens（安心体验模式，同一主账号下共享、按模型分别计算）；需先在控制台「开通管理」里开通对应模型',
+      docsUrl: 'https://www.volcengine.com/docs/ark/free-inference-quota', claimUrl: 'https://console.volcengine.com/ark',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'siliconflow-new', provider: '硅基流动', icon: 'siliconcloud', category: 'trial_credit',
-      title: '新客体验金 + 长期免费的小模型',
-      quota: '注册送 ¥14（约 2000 万 token，不可用于满血 R1）；小型/嵌入/重排模型长期免费（限速较低）',
-      docsUrl: 'https://docs.siliconflow.cn/cn/userguide/introduction', claimUrl: 'https://cloud.siliconflow.cn',
-      presetId: 'siliconflow', lastVerifiedAt: '2026-09-30',
+      title: '长期免费的小模型（需先实名认证）',
+      quota: '完成实名认证后可用全部免费模型（小参数、嵌入、重排等，限速较低，费用为 0）；「注册送 ¥14」在官方文档与定价页均查无出处，本页不写',
+      docsUrl: 'https://docs.siliconflow.cn/cn/userguide/faqs/rate-limit-and-upgradation', claimUrl: 'https://cloud.siliconflow.cn',
+      presetId: 'siliconflow', claimFlow: 'needsVerification', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'cohere-trial', provider: 'Cohere', icon: 'cohere', category: 'trial_credit',
       title: '试用 Key 免费调用',
-      quota: '1,000 次调用/月；chat 模型 20 次/分',
+      quota: '1,000 次调用/月；chat 模型 20 次/分。官方写明：注册后自动生成 Trial Key，限速且不得用于生产环境',
       docsUrl: 'https://docs.cohere.com/docs/rate-limits', claimUrl: 'https://dashboard.cohere.com',
-      lastVerifiedAt: '2026-09-25',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'hf-inference', provider: 'Hugging Face', icon: 'huggingface', category: 'trial_credit',
       title: 'Inference Providers 月度免费额度',
-      quota: 'Free 账号 $0.10/月、PRO $2/月；OpenAI 兼容 router.huggingface.co/v1',
+      quota: 'Free 账号 $0.10/月、PRO $2/月（官方标注 subject to change）；OpenAI 兼容 router.huggingface.co/v1；额度用尽后需自购 credits',
       docsUrl: 'https://huggingface.co/docs/inference-providers/pricing', claimUrl: 'https://huggingface.co/settings/tokens',
-      lastVerifiedAt: '2026-09-25',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'cloudflare-workers-ai', provider: 'Cloudflare Workers AI', icon: 'cloudflare', category: 'trial_credit',
       title: '每日 10,000 Neurons 免费算力',
-      quota: 'Free 与 Paid Workers 计划都是 10,000 Neurons/天；提供 OpenAI 兼容入口 /ai/v1',
+      quota: 'Free 与 Paid Workers 计划都是 10,000 Neurons/天；提供 OpenAI 兼容入口 /ai/v1；个别模型标注要求 Workers Paid 计划',
       docsUrl: 'https://developers.cloudflare.com/workers-ai/platform/pricing/', claimUrl: 'https://dash.cloudflare.com',
-      lastVerifiedAt: '2026-09-25',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'fireworks-credit', provider: 'Fireworks', icon: 'fireworks', category: 'trial_credit',
       title: '$1 免费额度',
-      quota: '注册赠送 $1，用于开源模型推理',
-      docsUrl: 'https://fireworks.ai/pricing', claimUrl: 'https://fireworks.ai/account',
-      lastVerifiedAt: '2026-09-25',
+      quota: '注册赠送 $1 用于开源模型推理；平台是预付费额度制，用完后需先充值才能继续调用',
+      docsUrl: 'https://fireworks.ai/pricing', claimUrl: 'https://fireworks.ai/signup',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'nvidia-nim', provider: 'NVIDIA NIM', icon: 'nvidia', category: 'trial_credit',
-      title: '开发者计划免费试用',
-      quota: '面向原型验证免费（限额以 NIM 文档为准）',
-      docsUrl: 'https://www.nvidia.com/en-us/ai-data-science/nim/', claimUrl: 'https://build.nvidia.com',
-      lastVerifiedAt: '2026-09-25',
+      title: '开发者免费推理（额度未公开）',
+      quota: '官网只写「Free inference with leading models」，没有公开额度数字与期限；实际可用量以 build.nvidia.com 登录后的控制台为准',
+      docsUrl: 'https://build.nvidia.com', claimUrl: 'https://build.nvidia.com',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
     },
 
     // ---- 学生 / 开发者计划 ----
     {
       id: 'google-student', provider: 'Google AI Pro 学生版', icon: 'google', category: 'student_dev',
-      title: '在校生免费 1 年（注意：是 Gemini 应用订阅，不是 API 额度）',
-      quota: '美国 18 岁以上在校生；需资格验证与支付方式；兑换截止 2026-12-31；到期自动续费 $19.99/月',
-      docsUrl: 'https://gemini.google/students/', claimUrl: 'https://gemini.google/students/',
-      lastVerifiedAt: '2026-09-25',
+      title: '在校生免费 1 年（是 Gemini 应用订阅，不是 API 额度）',
+      quota: '需 SheerID 学生资格验证 + 有效支付方式；按院校所在地区分档（美国为 AI Pro，其他地区为 AI Plus）；香港、澳门等地区不参加；须在 2026-12-31 前兑换；到期后按当地价格自动续费',
+      docsUrl: 'https://one.google.com/offer/studentoffer8', claimUrl: 'https://gemini.google/students/?hl=en',
+      claimFlow: 'needsEligibility', lastVerifiedAt: '2026-09-30',
     },
     {
       id: 'github-student', provider: 'GitHub Student Developer Pack', icon: 'github', category: 'student_dev',
       title: '学生开发者大礼包',
-      quota: '含 Copilot Student、$100 Azure 额度、Codespaces 等',
+      quota: '含 Copilot Student、$100 Azure 额度、Codespaces 等；需 GitHub 账号并上传在读证明（学生证/课表/成绩单）等审核，审核通过后 Copilot Student 可能还需再激活一次',
       docsUrl: 'https://education.github.com/pack', claimUrl: 'https://education.github.com/pack',
-      lastVerifiedAt: '2026-09-25',
+      claimFlow: 'needsEligibility', lastVerifiedAt: '2026-09-30',
     },
 
     // ---- 本机离线 ----
     {
       id: 'ollama-local', provider: 'Ollama', icon: 'ollama', category: 'local',
       title: '本机运行不限量（唯一真正「无限免费」的一档）',
-      quota: 'OpenAI 兼容 http://localhost:11434/v1（Key 需要但被忽略）；吞吐受本机算力限制',
+      quota: 'OpenAI 兼容 http://localhost:11434/v1（Key 需要但被忽略）；吞吐受本机算力限制；本地接口不需要认证，也不需要账号',
       docsUrl: 'https://docs.ollama.com/api/openai-compatibility', claimUrl: 'https://ollama.com/download',
-      presetId: 'ollama', lastVerifiedAt: '2026-09-25',
+      presetId: 'ollama', claimFlow: 'noAccount', lastVerifiedAt: '2026-09-30',
+    },
+
+    // ---- 2026-09-30 扩充：海外免费算力与新客额度 ----
+    {
+      id: 'modal-credits', provider: 'Modal', category: 'trial_credit',
+      title: '$30/月免费算力，可跑 GPU 推理与训练',
+      quota: 'Starter 计划 $0：含 $30/月免费算力、100 个容器、10 路 GPU 并发，按月重置',
+      docsUrl: 'https://modal.com/pricing', claimUrl: 'https://modal.com/signup',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'assemblyai-credits', provider: 'AssemblyAI', icon: 'assemblyai', category: 'trial_credit',
+      title: '$50 额度，官方写明不过期',
+      quota: '新账号 $50、无需信用卡、不过期；含最多 185 小时预录转写或 333 小时流式转写（LLM Gateway 不在免费范围）',
+      docsUrl: 'https://www.assemblyai.com/pricing', claimUrl: 'https://www.assemblyai.com/dashboard/signup',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'deepgram-credits', provider: 'Deepgram', category: 'trial_credit',
+      title: '$200 额度，官方写明不过期',
+      quota: '$200 免费额度；官方标注 No expiration、No credit card required',
+      docsUrl: 'https://deepgram.com/pricing', claimUrl: 'https://console.deepgram.com/signup',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'voyage-embeddings', provider: 'Voyage AI', category: 'trial_credit',
+      title: '每个账号 2 亿 embedding token 免费',
+      quota: 'voyage-4 系列前 2 亿 token 免费、rerank-2.5 系列前 2 亿、multilingual-2 前 5,000 万；Batch API 不抵扣免费额度',
+      docsUrl: 'https://docs.voyageai.com/docs/pricing', claimUrl: 'https://www.voyageai.com/',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'scaleway-tokens', provider: 'Scaleway', category: 'trial_credit',
+      title: '新客户 100 万免费 token',
+      quota: '每个新客户 1,000,000 免费 token，从第 1,000,001 个起计费；欧洲机房',
+      docsUrl: 'https://www.scaleway.com/en/generative-apis/', claimUrl: 'https://console.scaleway.com/generative-api/models',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'ai21-trial', provider: 'AI21', icon: 'ai21', category: 'trial_credit',
+      title: '$10 试用金 / 7 天',
+      quota: 'Free Trial $10、7 天有效；官方写明无需信用卡',
+      docsUrl: 'https://www.ai21.com/pricing', claimUrl: 'https://studio.ai21.com/sign-up',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'jina-tokens', provider: 'Jina AI', icon: 'jina', category: 'trial_credit',
+      title: '新用户自动发带免费 token 的 Key',
+      quota: '官方 FAQ：新用户自动生成 API Key 并附免费 token，可用于全部模型；具体数量在 Dashboard 查看',
+      docsUrl: 'https://jina.ai/embeddings/', claimUrl: 'https://jina.ai/api-dashboard/',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'elevenlabs-free', provider: 'ElevenLabs', category: 'model_free_tier',
+      title: '免费档永久 10,000 credits/月',
+      quota: 'Free 档 $0：10,000 credits/月、2 路并发，覆盖语音合成、语音识别、音效与音乐',
+      docsUrl: 'https://elevenlabs.io/pricing', claimUrl: 'https://elevenlabs.io/app/sign-up',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'zai-flash', provider: 'Z.ai（智谱国际站）', icon: 'zhipu', category: 'model_free_tier',
+      title: 'GLM Flash 系列输入输出全免费',
+      quota: 'GLM-4.7-Flash / GLM-4.5-Flash / GLM-4.6V-Flash 在定价页的输入、缓存、输出全部标 Free',
+      docsUrl: 'https://docs.z.ai/guides/overview/pricing', claimUrl: 'https://z.ai/model-api',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'ibm-watsonx-free', provider: 'IBM watsonx', category: 'model_free_tier',
+      title: '免费计划每月 30 万 token',
+      quota: 'Free 计划：基础模型最多 300,000 tokens/月、ML 工具 20 CUH/月、文本抽取 100 文档/月',
+      docsUrl: 'https://www.ibm.com/products/watsonx-ai/pricing', claimUrl: 'https://dataplatform.cloud.ibm.com/registration/stepone',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'ovh-ai-endpoints', provider: 'OVHcloud AI Endpoints', category: 'model_free_tier',
+      title: '多款模型定价直接标 Free',
+      quota: 'Qwen3Guard、SDXL、语音合成等定价即 Free；限速：匿名 2 次/分/IP/模型，带 API Key 400 次/分/项目',
+      docsUrl: 'https://help.ovhcloud.com/csm/en-public-cloud-ai-endpoints-getting-started?id=kb_article_view&sysparm_article=KB0065779',
+      claimUrl: 'https://www.ovhcloud.com/en/public-cloud/ai-endpoints/catalog/',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'oracle-cloud-free', provider: 'Oracle Cloud', category: 'trial_credit',
+      title: '$300 / 30 天 + 永久免费层',
+      quota: '注册送 $300 云额度、30 天有效；另有 Always Free 服务无限期（Ampere ARM 计算、自治数据库等）；一人限一个免费账号',
+      docsUrl: 'https://www.oracle.com/cloud/free/', claimUrl: 'https://signup.cloud.oracle.com/',
+      claimFlow: 'needsVerification', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'gcp-trial', provider: 'Google Cloud', category: 'trial_credit',
+      title: '$300 / 90 天',
+      quota: '$300 欢迎额度、90 天内用完；另含 20 多项永久免费额度（e2-micro 每月 744 小时等，仅限美国三个区域）',
+      docsUrl: 'https://docs.cloud.google.com/free/docs/free-cloud-features', claimUrl: 'https://cloud.google.com/free',
+      claimFlow: 'needsVerification', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'azure-trial', provider: 'Microsoft Azure', icon: 'azure', category: 'trial_credit',
+      title: '$200 / 30 天 + 65 项永久免费',
+      quota: '$200 额度、30 天内用完；20+ 项服务免费 12 个月、65+ 项永久免费（翻译 200 万字符、语音 50 万字符等）',
+      docsUrl: 'https://azure.microsoft.com/en-us/free/', claimUrl: 'https://azure.microsoft.com/en-us/free/',
+      claimFlow: 'needsVerification', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'aws-free-tier', provider: 'AWS', icon: 'aws', category: 'trial_credit',
+      title: '最多 $200 / 6 个月',
+      quota: '新账号立即到账 $100，探索服务再赚最多 $100，合计最多 $200、6 个月内有效；Free 计划只能用部分服务（Bedrock 在列）',
+      docsUrl: 'https://aws.amazon.com/free/', claimUrl: 'https://aws.amazon.com/free/',
+      claimFlow: 'needsVerification', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'aliyun-intl-free', provider: '阿里云 Model Studio 国际站', icon: 'qwen', category: 'trial_credit',
+      title: '每模型 100 万 token / 90 天（新加坡）',
+      quota: '首次开通新加坡地域时自动发放，通常每模型 1,000,000 token、90 天有效、不可跨模型合并；只覆盖实时推理；重开账号不再发',
+      docsUrl: 'https://www.alibabacloud.com/help/en/model-studio/new-free-quota',
+      claimUrl: 'https://modelstudio.console.alibabacloud.com/',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'colab-free', provider: 'Google Colab', icon: 'colab', category: 'student_dev',
+      title: '免费 GPU 笔记本',
+      quota: '免费档提供 GPU，但官方写明高成本资源受限、型号随供给变动、单次会话最长 12 小时、有动态用量限制',
+      docsUrl: 'https://research.google.com/colaboratory/faq.html', claimUrl: 'https://colab.research.google.com/',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'hf-zerogpu', provider: 'Hugging Face ZeroGPU', icon: 'huggingface', category: 'student_dev',
+      title: '免费共享 GPU（跑 Space 与模型 demo）',
+      quota: '所有用户可免费使用 ZeroGPU Spaces；PRO 用户额度 ×8 且队列优先；免费个人号可托管最多 2 个 ZeroGPU Space',
+      docsUrl: 'https://huggingface.co/docs/hub/spaces-zerogpu', claimUrl: 'https://huggingface.co/spaces',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'paperspace-free', provider: 'Paperspace', category: 'student_dev',
+      title: '免费 GPU 机器',
+      quota: 'Free 计划 $0、标 FREE GPU；公共项目、12 小时自动关机、5GB 存储',
+      docsUrl: 'https://www.paperspace.com/pricing', claimUrl: 'https://console.paperspace.com/signup',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+
+    // ---- 2026-09-30 扩充：国内厂商与算力平台 ----
+    {
+      id: 'scnet-maas', provider: '国家超算互联网', category: 'trial_credit',
+      title: '新客 1000 万 Tokens（限活动期）',
+      quota: '注册实时到账 10,000,000 Tokens（DeepSeek-V4.1-Flash，1024K 上下文），30 天有效；限 2026-08-13～10-13 新注册账号、每账号 1 次',
+      docsUrl: 'https://www.scnet.cn/home/subject/maas/index.html', claimUrl: 'https://www.scnet.cn/home/subject/maas/index.html',
+      claimFlow: 'instant', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'sensenova-token-plan', provider: '商汤日日新', icon: 'sensenova', category: 'model_free_tier',
+      title: 'Token Plan 公测期免费',
+      quota: '通用与 Flash-Lite 两个积分池各 60,000 积分/滚动 5 小时 + 600,000 积分/滚动周；Flash-Lite 每消耗 1 专属积分返赠 1 通用积分（30 天有效）',
+      docsUrl: 'https://platform.sensenova.cn/docs', claimUrl: 'https://platform.sensenova.cn/',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'ant-ling-free', provider: '蚂蚁百灵', category: 'trial_credit',
+      title: '每日免费额度（新旧计费口径并存）',
+      quota: 'FAQ：每日 50 万 tokens、每日 02:00 前自动发放、不结转；计费升级说明：每月 1 日发放 1 张 10 元 Token 抵扣券——新注册用户按新平台规则走，以控制台实际到账为准',
+      docsUrl: 'https://developer.ant-ling.com/zh-CN/docs/faq', claimUrl: 'https://chat.ant-ling.com/open',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'modelscope-magicubes', provider: '魔搭 ModelScope', icon: 'modelscope', category: 'model_free_tier',
+      title: 'API-Inference 免费调用（魔粒制）',
+      quota: '每天登录送 200 魔粒（24 小时有效），绑定阿里云账号再 +50/天；轻量/标准/旗舰模型每次约消耗 0.5/1/2 魔粒',
+      docsUrl: 'https://www.modelscope.cn/docs/model-service/API-Inference/limits', claimUrl: 'https://www.modelscope.cn/',
+      claimFlow: 'needsVerification', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'ppio-coupon', provider: 'PPIO 派欧云', icon: 'ppio', category: 'trial_credit',
+      title: '注册自动发新用户代金券 + 免费体验模型',
+      quota: '官方文档：注册后自动获得新用户代金券；另提供完全免费的体验模型（模型列表可按「免费」筛选）',
+      docsUrl: 'https://ppio.com/docs/support/faq', claimUrl: 'https://ppio.com/',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'stepfun-model-lab', provider: '阶跃星辰', icon: 'stepfun', category: 'model_free_tier',
+      title: 'Model Lab 模型免费开放',
+      quota: 'Model Lab 的模型免费开放给开发者使用（官方不建议用于生产环境）；另有四个语音模型标注限时免费',
+      docsUrl: 'https://platform.stepfun.com/docs/zh/guides/models/model-lab', claimUrl: 'https://platform.stepfun.com/',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'xfyun-spark-free', provider: '讯飞星火', icon: 'spark', category: 'model_free_tier',
+      title: 'Spark-X2.5-1.7B 免费 + 实名新客礼包',
+      quota: '产品页 Spark-X2.5-1.7B 标「免费」、4B 标「限时免费」；完成个人实名认证的新用户可在免费套餐页领取礼包（额度随活动调整）',
+      docsUrl: 'https://xinghuo.xfyun.cn/sparkapi', claimUrl: 'https://xinghuo.xfyun.cn/sparkapi',
+      claimFlow: 'needsVerification', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'ksyun-model-api', provider: '金山云', category: 'trial_credit',
+      title: '每个模型 100 万 tokens 免费额度',
+      quota: '开通模型 API 服务后平台自动发放：每个文本模型与视觉理解模型 100 万 Tokens；图像与视频生成模型不含',
+      docsUrl: 'https://docs.ksyun.com/documents/44741', claimUrl: 'https://console.ksyun.com/',
+      claimFlow: 'afterLogin', lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'huawei-maas-free', provider: '华为云 ModelArts Studio', category: 'trial_credit',
+      title: '新用户按模型免费额度（需在控制台领取）',
+      quota: '需在控制台「模型推理 → 在线推理 → 区域选西南-贵阳一 → 免费服务」里手动领取；官方未给固定数字',
+      docsUrl: 'https://www.huaweicloud.com/product/modelarts/studio.html', claimUrl: 'https://www.huaweicloud.com/product/modelarts/studio.html',
+      claimFlow: 'instant', lastVerifiedAt: '2026-09-30',
+    },
+
+    // ---- 2026-09-30 扩充：明确「没有免费档」的反例（防旧攻略） ----
+    {
+      id: 'together-none', provider: 'Together AI', category: 'model_free_tier',
+      title: '没有免费试用',
+      quota: '官方原话：不提供免费试用，使用平台最少需先购买 $5 额度',
+      docsUrl: 'https://docs.together.ai/docs/quickstart', claimUrl: 'https://www.together.ai/pricing',
+      lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'deepinfra-none', provider: 'DeepInfra', icon: 'deepinfra', category: 'model_free_tier',
+      title: '必须先绑卡或预付',
+      quota: '官方原话：必须添加银行卡或预付费，否则无法使用服务',
+      docsUrl: 'https://deepinfra.com/pricing',
+      lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'xai-none', provider: 'xAI', category: 'model_free_tier',
+      title: 'API 没有免费档',
+      quota: '免费档只存在于 Grok 消费端；xAI 的 API 没有免费额度',
+      docsUrl: 'https://docs.x.ai/docs/overview',
+      lastVerifiedAt: '2026-09-30',
+    },
+    {
+      id: 'fal-none', provider: 'fal.ai', icon: 'fal', category: 'model_free_tier',
+      title: '免费额度只能用在网页 Playground',
+      quota: '官方原话：免费额度不能通过 API 或工作流使用',
+      docsUrl: 'https://docs.fal.ai/model-apis/pricing',
+      lastVerifiedAt: '2026-09-30',
     },
 
     // ---- 已退役（不删，防旧攻略） ----
@@ -177,7 +424,7 @@ export const FREE_TIER_CATALOG: FreeTierCatalog = {
       quota: '模型广场、推理 API、BYOK 已全部下线，官方文档引导迁移到 Azure AI Foundry',
       docsUrl: 'https://docs.github.com/en/github-models/about-github-models',
       retired: { at: '2026-07-30', note: '模型广场、推理 API、BYOK 全部下线' },
-      lastVerifiedAt: '2026-09-25',
+      lastVerifiedAt: '2026-09-30',
     },
   ],
 };
