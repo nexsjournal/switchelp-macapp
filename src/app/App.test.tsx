@@ -147,9 +147,10 @@ test('回归：配好模型后，页面上有「应用并重启 Codex」这一�
   expect(await screen.findByText('配置已提交，Codex 已重启；它回来后看看模型菜单。')).toBeInTheDocument();
 });
 
-test('已应用但没等到回执时，条上说事实，并把回执交回用户', async () => {
-  // 自动补记不成立的场合（宿主没重启、平台查不到启动时间）不能让用户卡在「待应用」上：
-  // 那条会误导人再点一次「应用并重启」，而配置其实早就写好了。
+test('已应用但没等到回执时，条上说事实，主按钮是「应用配置并重启」', async () => {
+  // 自动补记不成立的场合（宿主没重启、平台查不到启动时间）不能让用户卡在「待应用」上。
+  // 手动补记的兜底在「配置」页的事务面板里，不再在这条上放第二个入口——
+  // 「我已经重启过了」这种说状态的按钮被用户点名看不懂，这条上只留动作。
   const user = userEvent.setup();
   const applied = { ...modelRow(), hostState: 'awaiting_reload' as const };
   const confirmReload = vi.fn().mockResolvedValue({ operationId: 'op_9', open: false, events: [] });
@@ -165,8 +166,31 @@ test('已应用但没等到回执时，条上说事实，并把回执交回用�
   const bar = await screen.findByRole('region', { name: '待应用' });
   expect(within(bar).getByText('已应用，等 Codex 确认加载')).toBeInTheDocument();
   expect(within(bar).queryByRole('button', { name: '应用并重启 Codex' })).toBeNull();
+  expect(within(bar).getByRole('button', { name: '应用配置并重启' })).toBeInTheDocument();
+});
 
-  await user.click(within(bar).getByRole('button', { name: 'Codex 已经重启了' }));
+test('等待回执时「应用配置并重启」真的重启宿主并记账', async () => {
+  // 用户原话：「Codex 已经重启了这个按钮是什么意思我都没明白」——它原来只做手动补记。
+  // 现在主按钮是把宿主真正重启一次让它读入配置，确认弹窗说明会退出并重新打开 Codex。
+  const user = userEvent.setup();
+  const applied = { ...modelRow(), hostState: 'awaiting_reload' as const };
+  const confirmReload = vi.fn().mockResolvedValue({ operationId: 'op_9', open: false, events: [] });
+  const restartHost = vi.fn().mockResolvedValue({ appPath: '/Applications/ChatGPT.app', quitConfirmed: true, quitForced: false, launchedConfirmed: true });
+  const client = testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider], nextCursor: null }),
+    listModels: vi.fn().mockResolvedValue([applied]), listCredentials: vi.fn().mockResolvedValue([]),
+    detectInstances: vi.fn().mockResolvedValue([instance]),
+    applySummary: vi.fn().mockResolvedValue({ operationId: 'op_9', instanceId: 'inst_test', catalogRevision: 'rev_1',
+      defaultModel: 'gs/m_1', aliasCount: 1, stage: 'awaiting_reload', appliedAt: '2026-09-20T00:00:00Z' }),
+    confirmReload, restartHost });
+  render(<App client={client} />);
+  await screen.findByText('测试供应商');
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
+
+  const bar = await screen.findByRole('region', { name: '待应用' });
+  await user.click(within(bar).getByRole('button', { name: '应用配置并重启' }));
+  await user.click(await screen.findByRole('button', { name: '立即重启' }));
+
+  await waitFor(() => expect(restartHost).toHaveBeenCalledWith('inst_test'));
   await waitFor(() => expect(confirmReload).toHaveBeenCalledWith('op_9', true));
 });
 
@@ -404,6 +428,45 @@ function modelRow() {
     displayNameLayer: { discovered: null, userValue: null, overridden: false }, capabilityRevision: 1, version: 3,
     createdAt: '2026-09-18T00:00:00Z', updatedAt: '2026-09-18T00:00:00Z' };
 }
+
+test('从预设新建且填了 Key 的保存，接上模型发现且选中态跟随新供应商', async () => {
+  // 方案一（docs/design/08）：保存不再断流——预设厂商都支持 /models，
+  // 勾选弹窗直接接在保存后面；保存后详情也切到新供应商，不用自己在胶囊行里找。
+  const user = userEvent.setup();
+  const saved = { ...provider, id: 'p_new', name: 'DeepSeek', presetId: 'deepseek', activeCredentialId: 'k_new' };
+  const saveProvider = vi.fn().mockImplementation(async (draft: Record<string, unknown>) => ({ ...saved, ...draft, id: 'p_new' }));
+  const addCredential = vi.fn().mockResolvedValue({ id: 'k_new', providerId: 'p_new', label: '默认', secretRef: 'r', secretVersion: 1, maskedSuffix: '••••1', status: 'saved', scope: null, lastVerifiedAt: null, version: 1, createdAt: '2026-09-18T00:00:00Z' });
+  const discoverModels = vi.fn().mockResolvedValue([
+    { upstreamId: 'deepseek-chat', displayName: 'DeepSeek Chat', alreadySaved: false },
+    { upstreamId: 'vendor/old', displayName: '已在库里的', alreadySaved: true },
+  ]);
+  const saveModel = vi.fn().mockResolvedValue(modelRow());
+  const client = testClient({
+    listProviders: vi.fn().mockResolvedValueOnce({ items: [], nextCursor: null }).mockResolvedValue({ items: [saved], nextCursor: null }),
+    saveProvider, addCredential, selectCredential: vi.fn().mockResolvedValue(undefined),
+    listCredentials: vi.fn().mockResolvedValue([]),
+    discoverModels, saveModel,
+  });
+  render(<App client={client} />);
+  // 其他用例已经把「向导已看过」写进 localStorage，这里直接从网关页的空态进。
+  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
+  await user.click(await screen.findByRole('button', { name: '添加供应商' }));
+  const dialog = screen.getByRole('dialog');
+  await user.click(within(dialog).getByRole('button', { name: 'DeepSeek' }));
+  await user.type(within(dialog).getByLabelText('API Key'), 'synthetic-key');
+  await user.click(within(dialog).getByRole('button', { name: '保存' }));
+
+  // 供应商弹窗已关，发现弹窗接上来；发现调用带着新供应商与它的当前 Key。
+  await waitFor(() => expect(discoverModels).toHaveBeenCalledWith('p_new', 'k_new'));
+  const discoverDialog = await screen.findByRole('dialog', { name: '选择要添加的模型' });
+  expect(discoverDialog).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '添加 1 个模型' }));
+  expect(saveModel).toHaveBeenCalledWith(expect.objectContaining({ providerId: 'p_new', upstreamId: 'deepseek-chat' }), 0);
+
+  // 刷新后胶囊行里新供应商被选中（aria-current）。
+  const chips = screen.getByRole('group', { name: '供应商列表' });
+  await waitFor(() => expect(within(chips).getByRole('button', { name: /DeepSeek/ })).toHaveAttribute('aria-current', 'true'));
+});
 
 test('供应商弹窗就地显示这家供应商的模型与长度徽章', async () => {
   const user = userEvent.setup();
@@ -696,25 +759,21 @@ test('Key 池：加第二个 Key、改名、停用、删除都能做，当前 Ke
   await waitFor(() => expect(deleteCredential).toHaveBeenCalledWith('k_2'));
 });
 
-test('供应商列表可以搜索：过滤逻辑早就在，缺的是输入框', async () => {
-  // 回归：`query` 状态、`visibleProviders` 过滤与「没有匹配」的空态都已经写好，
-  // 但没有任何地方能输入——供应商一多只能在 300px 宽的列表里用眼睛找。
+test('供应商以胶囊行选择：全部列在一行，点谁详情显示谁', async () => {
+  // 版式改版：左列列表换成了页头下的胶囊行。搜索框随之退役——
+  // 胶囊自己会换行，家数再多也是一眼可见，不需要再靠关键词过滤。
   const user = userEvent.setup();
   const other = { ...provider, id: 'p_other', name: '另一家' };
   render(<App client={testClient({ listProviders: vi.fn().mockResolvedValue({ items: [provider, other], nextCursor: null }) })} />);
   await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '网关' }));
-  const list = await screen.findByRole('region', { name: '供应商列表' });
-  expect(within(list).getByText('测试供应商')).toBeInTheDocument();
-  expect(within(list).getByText('另一家')).toBeInTheDocument();
+  const chips = await screen.findByRole('group', { name: '供应商列表' });
+  expect(within(chips).getByText('测试供应商')).toBeInTheDocument();
+  expect(within(chips).getByText('另一家')).toBeInTheDocument();
 
-  await user.type(screen.getByLabelText('搜索供应商'), '另一');
-  expect(within(list).queryByText('测试供应商')).not.toBeInTheDocument();
-  expect(within(list).getByText('另一家')).toBeInTheDocument();
-
-  // 搜不到时给空态，而不是一张空白列表。
-  await user.clear(screen.getByLabelText('搜索供应商'));
-  await user.type(screen.getByLabelText('搜索供应商'), '不存在的东西');
-  expect(await screen.findByText('没有匹配的供应商')).toBeInTheDocument();
+  // 详情一开始是第一家；点另一颗胶囊，详情卡整体换过去，而不是两栏并排。
+  expect(screen.getByRole('heading', { name: '测试供应商' })).toBeInTheDocument();
+  await user.click(within(chips).getByRole('button', { name: /另一家/ }));
+  expect(screen.getByRole('heading', { name: '另一家' })).toBeInTheDocument();
 });
 
 test('供应商卡片报的是 Codex 状态：已加载/待应用/未纳入，且不再逐行重复', async () => {

@@ -1,9 +1,11 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
-import { Activity, Boxes, ChartColumn, ChevronRight, LayoutDashboard, ListChecks, Newspaper, PackageOpen, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, SlidersHorizontal, Wrench, Settings as SettingsIcon } from 'lucide-react';
+import { Activity, Boxes, ChartColumn, ChevronRight, Gift, LayoutDashboard, ListChecks, Newspaper, PackageOpen, Plus, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Wrench, Settings as SettingsIcon } from 'lucide-react';
 import type { Credential, Model, Provider } from '@/contracts/types';
-import { type AppliedSummary, type DesktopClient, type GatewayReport, type PlatformReport, type UpdateReport, toCoreError } from '@/desktop/client';
+import { type AppliedSummary, type DesktopClient, type DiscoveredModel, type GatewayReport, type PlatformReport, type UpdateReport, toCoreError } from '@/desktop/client';
 import { desktopClient } from '@/desktop/transport';
 import { ProviderForm } from '@/features/providers/ProviderForm';
+import { DiscoverModelsDialog } from '@/features/providers/DiscoverModelsDialog';
+import { addDiscoveredModels } from '@/features/providers/discoverFlow';
 import { ModelEditorPage } from '@/features/models/ModelEditorPage';
 import { OnboardingPage } from '@/features/onboarding/OnboardingPage';
 import { OverviewPage } from '@/features/overview/OverviewPage';
@@ -21,6 +23,7 @@ import { SettingsPage } from '@/features/settings/SettingsPage';
 import { ToolsPage } from '@/features/tools/ToolsPage';
 import { PluginHubPage } from '@/features/plugins/PluginHubPage';
 import { ContentPage } from '@/features/content/ContentPage';
+import { FreeTierPage } from '@/features/content/FreeTierPage';
 import { UsagePage } from '@/features/usage/UsagePage';
 import { UpdateDialog } from '@/features/update/UpdateDialog';
 import { UpdatePill } from '@/features/update/UpdatePill';
@@ -28,7 +31,7 @@ import { UpdatePill } from '@/features/update/UpdatePill';
 import styles from './App.module.css';
 
 import { useLocale, t } from '@/i18n';
-type Page = 'overview' | 'providers' | 'codexConfig' | 'tools' | 'plugins' | 'content' | 'usage' | 'diagnostics' | 'logs' | 'settings';
+type Page = 'overview' | 'providers' | 'codexConfig' | 'tools' | 'plugins' | 'content' | 'freeTier' | 'usage' | 'diagnostics' | 'logs' | 'settings';
 /**
  * 侧栏导航。`group` 只做视觉分组：它是分隔标签，不可点击也不折叠——
  * 为一组分隔引入折叠状态，收益是一条线，成本是用户又要学一个新控件。
@@ -39,6 +42,9 @@ const navigation = [
   { id: 'codexConfig', icon: SlidersHorizontal },
   // 「扩展」一组：内容中心放在最前（按用户要求），其余按「工具 → 插件」的因果顺序。
   { id: 'content', icon: Newspaper, group: 'shell.navGroup.extensions' },
+  // 免费额度：与内容中心同类（只汇集信息），紧跟其后；Gift 图标避开「又一个工具」的误读。
+  // 不带 group 标记：分组标签只挂在组的第一个条目（内容中心）上，出现两次就成了两个组。
+  { id: 'freeTier', icon: Gift },
   { id: 'tools', icon: Wrench },
   { id: 'plugins', icon: PackageOpen },
   // 用量放在扩展组末尾：它是只读自己数据的统计页，与内容中心同类，但不打断既有的因果顺序。
@@ -127,13 +133,14 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
    */
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [selectedProviderId, setSelectedProviderId] = useState('');
-  const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   /** 首次加载完成前才整页占位；后续刷新不得卸载当前页面（会丢失事务流程状态）。 */
   const [loaded, setLoaded] = useState(false);
   const [keyVersion, setKeyVersion] = useState(0);
   const [error, setError] = useState('');
   const [providerEditor, setProviderEditor] = useState<Provider | 'new' | null>(null);
+  /** 免费额度页「在网关中接入」带过来的预选预设；随弹窗关闭一并清掉。 */
+  const [providerEditorPreset, setProviderEditorPreset] = useState<string | null>(null);
   /**
    * 模型编辑器全 App 只有一份状态：模型目录页、供应商卡片、接入向导都从这里打开。
    * 只有一个入口才能在侧栏导航时统一拦截脏表单，而不是各自为政地丢内容。
@@ -250,7 +257,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
       setModelEditor(null);
       setEditorDirty(false);
     }
-    setPage(next); setQuery('');
+    setPage(next);
   }
   /** Key 变了：供应商行的状态与详情里的当前 Key 都要跟着变。 */
   function keysChanged() { setKeyVersion(version => version + 1); void refresh(); }
@@ -259,12 +266,48 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
    * 保存成功即关闭，因为用户把「不关」读成「没保存成功」）。
    * 提示也由弹窗自己推（它知道这次保存是新键还是更新），这里不重复报一次。
    */
-  function providerSaved() { keysChanged(); }
+  function providerSaved(saved: Provider) {
+    // 选中态跟随刚保存的那一家：从预设新建后，详情卡与模型表立刻切过去，
+    // 用户不用自己在胶囊行里找「刚才建的那个」。
+    setSelectedProviderId(saved.id);
+    /**
+     * 方案一（docs/design/08）：从**预设**新建、且已经有当前 Key 的保存，直接把
+     * 「选择要添加的模型」接在保存后面——预设厂商都支持 /models，让人保存完再打开
+     * 弹窗点「获取可用模型」是白走一趟。编辑既有供应商不触发（改个名不该冒出发现）。
+     */
+    if ((!providerEditor || providerEditor === 'new') && saved.presetId && saved.activeCredentialId) {
+      setAutoDiscover({ providerId: saved.id, credentialId: saved.activeCredentialId });
+    }
+    keysChanged();
+  }
+  /**
+   * 方案一的接续状态：intent（发现哪一家）与结果（清单）放在**同一个对象**里——
+   * `models` 为空表示还没取回来，取到后填进去；清 null 就是整个流程结束。
+   * 分成两个 state 会出现「intent 已清、列表才到」的空窗，弹窗永远渲染不出来。
+   */
+  const [autoDiscover, setAutoDiscover] = useState<{ providerId: string; credentialId: string; models?: DiscoveredModel[] } | null>(null);
+  useEffect(() => {
+    if (!autoDiscover || autoDiscover.models) return;
+    let current = true;
+    client.discoverModels(autoDiscover.providerId, autoDiscover.credentialId)
+      .then(list => {
+        if (!current) return;
+        // 一条也拿不到就如实说：别渲染一个空的勾选弹窗让人以为「没有模型」是正常态。
+        if (!list.length) showToast(t('providers.noUpstreamModels'), 'danger');
+        setAutoDiscover(list.length ? { ...autoDiscover, models: list } : null);
+      })
+      .catch(thrown => {
+        if (!current) return;
+        // 失败回落到现状路径：用户仍可从「编辑配置 → 获取可用模型」重试，Toast 说清原因。
+        showToast(toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('providers.discoverFailed'), 'danger');
+        setAutoDiscover(null);
+      });
+    return () => { current = false; };
+  }, [autoDiscover, client]);
+  const [discoverSaving, setDiscoverSaving] = useState(false);
   const pending = models.filter(m => m.inCatalog && m.hostState !== 'loaded');
   /** 待办只剩「等宿主回执」时，底栏改说事实：已经应用了，只是还没确认 Codex 读过。 */
   const awaitingHostOnly = pending.length > 0 && pending.every(m => m.hostState === 'awaiting_reload');
-  const search = query.trim().toLocaleLowerCase();
-  const visibleProviders = providers.filter(p => `${p.name} ${p.endpoint}`.toLocaleLowerCase().includes(search));
 
   return <div className={styles.shell} data-locale={locale}>
     {/*
@@ -315,12 +358,14 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
         {!showOnboarding && <header className={styles.pageHeader}><div><h1 className="text-page-title">{t(`nav.${page}`)}</h1><p>{({
               overview: t('page.overviewHint'), providers: t('page.providersHint'), codexConfig: t('page.codexHint'),
               tools: t('page.toolsHint'), plugins: t('page.pluginsHint'), content: t('page.contentHint'),
-              usage: t('page.usageHint'),
+              usage: t('page.usageHint'), freeTier: t('page.freeTierHint'),
               diagnostics: t('page.diagnosticsHint'), logs: t('page.logsHint'), settings: t('page.settingsHint'),
             })[page]}</p></div>
-          <div className="actions"><button className="icon-button" aria-label={t('common.reload')} disabled={loading} onClick={() => void refresh()}><RefreshCw size={18} className={loading ? styles.spin : ''} /></button>
-            {page !== 'codexConfig' && page !== 'logs' && page !== 'diagnostics' && page !== 'settings'
-              && page !== 'tools' && page !== 'plugins' && page !== 'content' && page !== 'usage'
+          <div className="actions">{page !== 'freeTier' && <button className="icon-button" aria-label={t('common.reload')} disabled={loading} onClick={() => void refresh()}><RefreshCw size={18} className={loading ? styles.spin : ''} /></button>}
+            {/* 网关页的「添加供应商」在供应商胶囊行的第一颗，页头不再重复放第二个入口；
+                免费额度页是静态清单，没有可刷新的数据，两个按钮都不出现。 */}
+            {page !== 'providers' && page !== 'codexConfig' && page !== 'logs' && page !== 'diagnostics' && page !== 'settings'
+              && page !== 'tools' && page !== 'plugins' && page !== 'content' && page !== 'usage' && page !== 'freeTier'
               && <button className="primary" disabled={loading} onClick={() => setProviderEditor('new')}><Plus size={18} />{t('action.addProvider')}</button>}</div></header>}
         {/* 页面状态（加载失败）留在页面里：它要一直看得见，直到状态本身改变。
             动作结果（已保存、已应用…）走全局 Toast，弹窗与常规界面共用同一个位置。 */}
@@ -350,70 +395,75 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
               description={t('providers.addFirstBody')}
               action={<button className="primary" onClick={() => setProviderEditor('new')}><Plus size={18} />{t('action.addProvider')}</button>} />
           </section>}
-          {page === 'providers' && providers.length > 0 && <div className={styles.providerLayout}><section className={styles.providerList} aria-label={t('providers.list')}>
-            {/* 搜索框以前缺着：`query` 状态、过滤逻辑与「没有匹配」的空态都在，就是没有输入的地方——
-                供应商一多只能靠眼睛在 300px 的列表里找。 */}
-            {providers.length > 1 && <div className={styles.providerSearch}>
-              <Search size={16} aria-hidden="true" />
-              <input type="search" value={query} aria-label={t('providers.searchAria')} placeholder={t('providers.searchPlaceholder')}
-                onChange={event => setQuery(event.target.value)} />
-            </div>}
-            {visibleProviders.map(provider => {
-              const own = models.filter(m => m.providerId === provider.id);
-              const modelCount = own.length;
-              /*
-               * 「已加载」是**供应商这一层**的事实：同一家的模型要么一起进了菜单、要么一起
-               * 待应用。逐行显示既啰嗦又容易被读成「每个模型各自的状态」。
-               * 一家供应商一个模型都没配时，Codex 状态无从谈起，那一行退回 Key 的状态。
-               */
-              const hostState = providerHostState(own);
-              const status = hostState
-                ? { tone: (hostStateVariant(hostState) || 'muted') as 'success' | 'warning' | 'muted', label: t(hostStateKeys[hostState]) }
-                : providerStatus(provider, credentialsByProvider[provider.id] ?? []);
-              const selected = selectedProviderId === provider.id;
-              return <button key={provider.id} className={`${styles.providerItem} ${selected ? styles.selected : ''}`}
-                onClick={() => setSelectedProviderId(provider.id)} aria-current={selected ? 'true' : undefined}>
-                <span className={styles.providerHead}>
-                  <span className={styles.monogram}>{provider.name.slice(0, 1)}</span>
-                  <span className={styles.providerName}><strong>{provider.name}</strong><span>{provider.enabled ? t('providers.modelCount', { count: modelCount }) : t('providers.disabledModelCount', { count: modelCount })}</span></span>
-                </span>
-                <span className={styles.providerStatus}>
-                  <span className={`${styles.statusDot} ${styles[status.tone]}`} aria-hidden="true" />
-                  <span className={styles.statusLabel}>{status.label}</span>
-                </span>
-              </button>;
-            })}
-            {!visibleProviders.length && <EmptyState icon={Search} title={t('providers.noMatch')} description={t('providers.noMatchBody')} />}
-          </section>{selectedProvider ? <section className={styles.card}>
-            <div className={styles.cardHeader}><h2>{selectedProvider.name}</h2><div className="actions">
-              <button onClick={() => setProviderEditor(selectedProvider)}>{t('providers.editConfig')}</button>
-              <button className="danger" aria-label={t('providers.deleteProviderAria', { name: selectedProvider.name })}
-                onClick={() => setConfirm({
-                  title: t('providers.deleteProvider'),
-                  body: t('providers.deleteProviderBody', {
-                    name: selectedProvider.name,
-                    keys: (credentialsByProvider[selectedProvider.id] ?? []).length,
-                    models: models.filter(model => model.providerId === selectedProvider.id).length,
-                  }),
-                  confirmLabel: t('providers.deleteProvider'),
-                  run: async () => { await client.deleteProvider(selectedProvider.id); },
-                })}>{t('providers.deleteProvider')}</button>
-            </div></div>
-            <dl className={styles.details}><dt>{t('providers.endpoint')}</dt><dd className="text-mono break-anywhere">{selectedProvider.endpoint}</dd><dt>{t('providers.protocol')}</dt><dd>{selectedProvider.protocol === 'responses' ? 'Responses' : t('providers.chatPending')}</dd><dt>{t('providers.authKind')}</dt><dd>{selectedProvider.authKind === 'api_key' ? t('auth.apiKey') : t('providers.noAuth')}</dd></dl>
+          {page === 'providers' && providers.length > 0 && <>
             {/*
-              这一页只放事实（地址、协议、模型）与动作入口：Key 的增删改、获取模型、
-              测试连接都在供应商弹窗里，由「编辑配置」进入。同一件事只有一个入口，
-              才不会出现两处谁才算数的问题。
-            */}
-            <div className={styles.cardHeader}><h3><Boxes size={18} />{t('models.title')}</h3>
-              <button onClick={() => setModelEditor('new')} disabled={!selectedProvider}><Plus size={16} />{t('action.addModel')}</button></div>
-            <ModelsPage client={client} providers={providers} models={models} onChanged={refresh}
-              onEditModel={target => setModelEditor(target)} providerScope={selectedProvider.id} embedded />
-          </section> : <section className={styles.card}><EmptyState icon={Settings2} title={t('providers.noneSelected')} description={t('providers.noneSelectedBody')} /></section>}</div>}
+             * 供应商页的版面照参考界面收成一条直线：页头下面一行胶囊 chip 选供应商，
+             * 详情卡占满整行。以前是 300px 左列 + 详情两栏——列表行把状态、模型数各占一行，
+             * 详情被挤在右半边，模型表要在很窄的宽度里横向省略。
+             */}
+            <div className={styles.providerChips} role="group" aria-label={t('providers.list')}>
+              {/* 「添加供应商」是这行的第一颗胶囊：新建就发生在选择供应商的同一个位置，
+                  不必让眼睛跳回页头右上角找主按钮。 */}
+              <button className={`${styles.providerChip} ${styles.chipAdd}`} onClick={() => setProviderEditor('new')}>
+                <Plus size={16} aria-hidden="true" />{t('action.addProvider')}
+              </button>
+              {providers.map(provider => {
+                const own = models.filter(m => m.providerId === provider.id);
+                /*
+                 * 「已加载」是**供应商这一层**的事实：同一家的模型要么一起进了菜单、要么一起
+                 * 待应用。一家供应商一个模型都没配时，Codex 状态无从谈起，那一行退回 Key 的状态。
+                 */
+                const hostState = providerHostState(own);
+                const status = hostState
+                  ? { tone: (hostStateVariant(hostState) || 'muted') as 'success' | 'warning' | 'muted', label: t(hostStateKeys[hostState]) }
+                  : providerStatus(provider, credentialsByProvider[provider.id] ?? []);
+                const selected = selectedProviderId === provider.id;
+                return <button key={provider.id} className={`${styles.providerChip} ${selected ? styles.chipSelected : ''}`}
+                  aria-current={selected ? 'true' : undefined} onClick={() => setSelectedProviderId(provider.id)}>
+                  <span className={`${styles.chipDot} ${styles[status.tone]}`} aria-hidden="true" />
+                  <strong>{provider.name}</strong>
+                  <span className={styles.chipMeta}>{status.label}</span>
+                </button>;
+              })}
+            </div>
+            {selectedProvider ? <section className={styles.card}>
+              <div className={styles.cardHeader}><h2>{selectedProvider.name}</h2><div className="actions">
+                <button onClick={() => setProviderEditor(selectedProvider)}>{t('providers.editConfig')}</button>
+                <button className="danger" aria-label={t('providers.deleteProviderAria', { name: selectedProvider.name })}
+                  onClick={() => setConfirm({
+                    title: t('providers.deleteProvider'),
+                    body: t('providers.deleteProviderBody', {
+                      name: selectedProvider.name,
+                      keys: (credentialsByProvider[selectedProvider.id] ?? []).length,
+                      models: models.filter(model => model.providerId === selectedProvider.id).length,
+                    }),
+                    confirmLabel: t('providers.deleteProvider'),
+                    run: async () => { await client.deleteProvider(selectedProvider.id); },
+                  })}>{t('providers.deleteProvider')}</button>
+              </div></div>
+              <dl className={styles.details}><dt>{t('providers.endpoint')}</dt><dd className="text-mono break-anywhere">{selectedProvider.endpoint}</dd><dt>{t('providers.protocol')}</dt><dd>{selectedProvider.protocol === 'responses' ? 'Responses' : t('providers.chatPending')}</dd><dt>{t('providers.authKind')}</dt><dd>{selectedProvider.authKind === 'api_key' ? t('auth.apiKey') : t('providers.noAuth')}</dd></dl>
+              {/*
+                这一页只放事实（地址、协议、模型）与动作入口：Key 的增删改、获取模型、
+                测试连接都在供应商弹窗里，由「编辑配置」进入。同一件事只有一个入口，
+                才不会出现两处谁才算数的问题。
+              */}
+              <div className={styles.cardHeader}><h3><Boxes size={18} />{t('models.title')}</h3>
+                <button onClick={() => setModelEditor('new')} disabled={!selectedProvider}><Plus size={16} />{t('action.addModel')}</button></div>
+              <ModelsPage client={client} providers={providers} models={models} onChanged={refresh}
+                onEditModel={target => setModelEditor(target)} providerScope={selectedProvider.id} embedded />
+            </section> : <section className={styles.card}><EmptyState icon={Settings2} title={t('providers.noneSelected')} description={t('providers.noneSelectedBody')} /></section>}
+          </>}
           {page === 'codexConfig' && <CodexConfigPage client={client} models={models} summary={summary} onApplied={() => void refresh()} />}
           {page === 'tools' && <ToolsPage client={client} />}
           {page === 'plugins' && <PluginHubPage client={client} />}
           {page === 'content' && <ContentPage client={client} />}
+          {page === 'freeTier' && <FreeTierPage client={client}
+            onAccessInGateway={presetId => {
+              // 拿到 Key 回来这一步：直接跳到网关页、打开预选好预设的添加供应商弹窗。
+              setProviderEditorPreset(presetId);
+              setProviderEditor('new');
+              navigate('providers');
+            }} />}
           {page === 'usage' && <UsagePage client={client} />}
           {page === 'diagnostics' && <ConnectionPage client={client} providers={providers} />}
           {page === 'logs' && <LogsPage client={client} />}
@@ -425,9 +475,24 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
       <footer className={styles.statusbar}><span><span className={`${styles.dot} ${gateway?.running ? styles.online : styles.offline}`} />{gatewayText(gateway)}</span><span>{awaitingHostOnly ? t('shell.awaitingHost', { count: pending.length }) : t('shell.pendingModels', { count: pending.length })} <span className={styles.separator}>/</span>{t('shell.configOnDevice')}</span></footer>
     </div>
     {providerEditor && <ProviderForm client={client} provider={providerEditor === 'new' ? undefined : providerEditor}
+      initialPresetId={providerEditorPreset ?? undefined}
       providers={providers} models={models}
       onSaved={providerSaved} onKeysChanged={keysChanged} onChanged={refresh}
-      onClose={() => setProviderEditor(null)} />}
+      onClose={() => { setProviderEditor(null); setProviderEditorPreset(null); }} />}
+    {/*
+     * 方案一的接续弹窗：供应商弹窗已经按「保存即关」关闭，模型发现在这里接着出现。
+     * intent 在 fetch 期间不渲染任何东西（保存的 Toast 还在屏上），拿到清单才渲染勾选弹窗。
+     */}
+    {autoDiscover?.models && <DiscoverModelsDialog models={autoDiscover.models} busy={discoverSaving}
+      onAdd={async selected => {
+        const target = autoDiscover;
+        setDiscoverSaving(true);
+        try {
+          await addDiscoveredModels(client, target.providerId, selected, refresh);
+          setAutoDiscover(null);
+        } finally { setDiscoverSaving(false); }
+      }}
+      onClose={() => setAutoDiscover(null)} />}
     {pendingNav && <Dialog width="narrow" title={t('editor.discardTitle')} description={t('editor.discardBody')} dirty={false}
       onClose={() => setPendingNav(null)} footer={<footer className="form-footer">
         <span>{t('editor.discardIrreversible')}</span>
@@ -438,7 +503,7 @@ export function App({ client = desktopClient, initialPage = 'overview' }: { clie
             setPendingNav(null);
             setModelEditor(null);
             setEditorDirty(false);
-            setPage(target); setQuery('');
+            setPage(target);
           }}>{t('editor.leaveDiscard')}</button>
         </div>
       </footer>} />}

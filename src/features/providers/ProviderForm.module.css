@@ -1,28 +1,39 @@
 /*
  * 供应商弹窗（参考界面的单层版面）。
  *
- * 字段直接用全局的 `.form-fields` 间距，这里只放这个弹窗独有的三块：
- * 标题里的名称输入、密钥行、模型列表。
+ * 版面从上到下：常用供应商预设（仅新建态）→ 字段行（标签左、控件右，行间静息分隔线）
+ * → Key 池 → 模型列表。这里只放这个弹窗独有的样式，输入框与按钮用全局的基础样式。
  */
 
-/*
- * 名称就是标题：它平时读起来是一个标题，点进去就能改名。
- * 去掉输入框的所有外观（边框、底色、内边距），只留下文字本身，
- * 于是它和别的弹窗的标题长得一模一样。
- *
- * 类名写两遍（`.titleInput.titleInput`）是为了压过全局的
- * `input:not([type='checkbox'])`：那条规则的权重是 0,1,1，而全局样式在打包顺序上
- * 排在 CSS Module 之后，平手也是它赢。写成两个类（0,2,0）就不用赌加载顺序。
- */
-.titleInput.titleInput { flex: 1; min-width: 0; height: auto; padding: 0; border: 0; background: none; border-radius: 0;
-  font-size: var(--font-size-section-title); line-height: var(--line-height-section-title); font-weight: var(--font-weight-semibold); color: var(--text-primary); }
-.titleInput:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-xs); }
-
-/*
- * 弹窗正文。这里不用 `<form>`：保存按钮在底栏、模型区又各自有自己的动作
- * （获取、添加、测试、删除），把它们圈进一个表单只会让 Enter 的语义变得含糊。
- */
+/* 弹窗正文：Dialog 的 body 本身不带内边距，整块内容的 24px 由这里给。 */
 .form { display: grid; gap: 16px; padding: 24px; }
+
+/*
+ * 常用供应商预设：一行可以换行的胶囊 chip。点一家把名称、地址、协议填好；
+ * 「自定义」是空模板。选中态用全应用唯一的「这是当前的」画法：accent 淡底 + accent 字。
+ */
+.presets { display: grid; gap: 8px; }
+.presetRow { display: flex; flex-wrap: wrap; gap: 8px; }
+.presetChip { height: var(--control-height-compact); padding: 0 14px; gap: 6px;
+  border-radius: var(--radius-pill); font-size: var(--font-size-label); line-height: var(--line-height-label); }
+.presetChip[aria-pressed='true'] { background: var(--accent-subtle); border-color: var(--accent-border); color: var(--accent); font-weight: 500; }
+.presetChip[aria-pressed='true']:hover:not(:disabled) { background: var(--accent-subtle); }
+
+/*
+ * 字段行：标签一列、控件一列。标签列宽 104px——最长的「接口协议」与 Base URL 都放得下。
+ * 行间用静息分隔线断开；标签用 padding-top 对齐 40 高控件的文字基线（(40-20)/2 = 10px）。
+ */
+.rows { display: grid; }
+.row { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 6px 16px; align-items: start;
+  padding: 14px 0; border-top: 1px solid var(--border-subtle); }
+.row:first-child { border-top: 0; padding-top: 0; }
+.rowLabel { padding-top: 10px; font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); }
+.rowControl { display: grid; gap: 6px; min-width: 0; }
+/* 行内的 field-hint 比全局的更贴近控件：它解释的就是这一行。 */
+.rowControl .field-hint { margin: 0; }
+
+/* 连接测试行：摘要一句话在左，动作按钮在右；与 40 高的控件行同节奏。 */
+.testRow { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; }
 
 /* SecretField：输入框 + 显隐按钮，按钮压在右侧，输入框留出它的位置。
    同样要压过全局的输入框规则，所以类名写两遍。 */
@@ -30,7 +41,6 @@
 .secret .secretInput.secretInput { padding-right: 48px; }
 .secret button { position: absolute; right: 4px; top: 4px; }
 
-/* 实验状态的适配器提示：与普通 hint 同一个位置，但用警告色，因为它改的是「能用多少」的预期。 */
 /* 无认证的供应商：不渲染 Key 字段，但要说清现在是哪一种认证，而不是留一片空白。 */
 .authNote { margin: 0; padding: 12px 16px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
   background: var(--bg-input); color: var(--text-secondary); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
@@ -52,13 +62,6 @@
 .modelName { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--font-size-code); line-height: var(--line-height-code); overflow-wrap: anywhere; }
 .modelActions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .modelList .badge { flex-shrink: 0; }
-
-/* 结论条：成功是轻量的绿，失败用危险色；两种都带图标，颜色不是唯一编码。 */
-.banner { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: var(--radius-sm);
-  font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
-.banner > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.bannerSuccess { color: var(--status-success); background: var(--status-success-bg); }
-.bannerDanger { color: var(--status-danger); background: var(--status-danger-bg); }
 
 .footer { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px;
   border-top: 1px solid var(--border-subtle); background: var(--bg-surface); gap: 16px; }

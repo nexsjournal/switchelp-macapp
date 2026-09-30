@@ -20,22 +20,25 @@
 .report > strong { font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-primary); }
 .report > button { justify-self: start; }
 
-.itemList { list-style: none; margin: 0; padding: 0; }
-.itemList > li { border-top: 1px solid var(--border-subtle); }
-.itemList > li:first-child { border-top: 0; }
 /*
- * 新闻行。三处都是被全局 `button` 规则咬过的：不写 height 会被压成 40（内容 44 被挤掉 4），
- * 不关掉 `button:hover` 的无内边距底色，hover 会贴着文字铺一整条（用户原话「这块的 hover 样式也有问题」）。
- * 与工具管理列表同一套做法：底色交给 `::before`，左右各外扩 12px、上下各内收 2px。
+ * 资讯卡片网格（照「GitHub 热门」的 repoGrid 同一套语言：同一页两种内容一种形状）。
+ * grid 只拉伸 li 本身，里面的按钮要自己 `min-height: 100%` 才能等高——两层缺一不可。
  */
-.itemRow { position: relative; width: 100%; height: auto; display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 12px; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
-.itemRow::before { content: ''; position: absolute; inset: 2px -12px; border-radius: var(--radius-sm); background: transparent; transition: background var(--motion-hover); }
-.itemRow:hover::before { background: var(--bg-hover); }
-.itemRow:hover:not(:disabled) { background: none; }
-.itemRow > * { position: relative; }
-.itemRow:hover .itemTitle { color: var(--accent); }
-.itemTitle { font-size: var(--font-size-label); line-height: var(--line-height-label); }
-.itemMeta { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.newsGrid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+/*
+ * 卡片：标题在上（最多两行，截断加省略号），来源与时间钉在底部——
+ * 长标题不把卡片撑得参差，短标题的元信息也不上浮。整卡可点，外链图标随元信息淡显。
+ */
+.newsCard { width: 100%; min-height: 100%; display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 16px;
+  height: auto; text-align: left; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  background: var(--bg-input); }
+.newsCard:hover:not(:disabled) { border-color: var(--accent-border); }
+.newsCard:hover .newsTitle { color: var(--accent); }
+.newsTitle { font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-primary);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.newsMeta { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.newsSource { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .more { margin-top: 16px; }
 
 .repoGrid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
@@ -74,3 +77,4 @@
 .secret { position: relative; display: block; }
 .secret .secretInput.secretInput { padding-right: 48px; }
 .secret button { position: absolute; right: 4px; top: 4px; }
+

@@ -7,8 +7,10 @@ import { RowMenu } from '@/components/RowMenu';
 import { Switch } from '@/components/Switch';
 import { showToast, dismissTone } from '@/components/Toast';
 import { ModelFormDialog } from '@/features/models/ModelFormDialog';
-import { compactTokens, modelDraft, recommendedPolicy } from '@/features/models/policy';
+import { compactTokens, modelDraft } from '@/features/models/policy';
 import { DiscoverModelsDialog } from './DiscoverModelsDialog';
+import { addDiscoveredModels } from './discoverFlow';
+import { PROVIDER_PRESETS, type WellKnownPreset } from './presets';
 import styles from './ProviderForm.module.css';
 
 import { t } from '@/i18n';
@@ -40,9 +42,13 @@ function isLoopback(endpoint: string): boolean {
 /**
  * 供应商的唯一条目：录入、Key、模型、测试连接都在这里。
  *
- * 版面照参考界面收成一条直线：**名称 → 地址 → API 格式 → API Key → 模型列表**。
+ * 版面照参考界面收成一条直线：常用供应商预设行（仅新建态）→ 字段行
+ * （**名称 → 地址 → API 格式 → API Key → 连接测试**，标签在左、控件在右）→ Key 池 → 模型列表。
  * 名称是普通表单字段（以前把它塞进弹窗标题里，没人看得出那是个能点的输入框）。
  * 多出来的东西（备注、无认证、启用/停用、删除）都收进「更多」菜单。
+ *
+ * 预设只填公开地址与协议，**不预填真实 Key**——Key 是用户唯一要自己填的东西；
+ * 「自定义」就是空模板，点了把模板字段清空自己写。
  *
  * 两处容易出错的地方，这里都写成了不变量：
  *
@@ -50,11 +56,13 @@ function isLoopback(endpoint: string): boolean {
  *   这类动作本身就会把供应商的版本推高（保存供应商 v1 → 选当前 Key → v2）。如果还攥着创建时
  *   拿到的 v1 去写，就会被判成冲突，界面上一句「保存失败」什么也说明不了。所以这里从宿主给的
  *   活列表里取记录，并在真的撞上冲突时重读一次再写。
- * - **一次动作只推一条提示**，位置由全局 Toast 宿主决定（右下角悬浮），不再在弹窗底部摆横幅。
+ * - **一次动作只推一条提示**，位置由全局 Toast 宿主决定，不在弹窗底部摆横幅。
  */
-export function ProviderForm({ client, provider, providers, models, onSaved, onKeysChanged, onChanged, onClose }: {
+export function ProviderForm({ client, provider, initialPresetId, providers, models, onSaved, onKeysChanged, onChanged, onClose }: {
   client: DesktopClient;
   provider?: Provider;
+  /** 从免费额度页「在网关中接入」跳来时预选的预设：表单字段按它初始化。 */
+  initialPresetId?: string;
   /** 宿主持有的活列表：版本号以此为准，弹窗里的快照会过期。 */
   providers: Provider[];
   /** 全部模型；这里只展示当前供应商的，过滤在组件内做。 */
@@ -65,10 +73,14 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
   onChanged: () => Promise<void> | void;
   onClose: () => void;
 }) {
-  const [name, setName] = useState(provider?.name ?? '');
-  const [endpoint, setEndpoint] = useState(provider?.endpoint ?? '');
-  const [protocol, setProtocol] = useState<Provider['protocol']>(provider?.protocol ?? 'chat_completions');
-  const [authKind, setAuthKind] = useState<Provider['authKind']>(provider?.authKind ?? 'api_key');
+  // 从免费额度页跳来时按预设初始化（与 applyPreset 同一套取值），用户只差粘贴 Key。
+  const initialPreset = !provider && initialPresetId
+    ? PROVIDER_PRESETS.find(item => item.id === initialPresetId) ?? null : null;
+  const [appliedPreset, setAppliedPreset] = useState<WellKnownPreset | null>(initialPreset);
+  const [name, setName] = useState(provider?.name ?? (initialPreset ? t(initialPreset.nameKey) : ''));
+  const [endpoint, setEndpoint] = useState(provider?.endpoint ?? initialPreset?.baseUrl ?? '');
+  const [protocol, setProtocol] = useState<Provider['protocol']>(provider?.protocol ?? initialPreset?.protocol ?? 'chat_completions');
+  const [authKind, setAuthKind] = useState<Provider['authKind']>(provider?.authKind ?? initialPreset?.authKind ?? 'api_key');
   const [enabled, setEnabled] = useState(provider?.enabled ?? true);
   const [notes, setNotes] = useState(provider?.notes ?? '');
   const [showNotes, setShowNotes] = useState(false);
@@ -103,6 +115,7 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
   const [busy, setBusy] = useState('');
   const [dirty, setDirty] = useState(false);
   const nameInput = useRef<HTMLInputElement>(null);
+  const secretInput = useRef<HTMLInputElement>(null);
 
   const activeKey = keys.find(credential => credential.id === activeId) ?? null;
   const providerModels = models
@@ -122,6 +135,20 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
   }
 
   /**
+   * 应用一条预设（「自定义」传 null）：覆盖名称、地址、协议与认证方式。
+   * Key 字段不动——它是唯一留给用户填的东西，应用后把焦点送过去。
+   */
+  function applyPreset(preset: WellKnownPreset | null) {
+    setAppliedPreset(preset);
+    setName(preset ? t(preset.nameKey) : '');
+    setEndpoint(preset?.baseUrl ?? '');
+    setProtocol(preset?.protocol ?? 'chat_completions');
+    setAuthKind(preset?.authKind ?? 'api_key');
+    setDirty(true);
+    if (!preset || preset.authKind !== 'none') secretInput.current?.focus();
+  }
+
+  /**
    * 写一次供应商（必要时连带写 Key）。
    *
    * `version` 必须是当前最新版本，由调用方给出——冲突重试正是靠它。
@@ -129,7 +156,9 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
   async function write(version: number, values: { name: string; endpoint: string; typed: string }): Promise<Ready> {
     const saved = await client.saveProvider({
       id: target?.id, name: values.name, endpoint: values.endpoint,
-      protocol, authKind, enabled, notes: notes.trim() || null, presetId: target?.presetId,
+      protocol, authKind, enabled, notes: notes.trim() || null,
+      // 预设来源记进核心：它是「这家供应商是怎么来的」的事实，编辑时也随库里的那份走。
+      presetId: target?.presetId ?? appliedPreset?.id ?? null,
     }, version);
 
     let credentialId = activeId;
@@ -208,7 +237,7 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
   }
 
   /**
-   * 模型相关的动作（获取、添加）需要一份已落库的供应商与当前 Key。
+   * 模型相关的动作（获取、添加、连接测试）需要一份已落库的供应商与当前 Key。
    *
    * 已经保存过、这次也没改任何字段时**不写库**：地址没变就没必要再写一遍，
    * 白写一次还会撞上版本冲突。改了字段或还没保存过时才走 `persist`。
@@ -216,6 +245,36 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
   async function ensureReady(): Promise<Ready | null> {
     if (target && !dirty) return { providerId: target.id, credentialId: activeId };
     return persist();
+  }
+
+  /**
+   * 只读探测一个模型：读模型清单，不发真实生成，不产生费用。结论走全局 Toast。
+   * 调用方保证 credentialId 非空——没有 Key 时各入口自己先把「先填 Key」说出去。
+   */
+  async function probe(ready: { providerId: string; credentialId: string }, model: Model) {
+    const label = `${target?.name ?? name} / ${model.displayName}`;
+    setTesting(model.id);
+    try {
+      const report = await client.startProbe(
+        { providerId: ready.providerId, modelId: model.id, credentialId: ready.credentialId },
+        { includeGenerate: false },
+      );
+      const failed = report.stages.find(stage => stage.status === 'failed');
+      if (failed) showToast(t('providers.testFailed', { label, reason: t(failed.messageKey) }), 'danger');
+      else showToast(t('providers.testPassed', { label }));
+    } catch (thrown) {
+      showToast(t('providers.testFailed', { label, reason: toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('common.failed') }), 'danger');
+    } finally { setTesting(''); }
+  }
+
+  /** 连接测试行：先确保供应商与 Key 已落库（新建态填了 Key 就顺手保存），再探测第一个模型。 */
+  async function testConnection() {
+    const first = providerModels[0];
+    if (!first) return;
+    const ready = await ensureReady();
+    if (!ready) return;
+    if (!ready.credentialId) { showToast(t('providers.selectKeyFirst'), 'danger'); return; }
+    await probe({ providerId: ready.providerId, credentialId: ready.credentialId }, first);
   }
 
   /** 获取可用模型：需要地址与当前 Key，所以先确保它已经落库。 */
@@ -232,21 +291,11 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
     finally { setBusy(''); }
   }
 
-  /** 确认添加：上游不返回长度，统一用默认值写入，之后逐个核对（提示写在弹窗底栏）。 */
+  /** 确认添加：写库逻辑在 discoverFlow（供应商弹窗与「保存后自动接上发现」共用）。 */
   async function addDiscovered(selected: DiscoveredModel[]) {
     if (!targetId) return;
-    for (const model of selected) {
-      await client.saveModel({
-        providerId: targetId, upstreamId: model.upstreamId,
-        displayName: model.displayName || model.upstreamId, catalogAlias: '',
-        policy: recommendedPolicy(), inCatalog: true, displayNameOverridden: false,
-        // 发现出来的模型一律跟随供应商：上游列表不会告诉我们它走哪套协议。
-        protocolOverride: null,
-      }, 0);
-    }
+    await addDiscoveredModels(client, targetId, selected, onChanged);
     setDiscovered(null);
-    await onChanged();
-    showToast(t('providers.discoverAdded', { count: selected.length }));
   }
 
   /** 当前 Key 换一个：秘密值不变，只改「新请求用哪一个」。 */
@@ -325,19 +374,10 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
     void ensureReady().then(ready => { if (ready) setModelDialog({}); });
   }
 
-  /** 测试连接：只读探测（读模型列表，不发真实生成），不产生费用。 */
+  /** 模型行上的单行测试：只读探测这一行，不动别的。 */
   async function testModel(model: Model) {
     if (!target || !activeId) { showToast(t('providers.selectKeyFirst'), 'danger'); return; }
-    const label = `${target.name} / ${model.displayName}`;
-    setTesting(model.id);
-    try {
-      const report = await client.startProbe({ providerId: target.id, modelId: model.id, credentialId: activeId }, { includeGenerate: false });
-      const failed = report.stages.find(stage => stage.status === 'failed');
-      if (failed) showToast(t('providers.testFailed', { label, reason: t(failed.messageKey) }), 'danger');
-      else showToast(t('providers.testPassed', { label }));
-    } catch (thrown) {
-      showToast(t('providers.testFailed', { label, reason: toCoreError(thrown).safeDetails.join(t('common.listSeparator')) || t('common.failed') }), 'danger');
-    } finally { setTesting(''); }
+    await probe({ providerId: target.id, credentialId: activeId }, model);
   }
 
   /** 纳入 / 移出 Codex 目录。它是这个模型会不会出现在 Codex 菜单里的开关。 */
@@ -407,94 +447,158 @@ export function ProviderForm({ client, provider, providers, models, onSaved, onK
       </footer>}>
 
       <div className={styles.form}>
-        <label>{t('providers.name')}
-          <input ref={nameInput} value={name} required maxLength={64} aria-label={t('providers.name')}
-            placeholder={t('providers.namePlaceholder')} autoFocus={!target} spellCheck={false}
-            onChange={event => { setName(event.target.value); setDirty(true); }} /></label>
-        <p className="field-hint">{t('providers.nameHint')}</p>
+        {/* 新建态才有预设：编辑一家现有供应商时，「换成哪家」不是这一步的事。 */}
+        {!target && <section className={styles.presets} aria-label={t('providers.presetGroup')}>
+          <div className={styles.presetRow}>
+            {PROVIDER_PRESETS.map(preset => <button key={preset.id} type="button"
+              className={styles.presetChip} aria-pressed={appliedPreset?.id === preset.id}
+              title={preset.baseUrl} onClick={() => applyPreset(preset)}>{t(preset.nameKey)}</button>)}
+            <button type="button" className={styles.presetChip} aria-pressed={!appliedPreset}
+              onClick={() => applyPreset(null)}>
+              <Plus size={14} aria-hidden="true" />{t('providers.presetCustom')}
+            </button>
+          </div>
+          <p className="field-hint">{t('providers.presetHint')}</p>
+        </section>}
 
-        <label>{t('providers.baseUrl')}
-          <input type="url" required value={endpoint} spellCheck={false} placeholder="https://api.example.com/v1"
-            onChange={event => { setEndpoint(event.target.value); setDirty(true); }} /></label>
-        <p className="field-hint">{t('providers.openAiUrlHint')}</p>
-
-        <label><span className="field-label">{t('providers.apiFormat')}</span>
-          <select value={protocol} onChange={event => { setProtocol(event.target.value as Provider['protocol']); setDirty(true); }}>
-            <option value="chat_completions">{t('providers.formatChat')}</option>
-            <option value="responses">{t('providers.formatResponses')}</option>
-          </select></label>
-        <p className="field-hint">{t('providers.anthropicUnsupported')}</p>
-
-        {authKind === 'api_key' ? <>
-          {/* SecretField：保存后只显示掩码。输入框留空＝不动已有 Key，
-              直接写新值＝替换（编号不变，指向它的配置继续有效）。 */}
-          <label><span className="field-label">{t('auth.apiKey')}</span>
-            <span className={styles.secret}>
-              <input type={secretVisible ? 'text' : 'password'} value={secret} maxLength={4096} spellCheck={false}
-                autoComplete="new-password" aria-label={t('auth.apiKey')} className={styles.secretInput}
-                placeholder={activeKey ? t('providers.keySaved', { suffix: activeKey.maskedSuffix }) : t('key.secretPlaceholder')}
-                onChange={event => { setSecret(event.target.value); setDirty(true); }} />
-              <button type="button" className="icon-button" aria-label={secretVisible ? t('key.hide') : t('key.reveal')}
-                onClick={() => setSecretVisible(current => !current)}>{secretVisible ? <EyeOff size={16} /> : <Eye size={16} />}</button>
-            </span></label>
-          {keys.length > 1 && <label><span className="field-label">{t('providers.currentKey')}</span>
-            <select value={activeId ?? ''} onChange={event => void switchKey(event.target.value)}>
-              {keys.filter(credential => credential.status !== 'disabled')
-                .map(credential => <option key={credential.id} value={credential.id}>{credential.label} · {credential.maskedSuffix}</option>)}
-            </select></label>}
-          <p className="field-hint">{t('providers.apiKeyHint')}</p>
-
-          {/* Key 池：同一供应商下的每个 Key 各自一行，四种动作都能做。 */}
-          {target && keys.length > 0 && <section className={styles.keyPool} aria-label={t('key.poolTitle')}>
-            <div className={styles.keyPoolHead}>
-              <h3>{t('key.poolTitle')}</h3>
-              <button type="button" onClick={() => setAddingKey({ label: '', secret: '' })} disabled={working}>{t('key.add')}</button>
+        {/*
+         * 字段行：标签一列、控件一列，行间一条静息分隔线（照参考界面的版式）。
+         * 标签用显式的 htmlFor 关联：行式布局里 label 不再包着控件。
+         */}
+        <div className={styles.rows}>
+          <div className={styles.row}>
+            <label className={styles.rowLabel} htmlFor="provider-name">{t('providers.name')}</label>
+            <div className={styles.rowControl}>
+              <input id="provider-name" ref={nameInput} value={name} required maxLength={64}
+                placeholder={t('providers.namePlaceholder')} autoFocus={!target} spellCheck={false}
+                onChange={event => { setName(event.target.value); setDirty(true); }} />
+              <p className="field-hint">{t('providers.nameHint')}</p>
             </div>
-            <ul className={styles.keyList}>
-              {keys.map(credential => <li key={credential.id} className={credential.status === 'disabled' ? styles.keyOff : ''}>
-                {renamingKey?.id === credential.id
-                  ? <span className={styles.keyRename}>
-                      <input value={renamingKey.label} aria-label={t('key.labelAria', { label: credential.label })} maxLength={64}
-                        onChange={event => setRenamingKey({ id: credential.id, label: event.target.value })} />
-                      <button type="button" className="primary" onClick={() => void renameKey()} disabled={keyBusy === 'rename'}>{t('action.save')}</button>
-                      <button type="button" onClick={() => setRenamingKey(null)}>{t('action.cancel')}</button>
-                    </span>
-                  : <span className={styles.keyName}>
-                      <strong>{credential.label}</strong>
-                      <span className="text-mono text-muted">{credential.maskedSuffix}</span>
-                      {credential.id === activeId && <span className="badge">{t('key.current')}</span>}
-                      <span className="badge">{t(credentialStatusKeys[credential.status])}</span>
-                    </span>}
-                <span className={styles.keyActions}>
-                  {credential.id !== activeId && credential.status !== 'disabled'
-                    && <button type="button" onClick={() => void switchKey(credential.id)} disabled={working}>{t('key.makeCurrent')}</button>}
-                  <button type="button" onClick={() => setRenamingKey({ id: credential.id, label: credential.label })} disabled={working}>{t('common.edit')}</button>
-                  {/* 停用当前 Key 由核心拒绝；这里也先禁掉，理由写在 title 里，而不是点了才报错。 */}
-                  <button type="button" onClick={() => void toggleKeyDisabled(credential)}
-                    title={credential.id === activeId && credential.status !== 'disabled' ? t('key.currentCannotDisable') : undefined}
-                    disabled={working || keyBusy === credential.id || (credential.id === activeId && credential.status !== 'disabled')}>
-                    {credential.status === 'disabled' ? t('key.enable') : t('key.disable')}</button>
-                  <button type="button" className="danger" onClick={() => void deleteKey(credential)} disabled={working || keyBusy === credential.id || credential.id === activeId}
-                    title={credential.id === activeId ? t('key.currentCannotDelete') : undefined}>{t('action.delete')}</button>
+          </div>
+
+          <div className={styles.row}>
+            <label className={styles.rowLabel} htmlFor="provider-endpoint">{t('providers.baseUrl')}</label>
+            <div className={styles.rowControl}>
+              <input id="provider-endpoint" type="url" required value={endpoint} spellCheck={false}
+                placeholder="https://api.example.com/v1"
+                onChange={event => { setEndpoint(event.target.value); setDirty(true); }} />
+              <p className="field-hint">{t('providers.openAiUrlHint')}</p>
+            </div>
+          </div>
+
+          <div className={styles.row}>
+            <label className={styles.rowLabel} htmlFor="provider-protocol">{t('providers.apiFormat')}</label>
+            <div className={styles.rowControl}>
+              <select id="provider-protocol" value={protocol}
+                onChange={event => { setProtocol(event.target.value as Provider['protocol']); setDirty(true); }}>
+                <option value="chat_completions">{t('providers.formatChat')}</option>
+                <option value="responses">{t('providers.formatResponses')}</option>
+              </select>
+              <p className="field-hint">{t('providers.anthropicUnsupported')}</p>
+            </div>
+          </div>
+
+          {authKind === 'api_key' ? <>
+            {/* SecretField：保存后只显示掩码。输入框留空＝不动已有 Key，
+                直接写新值＝替换（编号不变，指向它的配置继续有效）。 */}
+            <div className={styles.row}>
+              <label className={styles.rowLabel} htmlFor="provider-secret">{t('auth.apiKey')}</label>
+              <div className={styles.rowControl}>
+                <span className={styles.secret}>
+                  <input id="provider-secret" ref={secretInput} type={secretVisible ? 'text' : 'password'}
+                    value={secret} maxLength={4096} spellCheck={false} autoComplete="new-password"
+                    className={styles.secretInput}
+                    placeholder={activeKey ? t('providers.keySaved', { suffix: activeKey.maskedSuffix }) : t('key.secretPlaceholder')}
+                    onChange={event => { setSecret(event.target.value); setDirty(true); }} />
+                  <button type="button" className="icon-button" aria-label={secretVisible ? t('key.hide') : t('key.reveal')}
+                    onClick={() => setSecretVisible(current => !current)}>{secretVisible ? <EyeOff size={16} /> : <Eye size={16} />}</button>
                 </span>
-              </li>)}
-            </ul>
-            {addingKey && <div className={styles.keyAdd}>
-              <label>{t('key.label')}
-                <input value={addingKey.label} maxLength={64} placeholder={t('key.labelPlaceholder')}
-                  onChange={event => setAddingKey({ ...addingKey, label: event.target.value })} /></label>
-              <label>{t('auth.apiKey')}
-                <input type="password" value={addingKey.secret} maxLength={4096} spellCheck={false} autoComplete="new-password"
-                  placeholder={t('key.secretPlaceholder')}
-                  onChange={event => setAddingKey({ ...addingKey, secret: event.target.value })} /></label>
-              <div className="actions">
-                <button type="button" className="primary" onClick={() => void addKey()} disabled={keyBusy === 'add'}>{t('key.addSave')}</button>
-                <button type="button" onClick={() => setAddingKey(null)}>{t('action.cancel')}</button>
+                <p className="field-hint">{t('providers.apiKeyHint')}</p>
+              </div>
+            </div>
+
+            {keys.length > 1 && <div className={styles.row}>
+              <label className={styles.rowLabel} htmlFor="provider-active-key">{t('providers.currentKey')}</label>
+              <div className={styles.rowControl}>
+                <select id="provider-active-key" value={activeId ?? ''} onChange={event => void switchKey(event.target.value)}>
+                  {keys.filter(credential => credential.status !== 'disabled')
+                    .map(credential => <option key={credential.id} value={credential.id}>{credential.label} · {credential.maskedSuffix}</option>)}
+                </select>
               </div>
             </div>}
-            <p className="field-hint">{t('key.poolHint')}</p>
-          </section>}
-        </> : <p className={styles.authNote}>{t('providers.noAuthOn')}</p>}
+          </> : <div className={styles.row}>
+            <span className={styles.rowLabel}>{t('providers.authKind')}</span>
+            <div className={styles.rowControl}>
+              <p className={styles.authNote}>{t('providers.noAuthOn')}</p>
+            </div>
+          </div>}
+
+          {/* 连接测试是供应商这一层的动作：对第一个模型跑一次只读探测。
+              新建态还没有模型，按钮先禁用并把原因写在 title 里，而不是点了才报错。 */}
+          <div className={styles.row}>
+            <span className={styles.rowLabel}>{t('providers.testRowTitle')}</span>
+            <div className={styles.rowControl}>
+              <div className={styles.testRow}>
+                <span className="field-hint">{t('providers.modelCountShort', { count: providerModels.length })}</span>
+                <button type="button" onClick={() => void testConnection()} disabled={working || !providerModels.length}
+                  title={!providerModels.length ? t('providers.testNeedsModel') : undefined}>
+                  {t('action.testConnection')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Key 池：同一供应商下的每个 Key 各自一行，四种动作都能做。 */}
+        {authKind === 'api_key' && target && keys.length > 0 && <section className={styles.keyPool} aria-label={t('key.poolTitle')}>
+          <div className={styles.keyPoolHead}>
+            <h3>{t('key.poolTitle')}</h3>
+            <button type="button" onClick={() => setAddingKey({ label: '', secret: '' })} disabled={working}>{t('key.add')}</button>
+          </div>
+          <ul className={styles.keyList}>
+            {keys.map(credential => <li key={credential.id} className={credential.status === 'disabled' ? styles.keyOff : ''}>
+              {renamingKey?.id === credential.id
+                ? <span className={styles.keyRename}>
+                    <input value={renamingKey.label} aria-label={t('key.labelAria', { label: credential.label })} maxLength={64}
+                      onChange={event => setRenamingKey({ id: credential.id, label: event.target.value })} />
+                    <button type="button" className="primary" onClick={() => void renameKey()} disabled={keyBusy === 'rename'}>{t('action.save')}</button>
+                    <button type="button" onClick={() => setRenamingKey(null)}>{t('action.cancel')}</button>
+                  </span>
+                : <span className={styles.keyName}>
+                    <strong>{credential.label}</strong>
+                    <span className="text-mono text-muted">{credential.maskedSuffix}</span>
+                    {credential.id === activeId && <span className="badge">{t('key.current')}</span>}
+                    <span className="badge">{t(credentialStatusKeys[credential.status])}</span>
+                  </span>}
+              <span className={styles.keyActions}>
+                {credential.id !== activeId && credential.status !== 'disabled'
+                  && <button type="button" onClick={() => void switchKey(credential.id)} disabled={working}>{t('key.makeCurrent')}</button>}
+                <button type="button" onClick={() => setRenamingKey({ id: credential.id, label: credential.label })} disabled={working}>{t('common.edit')}</button>
+                {/* 停用当前 Key 由核心拒绝；这里也先禁掉，理由写在 title 里，而不是点了才报错。 */}
+                <button type="button" onClick={() => void toggleKeyDisabled(credential)}
+                  title={credential.id === activeId && credential.status !== 'disabled' ? t('key.currentCannotDisable') : undefined}
+                  disabled={working || keyBusy === credential.id || (credential.id === activeId && credential.status !== 'disabled')}>
+                  {credential.status === 'disabled' ? t('key.enable') : t('key.disable')}</button>
+                <button type="button" className="danger" onClick={() => void deleteKey(credential)} disabled={working || keyBusy === credential.id || credential.id === activeId}
+                  title={credential.id === activeId ? t('key.currentCannotDelete') : undefined}>{t('action.delete')}</button>
+              </span>
+            </li>)}
+          </ul>
+          {addingKey && <div className={styles.keyAdd}>
+            <label>{t('key.label')}
+              <input value={addingKey.label} maxLength={64} placeholder={t('key.labelPlaceholder')}
+                onChange={event => setAddingKey({ ...addingKey, label: event.target.value })} /></label>
+            <label>{t('auth.apiKey')}
+              <input type="password" value={addingKey.secret} maxLength={4096} spellCheck={false} autoComplete="new-password"
+                placeholder={t('key.secretPlaceholder')}
+                onChange={event => setAddingKey({ ...addingKey, secret: event.target.value })} /></label>
+            <div className="actions">
+              <button type="button" className="primary" onClick={() => void addKey()} disabled={keyBusy === 'add'}>{t('key.addSave')}</button>
+              <button type="button" onClick={() => setAddingKey(null)}>{t('action.cancel')}</button>
+            </div>
+          </div>}
+          <p className="field-hint">{t('key.poolHint')}</p>
+        </section>}
 
         {showNotes && <label>{t('common.notes')}
           <textarea value={notes} maxLength={500} rows={2}

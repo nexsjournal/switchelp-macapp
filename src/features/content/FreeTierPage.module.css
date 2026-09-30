@@ -1,0 +1,30 @@
+/*
+ * 免费额度页（docs/design/09）。随包静态清单 + 类别筛选 + 卡片网格；
+ * 卡片形状与内容中心的资讯卡同一套（同一类「信息汇集」的事不长两种样子）。
+ */
+.page { display: grid; gap: 16px; }
+
+.head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.disclaimer { margin: 0; max-width: 640px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
+.version { font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+
+/* 卡片网格：grid 只拉伸 li 本身，里面的 article 要自己撑满高度（两层缺一不可）。 */
+.grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); padding: 24px; }
+.card__inner { display: flex; flex-direction: column; gap: 10px; height: 100%; padding: 16px;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-input); }
+.retired { opacity: .55; }
+.head_row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* 图标位与工具管理页 tile 同尺寸同底；单色图标继承文字色，深浅主题都不用另配。 */
+.icon { width: 32px; height: 32px; flex-shrink: 0; display: grid; place-items: center;
+  border-radius: var(--radius-sm); background: var(--bg-elevated); border: 1px solid var(--border-subtle); color: var(--text-secondary); }
+.monogram { font-size: var(--font-size-label); line-height: var(--line-height-label); font-weight: 500; }
+.provider { flex: 1; min-width: 0; font-size: var(--font-size-label); line-height: var(--line-height-label); font-weight: 500; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title { margin: 0; font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-primary);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.quota { margin: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.note { margin: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.actions { margin-top: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.actions button { height: var(--control-height-compact); font-size: var(--font-size-caption); line-height: var(--line-height-caption); padding: 0 10px; }
+.verified { font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }

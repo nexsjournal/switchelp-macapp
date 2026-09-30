@@ -33,30 +33,41 @@ export function Dialog({ title, description, onClose, dirty = false, busy = fals
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const previousFocus = useRef(document.activeElement as HTMLElement | null);
   const close = () => { if (!busy) { if (dirty) setConfirmDiscard(true); else onClose(); } };
-  return <Primitive.Root open onOpenChange={open => { if (!open) close(); }}>
-    <Primitive.Portal>
-      <Primitive.Overlay className={styles.overlay} />
-      <Primitive.Content className={`${styles.dialog} ${styles[width]}`} onCloseAutoFocus={event => {
-        event.preventDefault(); previousFocus.current?.focus();
-      }} onInteractOutside={event => event.preventDefault()}>
-        <header className={styles.header}>
-          <div className={styles.heading}>
-            {leadingIcon && <span className={styles.leadingIcon} aria-hidden="true">{leadingIcon}</span>}
-            <Primitive.Title className="text-section-title">{title}</Primitive.Title>
-            {description && <Primitive.Description className={styles.description}>{description}</Primitive.Description>}
-          </div>
-          <div className={styles.headerActions}>{headerActions}
-            <button className="icon-button" aria-label={t('common.close')} onClick={close} disabled={busy}><X size={18} /></button>
-          </div>
-        </header>
-        {confirmDiscard && <div className={styles.discard}>
-          <p>{t('editor.discardBody')}</p>
-          <div className="actions"><button onClick={() => setConfirmDiscard(false)} autoFocus>{t('editor.keepEditing')}</button>
-            <button className="danger" onClick={onClose}>{t('editor.discardTitle')}</button></div>
-        </div>}
-        <div className={styles.body} hidden={confirmDiscard}>{children}</div>
-        {footer && <div className={styles.footer} hidden={confirmDiscard}>{footer}</div>}
-      </Primitive.Content>
-    </Primitive.Portal>
-  </Primitive.Root>;
+  return <>
+    <Primitive.Root open onOpenChange={open => { if (!open) close(); }}>
+      <Primitive.Portal>
+        <Primitive.Overlay className={styles.overlay} />
+        <Primitive.Content className={`${styles.dialog} ${styles[width]}`} onCloseAutoFocus={event => {
+          event.preventDefault(); previousFocus.current?.focus();
+        }} onInteractOutside={event => event.preventDefault()}>
+          <header className={styles.header}>
+            <div className={styles.heading}>
+              {leadingIcon && <span className={styles.leadingIcon} aria-hidden="true">{leadingIcon}</span>}
+              <Primitive.Title className="text-section-title">{title}</Primitive.Title>
+              {description && <Primitive.Description className={styles.description}>{description}</Primitive.Description>}
+            </div>
+            <div className={styles.headerActions}>{headerActions}
+              <button className="icon-button" aria-label={t('common.close')} onClick={close} disabled={busy}><X size={18} /></button>
+            </div>
+          </header>
+          <div className={styles.body}>{children}</div>
+          {footer && <div className={styles.footer}>{footer}</div>}
+        </Primitive.Content>
+      </Primitive.Portal>
+    </Primitive.Root>
+    {/*
+     * 脏表单的放弃确认是**叠在上面的一只小弹窗**，不是把正文藏掉换成一段话。
+     * 以前是正文 hidden + 弹窗里只剩一行字——用户点关闭后看到一个几乎空掉的弹窗，
+     * 读成「关闭没反应」，只能再点一次或去点 X 之外的地方。
+     */}
+    {confirmDiscard && <Dialog width="narrow" title={t('editor.discardBody')}
+      dirty={false} busy={busy} onClose={() => setConfirmDiscard(false)}
+      footer={<footer className="form-footer">
+        <span>{t('editor.discardIrreversible')}</span>
+        <div className="actions">
+          <button onClick={() => setConfirmDiscard(false)} autoFocus>{t('editor.keepEditing')}</button>
+          <button className="danger" onClick={onClose}>{t('editor.discardTitle')}</button>
+        </div>
+      </footer>} />}
+  </>;
 }

@@ -2,7 +2,7 @@
   "name": "switchelp",
   "private": true,
   "license": "MIT",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,6 +16,7 @@
     "test:core": "cargo test -p switch-core"
   },
   "dependencies": {
+    "@lobehub/icons": "^1.97.2",
     "@radix-ui/react-dialog": "^1",
     "@tauri-apps/api": "^2",
     "lucide-react": "^0.470.0",
