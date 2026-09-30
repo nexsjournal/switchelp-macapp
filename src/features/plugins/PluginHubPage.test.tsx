@@ -385,7 +385,8 @@ describe('技能市场', () => {
     // 来源标识里没有 `/` ＝ 市场：本地筛几千条没有意义，关键词要交给对方的搜索接口（400ms 防抖）。
     await screen.findByRole('list', { name: '技能卡片' });
     await user.type(screen.getByLabelText('搜索技能'), 'pdf');
-    await waitFor(() => expect(browsePluginRepo).toHaveBeenLastCalledWith('clawhub', 'pdf'), { timeout: 2000 });
+    // 第三个参数是「顺带补齐哪个技能的正文」，只有进详情时才有值；搜索这一次是 undefined。
+    await waitFor(() => expect(browsePluginRepo).toHaveBeenCalledWith('clawhub', 'pdf', undefined), { timeout: 2000 });
 
     // 市场不是 GitHub：卡片上的来源图标回链到它自己的技能页。
     await user.click(screen.getAllByRole('button', { name: '打开来源页' })[0]!);

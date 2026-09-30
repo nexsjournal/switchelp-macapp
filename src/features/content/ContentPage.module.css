@@ -48,7 +48,10 @@
   justify-content: stretch; justify-items: stretch; align-content: start;
   border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); color: inherit; text-align: left; cursor: pointer; }
 .repoCard:hover { border-color: var(--accent-border); }
-.repoName { font-family: var(--font-mono); font-size: var(--font-size-label); line-height: var(--line-height-label); }
+.repoName { font-family: var(--font-mono); font-size: var(--font-size-label); line-height: var(--line-height-label);
+  /* 长仓库名（owner/repo 一长串）必须截断：卡片是 grid，格项默认 min-width:auto，
+     不写 min-width:0 + 截断就会把文字顶出卡片外沿（用户截图里好几处这样）。 */
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repoStars { font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--status-warning); }
 /* 同上：仓库卡片也是 button，nowrap 会把它压成一行。 */
 .repoSummary { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; }

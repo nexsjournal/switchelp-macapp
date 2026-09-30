@@ -65,6 +65,15 @@ pub struct RepoCatalog {
     /// 界面据此回落到原来的做法。见 `plugins::registry::homepage_of`。
     pub homepage: Option<String>,
     pub skills: Vec<RepoSkill>,
+    /// 来源自己给出的**总数**：当前关键词下市场里一共有多少条。
+    ///
+    /// 只有技能市场会填，而且只在响应里真的带了它时（SkillHub 的 `data.total`）。
+    /// 界面据此说「共 N 条，已列出 M」；`M` 就是 `skills.len()`。
+    ///
+    /// **读不到就是 `None`，不猜**：GitHub 仓库一次拿全（`skills` 就是全部，
+    /// 被 [`MAX_SKILLS_PER_REPO`] 截断时看 `truncated`），ClawHub 的列表与搜索响应里
+    /// 没有总数的字段（列表响应有 `nextCursor`，但它只能说明「还有下一页」）。
+    pub total: Option<usize>,
     pub fetched_at: i64,
     /// 读全了多少个技能目录里的文件。超过上限时小于 `skills.len()`。
     pub truncated: bool,
@@ -308,6 +317,8 @@ pub fn assemble(
         // 仓库来源没有「平台页面」这一说；市场来源由 `PluginService::browse` 补上。
         homepage: None,
         skills,
+        // 仓库一次拿全：`skills` 就是全部（截断看 `truncated`），没有另一个「总数」可说。
+        total: None,
         fetched_at: now,
         truncated,
     })

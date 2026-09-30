@@ -125,7 +125,7 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
     }).catch(() => setTargets([]));
   }, [client]);
 
-  const browse = useCallback(async (target: string, search?: string) => {
+  const browse = useCallback(async (target: string, search?: string, skill?: string) => {
     if (!target) return;
     setLoadingCatalog(true);
     setCatalogError(null);
@@ -133,7 +133,7 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
     // 重新取目录就回列表：目录换了之后，刚才在看的那条技能可能已经不在里面了。
     setDetailSkill(null);
     try {
-      const result = await client.browsePluginRepo(target, search);
+      const result = await client.browsePluginRepo(target, search, skill);
       setCatalog(result);
       setMarkdownOpen(false);
     } catch (cause) {
@@ -192,9 +192,15 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
   );
 
   /** 卡片 → 详情。展开状态跟着技能走：换一条就重新折叠。 */
+  /** 列表阶段的目录条目只有名字与描述，正文要等打开时才取（见 registry 的 CATALOG_BLOB）。 */
+  const bodyPending = (skill: RepoSkill) =>
+    isRegistry && !(skill.files.find(file => file.path.endsWith('SKILL.md'))?.text ?? '').trim();
+
   const openDetail = (skill: RepoSkill) => {
     setDetailSkill(skill.dirName);
     setMarkdownOpen(false);
+    // 市场来源按需取这一个技能的正文与文件清单：不进详情就不花这次请求。
+    if (bodyPending(skill)) void browse(repo, query.trim(), skill.dirName);
   };
 
   const startInstall = async (skill: RepoSkill) => {
@@ -414,7 +420,13 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
               )}
             </div>
             {catalog && (
-              <p className={styles.commit}>{t('plugins.source.commit', { commit: catalog.commit.slice(0, 8), count: catalog.skills.length })}</p>
+              /* 市场来源没有 git 提交可言（那个标记是平台自己的版本日期），别写「钉在提交」；
+                 它列的是**本次拿到的一页**，条数上限写在核心的 registry 里。 */
+              <p className={styles.commit}>{isRegistry
+                ? (catalog.total
+                    ? t('plugins.source.listedTotal', { total: catalog.total, count: catalog.skills.length })
+                    : t('plugins.source.listed', { count: catalog.skills.length }))
+                : t('plugins.source.commit', { commit: catalog.commit.slice(0, 8), count: catalog.skills.length })}</p>
             )}
             {/* 提醒与上面的来源行之间要有间距：卡片自身没有行间距，直接相邻会贴在一起。 */}
             {catalogError && (
@@ -467,7 +479,9 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
                 onClick={() => setMarkdownOpen(open => !open)}>
                 {markdownOpen ? t('plugins.hideDocument') : t('plugins.showDocument')}
               </button>
-              {markdownOpen && <pre className={styles.markdown}>{current.files[0]?.text}</pre>}
+              {markdownOpen && (bodyPending(current)
+                ? <p className={styles.fileList}>{t('plugins.documentPending')}</p>
+                : <pre className={styles.markdown}>{current.files.find(file => file.path.endsWith('SKILL.md'))?.text ?? current.files[0]?.text}</pre>)}
               {current.files.length > 1 && (
                 <p className={styles.fileList}>
                   {t('plugins.siblingFiles', { count: current.files.length - 1 })}
@@ -511,12 +525,12 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
                   placeholder={t('plugins.searchPlaceholder')} aria-label={t('plugins.search')} />
               )}
               {loadingCatalog ? (
-                <div className={styles.empty} role="status" aria-live="polite">{t('plugins.loadingCatalog')}</div>
+                <div className={styles.empty} role="status" aria-live="polite">{t(isRegistry ? 'plugins.loadingRegistry' : 'plugins.loadingCatalog')}</div>
               ) : catalog && catalog.skills.length > 0 ? (
                 <ul className={styles.grid} aria-label={t('plugins.gridLabel')}>
                   {skills.map(skill => {
                     const installedHere = chosen.some(toolId => installedKeys.has(`${skill.document.id}::${toolId}`))
-                      || installed.some(record => record.skillId === skill.document.id);
+                      || installed.some(record => record.skillId === skill.document.id || record.dirName === skill.dirName);
                     return (
                       <li key={skill.dirName} className={styles.cardItem}>
                         {/*
@@ -541,7 +555,7 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
                                 「写到哪、装给哪些工具」说清。 */}
                             <button type="button" className={styles.iconAction} aria-label={t('plugins.cardAdd')}
                               onClick={() => void startInstall(skill)}>
-                              <Download size={18} aria-hidden="true" />
+                              <Download size={16} aria-hidden="true" />
                             </button>
                             {/* 图标按来源类型分：GitHub 来源用 GitHub 标记，技能市场用它自己的
                                 含义（商店）——给市场放 GitHub 图标等于指错地方（ClawHub / SkillHub
@@ -549,8 +563,8 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
                             <button type="button" className={styles.iconAction} aria-label={t('plugins.cardOpen')}
                               onClick={() => void openRepo()}>
                               {isRegistry
-                                ? <Store size={18} aria-hidden="true" />
-                                : <Github size={18} aria-hidden="true" />}
+                                ? <Store size={16} aria-hidden="true" />
+                                : <Github size={16} aria-hidden="true" />}
                             </button>
                           </span>
                         </span>

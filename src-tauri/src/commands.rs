@@ -1541,17 +1541,22 @@ pub async fn plugins_remove_source(
 ///
 /// `query` 是技能市场的搜索词（不传与传 `null` 都按「没有搜索词」处理，
 /// 行为与历史版本一致）。仓库来源忽略它：那边的筛在界面上是本地做。
+///
+/// `skill` 是「用户正在看的那一个技能」的目录名（`dirName`）：技能市场的目录只用列表
+/// 响应里的名字与描述组装（一次请求），带上它时只把这一条的正文与文件清单补回来——
+/// 详情页要显示 `SKILL.md` 原文，就是在这里取。不传就是纯列表。仓库来源忽略它。
 #[tauri::command]
 pub async fn plugins_browse(
     window: WebviewWindow,
     state: Desktop<'_>,
     repo: String,
     query: Option<String>,
+    skill: Option<String>,
 ) -> Result<switch_core::plugins::RepoCatalog, CoreError> {
     run(window, state, move |desktop| {
         desktop
             .plugins()
-            .browse(&repo, now_seconds(), query.as_deref())
+            .browse(&repo, now_seconds(), query.as_deref(), skill.as_deref())
     })
     .await
 }
