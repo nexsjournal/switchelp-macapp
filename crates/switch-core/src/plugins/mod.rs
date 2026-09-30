@@ -40,21 +40,15 @@ pub use tarball::TarballFetcher;
 ///
 /// 后两个是**技能市场**（不是仓库）：`repo` 用的是哨兵写法，内容来自平台自己的公开接口，
 /// 抓取与版本标记见 [`registry`]。文案必须说清内容来自哪个平台，别让用户以为是我们维护的。
-pub const DEFAULT_SOURCES: [(&str, &str, &str); 6] = [
+///
+/// 这里只留四个来源（用户 2026-09-30 明确要求）：两个官方/社区技能集合 + 两个市场。
+/// 原先还有 `openai/skills` 与 `obra/superpowers`，前者用户没要，后者实测不是技能集合；
+/// 需要的人仍然可以用「添加来源」填 `owner/repo` 自己加回来——预置清单只放默认值。
+pub const DEFAULT_SOURCES: [(&str, &str, &str); 4] = [
     (
         "anthropics/skills",
         "Anthropic 官方技能集合",
         "官方公开的 Agent Skills，包含文档、设计与协作相关的技能。",
-    ),
-    (
-        "openai/skills",
-        "OpenAI 技能目录",
-        "OpenAI 公开的 Codex 技能目录，官方维护、按主题分组。",
-    ),
-    (
-        "obra/superpowers",
-        "Superpowers",
-        "社区维护的技能框架，覆盖头脑风暴、排查与并行协作等做法。",
     ),
     (
         "wshobson/agents",
