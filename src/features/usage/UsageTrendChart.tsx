@@ -101,24 +101,35 @@ function HeatGrid({ days, peak, ariaLabel, hovered, onHover, locale }: PlotProps
   // 空报告给 0 列，但 `repeat(0, …)` 是无效值（整条声明会被丢掉），所以这里至少写 1：
   // 没有格子要画，列数只影响那一格的轨道宽度。
   const columns = Math.max(1, heatColumns(days));
+  /*
+   * 两套排法，都是为了**铺满整行**：
+   * - 一年档：一周一列 × 7 行（GitHub 贡献图那套），53 列铺满；星期名有意义。
+   * - 90 天及以内：一天一格、一行铺到底。一周一列时 30 天只有 5 列、90 天 14 列，
+   *   格子受上限约束后右侧会空掉一大片（用户截图里就是这个）——短范围里星期几本来也不成规律，
+   *   横向铺满更好读。
+   */
+  const strip = days.length <= 90;
+  const gridColumns = strip ? Math.max(1, days.length) : columns;
   return <>
     <div
-      className={styles.heatGrid}
+      className={`${styles.heatGrid} ${strip ? styles.heatGridStrip : ''}`}
       role="img"
       aria-label={ariaLabel}
-      style={{ '--heat-cols': String(columns) } as CSSProperties}
+      style={{ '--heat-cols': String(gridColumns) } as CSSProperties}
       onMouseLeave={() => onHover(null)}
     >
       {/* 星期名只标周一 / 周三 / 周五（GitHub 也是这么标的）：7 行全标时，窄窗口下 8px 的行距
-          放不下 12px 的字，会挤成一团。行盒高度在样式里记成 0，行高由正方格子决定。 */}
-      {[0, 2, 4].map(row => <span
+          放不下 12px 的字，会挤成一团。行盒高度在样式里记成 0，行高由正方格子决定。
+          一天一格的那种排法没有「星期」这一维，不标。 */}
+      {!strip && [0, 2, 4].map(row => <span
         key={row}
         className={styles.heatWeekday}
         aria-hidden="true"
         style={{ gridColumn: 1, gridRow: row + 1 }}
       >{weekdayNarrow(locale, row)}</span>)}
       {days.map((day, index) => {
-        const cell = heatCell(index, offset);
+        // 下面统一 +1（第 1 列是零宽的星期名列），所以这里给的是「第几个数据列」。
+        const cell = strip ? { column: index, row: 1 } : heatCell(index, offset);
         return <div
           key={day.date}
           className={styles.heatCell}
