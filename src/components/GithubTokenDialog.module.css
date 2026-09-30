@@ -1,0 +1,8 @@
+/* 令牌弹窗的输入框：与供应商表单的密钥字段同一套做法（输入框 + 显隐按钮压在右侧，
+   输入框留出按钮的位置）。同样要压过全局输入框规则，所以类名写两遍。 */
+.secret { position: relative; display: block; }
+.secret .secretInput.secretInput { padding-right: 48px; }
+.secret button { position: absolute; right: 4px; top: 4px; }
+
+/* 令牌用在哪：内容抓取与插件目录共用这一份，两页都会开这个弹窗，各自解释一遍不如在这里说一次。 */
+.scope { margin: 0; color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }

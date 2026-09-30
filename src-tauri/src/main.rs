@@ -27,7 +27,7 @@ use tauri::{
     Manager,
 };
 
-use state::{DesktopState, StartupParts};
+use state::{DesktopState, GithubToken, StartupParts};
 
 /// 本机网关的凭据 helper 路径。
 ///
@@ -323,9 +323,13 @@ fn main() {
                 );
             }
             // 插件目录来自公开仓库：只读 GET，令牌可缺省。
-            let fetcher = Arc::new(GithubFetcher::new(
-                // 令牌在状态里按需读取；这里先给一份初始化用的。
-                None,
+            //
+            // 抓取器在这里装配、而令牌是用户之后才在设置里填的，所以传的是**来源**而不是
+            // 令牌本身：每次请求现读一次，填完令牌不必重启。用户越是没填，越容易被
+            // 匿名的 60 次/小时挡住，这个顺序不能反过来。
+            let github_token = Arc::new(GithubToken::new(vault.clone()));
+            let fetcher = Arc::new(GithubFetcher::with_token_source(
+                github_token.source(),
                 switch_core::content::DEFAULT_USER_AGENT.to_owned(),
             ));
             let plugins = Arc::new(PluginService::new(
@@ -374,17 +378,22 @@ fn main() {
             // 每 5 分钟醒一次，是否真的抓由每个源的到期时间决定；抓取本身放到
             // blocking 线程，ureq 是阻塞客户端，不能在 async 上下文里直接跑。
             let refresher = hub.clone();
+            // 定时抓取也要用同一份令牌规则：只在装配时解析一次的话，用户填了令牌、
+            // 手动刷新带上去了，后台自动抓取仍是匿名（搜索接口匿名只有 10 次/分钟），
+            // 于是「填了令牌还提示限额」。这里每次抓取前现读一次。
+            let refresher_token = github_token.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
                     // 每 5 分钟醒一次；是否真的抓由每个源的到期时间决定（本地 06:00 / 18:00）。
                     // 醒得比计划时刻密，是为了让「应用刚打开时已经过点了」这种情况立即补上。
                     tokio::time::sleep(std::time::Duration::from_secs(300)).await;
                     let store = refresher.clone();
+                    let token = refresher_token.clone();
                     let _ = tauri::async_runtime::spawn_blocking(move || {
                         let service = ContentService::new(
                             store,
                             Arc::new(switch_core::content::HttpFeedFetcher::new()),
-                            None,
+                            token.resolve(),
                         );
                         let _ = service.refresh(None, false, switch_core::time_now());
                     })

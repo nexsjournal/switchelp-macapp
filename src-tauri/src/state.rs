@@ -52,6 +52,42 @@ pub struct StartupParts {
     pub catalog: Result<Arc<ToolHubService>, CoreError>,
 }
 
+/// GitHub 令牌的**唯一**解析点：先看凭据库，再看环境变量兜底。
+///
+/// 内容侧与插件目录共用这一份规则。做成「每次调用现读」的结构而不是存下来的字符串，
+/// 因为两者都是启动时装配、令牌是用户之后才填的：留一份快照就等于把那一页永远钉在
+/// 匿名限额上（每小时 60 次），而界面还在喊用户去填令牌。
+pub struct GithubToken {
+    vault: Arc<dyn SecretVault>,
+}
+
+impl GithubToken {
+    pub fn new(vault: Arc<dyn SecretVault>) -> Self {
+        Self { vault }
+    }
+
+    /// 取不到（凭据库未授权、条目不存在）时按「没有令牌」处理——匿名访问本来就能用，
+    /// 只是频率低一些，不该因此让整个页面失败。
+    pub fn resolve(&self) -> Option<String> {
+        self.vault
+            .load(switch_core::content::GITHUB_TOKEN_REF)
+            .ok()
+            .flatten()
+            .filter(|token| !token.trim().is_empty())
+            .or_else(|| {
+                std::env::var("SWITCHELP_GITHUB_TOKEN")
+                    .ok()
+                    .filter(|token| !token.trim().is_empty())
+            })
+    }
+
+    /// 交给抓取器的令牌来源。抓取器每次请求调用它，所以这里**不缓存**结果。
+    pub fn source(self: &Arc<Self>) -> switch_core::plugins::TokenSource {
+        let token = self.clone();
+        Arc::new(move || token.resolve())
+    }
+}
+
 /// 一次进程生命周期内共享的壳状态。
 pub struct DesktopState {
     pub workspace: Arc<WorkspaceService>,
@@ -83,6 +119,8 @@ pub struct DesktopState {
     /// 抓取器与凭据库：内容服务每次按需装配，这样换了令牌立刻生效。
     feed_fetcher: Arc<dyn FeedFetcher>,
     vault: Arc<dyn SecretVault>,
+    /// GitHub 令牌解析。内容服务与插件目录的抓取器共用这一条规则。
+    github_token: Arc<GithubToken>,
     /// 系统代理的观察结果与已做的绕过。启动时算一次：代理是会话级设置，
     /// 进程生命周期里重算没有意义，只会让同一个事实在两个时刻显示成两句话。
     system_proxy: SystemProxyReport,
@@ -184,6 +222,7 @@ impl DesktopState {
                 .unwrap_or_else(|| error.message_key.clone())
         });
         let system_proxy = prepare_system_proxy();
+        let github_token = Arc::new(GithubToken::new(vault.clone()));
         Self {
             workspace,
             apply,
@@ -201,6 +240,7 @@ impl DesktopState {
             plugins,
             feed_fetcher: Arc::new(HttpFeedFetcher::new()),
             vault,
+            github_token,
             system_proxy,
         }
     }
@@ -237,19 +277,9 @@ impl DesktopState {
         )
     }
 
-    /// GitHub 令牌。取不到（凭据库未授权、条目不存在）时按「没有令牌」处理——
-    /// 匿名访问本来就能用，只是频率低一些，不该因此让整个资讯页失败。
+    /// GitHub 令牌。解析规则见 [`GithubToken`]；取不到时按「没有令牌」处理。
     pub fn github_token(&self) -> Option<String> {
-        self.vault
-            .load(switch_core::content::GITHUB_TOKEN_REF)
-            .ok()
-            .flatten()
-            .filter(|token| !token.trim().is_empty())
-            .or_else(|| {
-                std::env::var("SWITCHELP_GITHUB_TOKEN")
-                    .ok()
-                    .filter(|token| !token.trim().is_empty())
-            })
+        self.github_token.resolve()
     }
 
     pub fn vault(&self) -> &Arc<dyn SecretVault> {

@@ -42,6 +42,9 @@ pub struct ParsedFeed {
     pub truncated: bool,
 }
 
+/// 允许的时钟偏差：源的时钟与本机差几分钟是常见的，不算「时间不可用」。
+const FUTURE_SKEW_SECONDS: i64 = 3600;
+
 /// 解析一份 RSS / Atom 文档。
 pub fn parse(xml: &str, now: i64) -> Result<ParsedFeed, CoreError> {
     let mut reader = quick_xml::Reader::from_str(xml);
@@ -124,8 +127,18 @@ pub fn parse(xml: &str, now: i64) -> Result<ParsedFeed, CoreError> {
     let items = items
         .into_iter()
         .map(|mut item| {
-            // 发布时间认不出来的用「见到它的时间」，这样排序不会把它扔到最后。
-            if item.published_at.is_none() {
+            /*
+             * 发布时间认不出来的用「见到它的时间」，这样排序不会把它扔到最后。
+             *
+             * **未来时间同样不可用**：个别源把本地时间标成 GMT（InfoQ 中文实测差 8 小时，
+             * 库里收到的条目比当时还晚 3 小时），照字面收下，界面上就会显示「3 小时后」——
+             * 一条还没发生的资讯。留一点时钟偏差的余量，超出就当这个时间读不出来。
+             */
+            let unusable = match item.published_at {
+                None => true,
+                Some(at) => at > now + FUTURE_SKEW_SECONDS,
+            };
+            if unusable {
                 item.published_at = Some(now);
             }
             item
@@ -329,7 +342,8 @@ mod tests {
     </item>
   </channel>
 </rss>"#;
-        let feed = parse(xml, 5_000).unwrap();
+        // now 取真实量级：源给的 2026-09-21 在这之后，才是「过去的时间」
+        let feed = parse(xml, 1_789_960_000).unwrap();
         assert_eq!(feed.title.as_deref(), Some("示例站点"));
         assert_eq!(feed.items.len(), 2);
         assert_eq!(feed.items[0].title, "第一条 & 它的标题");
@@ -337,7 +351,34 @@ mod tests {
         assert_eq!(feed.items[0].published_at, Some(1_789_956_000));
         assert!(feed.items[0].summary.contains("<b>HTML</b>"));
         // 没有 pubDate 的条目用「见到它的时间」补位，而不是丢掉。
-        assert_eq!(feed.items[1].published_at, Some(5_000));
+        assert_eq!(feed.items[1].published_at, Some(1_789_960_000));
+    }
+
+    /// 源把本地时间标成 GMT 时，条目的时间会落在未来——那不是「一条还没发生的资讯」，
+    /// 是读不出来的时间，按既有规则用「见到它的时间」补位。InfoQ 中文实测差 8 小时。
+    #[test]
+    fn a_publication_time_in_the_future_falls_back_to_when_we_saw_it() {
+        let now = 1_789_900_000_i64; // 2026-09-21 前后：下面那条 pubDate 比它晚 8 天
+        let xml = r#"<?xml version="1.0"?>
+<rss version="2.0"><channel><title>标错时区的源</title>
+  <item><title>标成了 GMT</title><link>https://example.com/future</link>
+    <pubDate>Wed, 30 Sep 2026 16:00:00 GMT</pubDate></item>
+</channel></rss>"#;
+        let feed = parse(xml, now).unwrap();
+        assert_eq!(feed.items[0].published_at, Some(now));
+    }
+
+    /// 但几分钟的时钟偏差是常态，不能因此把源给的时间丢掉。
+    #[test]
+    fn a_small_clock_skew_keeps_the_published_time() {
+        let now = 1_789_956_000_i64;
+        let xml = r#"<?xml version="1.0"?>
+<rss version="2.0"><channel><title>走得快一点的源</title>
+  <item><title>快十分钟</title><link>https://example.com/skew</link>
+    <pubDate>Mon, 21 Sep 2026 10:10:00 +0800</pubDate></item>
+</channel></rss>"#;
+        let feed = parse(xml, now).unwrap();
+        assert_eq!(feed.items[0].published_at, Some(now + 600));
     }
 
     #[test]
@@ -354,7 +395,7 @@ mod tests {
     <summary>摘要文本</summary>
   </entry>
 </feed>"#;
-        let feed = parse(xml, 0).unwrap();
+        let feed = parse(xml, 1_789_960_000).unwrap();
         assert_eq!(feed.title.as_deref(), Some("Atom 源"));
         assert_eq!(feed.items.len(), 1);
         assert_eq!(feed.items[0].url, "https://example.org/a");

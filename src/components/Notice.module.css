@@ -1,0 +1,28 @@
+/*
+ * 小提醒：一条平铺行，不是卡片。
+ *
+ * 它常驻在页面顶部，出现频率比卡片高得多，所以底色取最低档的浮起层、描边取静息档：
+ * 折叠时看起来像「一行说明」，展开后才有一个浅色的详情块，不与真正的卡片抢层级。
+ * **不自带外边距**：两个调用点的容器都是 grid + gap，这里再加一份会变成双倍间距。
+ */
+.notice { display: flex; flex-direction: column; gap: 10px; padding: 10px 14px;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-surface);
+  font-size: var(--font-size-label); line-height: var(--line-height-label); }
+.line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.line > svg { flex: none; }
+.warning .line > svg { color: var(--status-warning); }
+.info .line > svg { color: var(--text-muted); }
+.summary { flex: 1; min-width: 0; color: var(--text-primary); }
+/* 展开按钮是行内的文字控件：高度交给全局 .text-button（紧凑控件 32），
+   只把字号压回内容字号——与全局规则权重打平时算全局赢，所以这里的类名写两遍。
+   高度别自己改小：32 是规范的点击区下限，量过 26×20 是不够点的。 */
+/* 内边距只为了把点击区撑到 32 宽：文字右边缘比摘要缩进 4px 是可接受的，
+   负外边距去凑对齐会让子元素溢出父容器（几何审计会如实记一笔），不值得。 */
+.toggle.toggle { flex: none; padding: 0 4px;
+  font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+.details { display: grid; gap: 8px; color: var(--text-secondary);
+  font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
+/* 详情里的原因列表：与内容的字号一致，逐条左对齐，不缩进。 */
+.details ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.details li { display: flex; align-items: flex-start; gap: 8px; }
+.details li > svg { margin-top: 3px; flex: none; color: var(--status-warning); }

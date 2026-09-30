@@ -85,9 +85,19 @@ export function ToolsPage({ client }: { client: DesktopClient }) {
     total: tools.length,
   }), [tools]);
 
-  const openLink = (url: string) => {
-    // 外链交给系统浏览器：本工具不内嵌浏览器（见桌面壳复审）。
-    window.open(url, '_blank', 'noreferrer');
+  /**
+   * 外链交给系统浏览器：本工具不内嵌浏览器（见桌面壳复审）。
+   *
+   * **必须走核心的 `open_external_url`**：`window.open` 在 Tauri 的 webview 里没有浏览器
+   * 新窗口，点了就是没反应——内容中心的资讯卡片踩过这个坑，那边也只走这条路。
+   */
+  const openLink = async (url: string) => {
+    try {
+      await client.openExternalUrl(url);
+    } catch (cause) {
+      const core = toCoreError(cause);
+      showToast(core.safeDetails[0] ?? t(core.messageKey), 'danger');
+    }
   };
 
   return (
@@ -246,7 +256,7 @@ export function ToolsPage({ client }: { client: DesktopClient }) {
                           </button>
                         )}
                         {tool.docs && (
-                          <button type="button" onClick={() => openLink(tool.docs!)}>
+                          <button type="button" onClick={() => void openLink(tool.docs!)}>
                             <ExternalLink size={15} />{t('tools.openDocs')}
                           </button>
                         )}

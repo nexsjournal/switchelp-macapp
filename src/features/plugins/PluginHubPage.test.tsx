@@ -1,10 +1,16 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RepoCatalog, SkillRecord, TargetPlan } from '@/contracts/types';
-import { PluginHubPage } from './PluginHubPage';
+import { PluginHubPage, resetCatalogErrorAnnouncements } from './PluginHubPage';
 import { testClient } from '../../../tests/helpers/client';
 import { renderWithToasts } from '../../../tests/helpers/render';
+
+/**
+ * 「一次运行里同一个 messageKey 只弹一次提示」是模块级记录：不在这里清掉的话，
+ * 前一个用例会把后一个用例该看见的提示吞掉（提示队列本身由 vitest.setup.ts 清理）。
+ */
+beforeEach(() => { resetCatalogErrorAnnouncements(); });
 
 const catalog: RepoCatalog = {
   repo: 'anthropics/skills',
@@ -35,6 +41,29 @@ const targetCodex: TargetPlan = {
 };
 
 const targetClaude: TargetPlan = { ...targetCodex, toolId: 'claude-code', displayName: 'Claude Code', root: '/Users/me/.claude/skills', dir: '/Users/me/.claude/skills/frontend-design' };
+
+/** 核心对 403/429 的真实返回：详情就是用户截图里那句。 */
+const rateLimited = {
+  code: 'INTERNAL', messageKey: 'error.pluginRateLimited',
+  safeDetails: ['公开接口的访问频率已用尽，稍后再试或在设置里填一个 GitHub 令牌'],
+  retryable: true, recoveryActions: [],
+};
+
+const repoNotFound = {
+  code: 'NOT_FOUND', messageKey: 'error.pluginRepoNotFound',
+  safeDetails: ['https://api.github.com/repos/owner/nope 返回 404'], retryable: false, recoveryActions: [],
+};
+
+/**
+ * 定位常驻的那一行提醒。
+ *
+ * 摘要与一次性提示可能写着同一句话，所以按「详情」按钮往上找它所在的 `section`，
+ * 断言只针对页面上那一行，不误抓提示。
+ */
+function notice(): HTMLElement {
+  // 展开后这个按钮改口「收起」，两种状态都要能找到。
+  return screen.getByRole('button', { name: /详情|收起/ }).closest('section') as HTMLElement;
+}
 
 function baseClient(overrides = {}) {
   return testClient({
@@ -241,7 +270,19 @@ it('来源可以添加，写法不对时给出可读原因', async () => {
   await waitFor(() => expect(addPluginSource).toHaveBeenLastCalledWith('owner/repo'));
 });
 
+it('打开仓库交给系统浏览器，而不是 webview 里没人接的 window.open', async () => {
+  const user = userEvent.setup();
+  const openExternalUrl = vi.fn().mockResolvedValue(undefined);
+  const client = baseClient({ openExternalUrl });
+  renderWithToasts(<PluginHubPage client={client} />);
+
+  // 回归：以前这里调 window.open，而 Tauri 的 webview 没有浏览器新窗口，点了没反应。
+  await user.click(await screen.findByRole('button', { name: /打开仓库/ }));
+  await waitFor(() => expect(openExternalUrl).toHaveBeenCalledWith('https://github.com/anthropics/skills'));
+});
+
 it('仓库里没有技能时说清楚，而不是显示一个空市场', async () => {
+  const user = userEvent.setup();
   const client = baseClient({
     browsePluginRepo: vi.fn().mockRejectedValue({
       code: 'NOT_FOUND', messageKey: 'error.pluginRepoHasNoSkills',
@@ -250,7 +291,97 @@ it('仓库里没有技能时说清楚，而不是显示一个空市场', async (
   });
   renderWithToasts(<PluginHubPage client={client} />);
 
-  expect(await screen.findByText(/没有任何 SKILL.md/)).toBeInTheDocument();
+  // 默认只有一行摘要，原因要点开才看。
+  expect(await screen.findByRole('button', { name: '详情' })).toBeInTheDocument();
+  expect(within(notice()).getByText('技能目录没能取到')).toBeInTheDocument();
+  expect(screen.queryByText(/没有任何 SKILL.md/)).not.toBeInTheDocument();
+  // 取不到目录不等于「仓库是空的」——空状态会让人去别处找原因。
+  expect(screen.queryByText('还没有可浏览的内容')).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: '详情' }));
+  expect(screen.getByText(/没有任何 SKILL.md/)).toBeInTheDocument();
+});
+
+it('限额失败：折叠时只有一句摘要，原因与「重试」在详情里', async () => {
+  const user = userEvent.setup();
+  const client = baseClient({ browsePluginRepo: vi.fn().mockRejectedValue(rateLimited) });
+  renderWithToasts(<PluginHubPage client={client} />);
+
+  expect(await screen.findByRole('button', { name: '详情' })).toBeInTheDocument();
+  expect(within(notice()).getByText('GitHub 接口的访问频率已用尽')).toBeInTheDocument();
+  // 折叠态只有那一行：完整原因、重试、令牌入口都不该已经占着版面。
+  expect(screen.queryByText(/公开接口的访问频率已用尽/)).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '填写令牌' })).not.toBeInTheDocument();
+  // 完整原因不铺在页面上——那正是报告里「一直提示这个信息」的那条红字。
+  expect(screen.queryByText(/稍后再试或在设置里填一个 GitHub 令牌/)).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: '详情' }));
+  expect(screen.getByText(/稍后再试或在设置里填一个 GitHub 令牌/)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+  // 限额的唯一解法是令牌，这条路径必须在能给出来的地方给出来。
+  expect(screen.getByRole('button', { name: '填写令牌' })).toBeInTheDocument();
+});
+
+it('不是限额的失败不给「令牌」这条路——它解决不了问题', async () => {
+  const user = userEvent.setup();
+  const client = baseClient({ browsePluginRepo: vi.fn().mockRejectedValue(repoNotFound) });
+  renderWithToasts(<PluginHubPage client={client} />);
+
+  await user.click(await screen.findByRole('button', { name: '详情' }));
+  expect(screen.getByText(/返回 404/)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '填写令牌' })).not.toBeInTheDocument();
+  // 摘要说「没能取到」，不说限额那句；条子的档位也不同（danger 才带 role="alert"）。
+  expect(within(notice()).getByText('技能目录没能取到')).toBeInTheDocument();
+  expect(within(await screen.findByLabelText('通知')).getByRole('alert')).toBeInTheDocument();
+});
+
+it('点「填写令牌」开弹窗，存好之后自动重抓一次目录', async () => {
+  const user = userEvent.setup();
+  const browsePluginRepo = vi.fn().mockRejectedValueOnce(rateLimited).mockResolvedValue(catalog);
+  const setContentGithubToken = vi.fn().mockResolvedValue(true);
+  const client = baseClient({ browsePluginRepo, setContentGithubToken });
+  renderWithToasts(<PluginHubPage client={client} />);
+
+  await user.click(await screen.findByRole('button', { name: '详情' }));
+  await user.click(screen.getByRole('button', { name: '填写令牌' }));
+
+  const dialog = await screen.findByRole('dialog');
+  await user.type(within(dialog).getByLabelText('GitHub 令牌'), 'ghp_secret');
+  await user.click(within(dialog).getByRole('button', { name: '保存' }));
+
+  await waitFor(() => expect(setContentGithubToken).toHaveBeenCalledWith('ghp_secret'));
+  // 存了令牌立刻再抓一次：不自动重试等于让用户自己再点一遍。
+  await waitFor(() => expect(browsePluginRepo).toHaveBeenCalledTimes(2));
+  expect(await screen.findByRole('heading', { name: 'frontend-design' })).toBeInTheDocument();
+});
+
+it('首次失败弹一次提示；同一个原因再失败只留那一行', async () => {
+  const user = userEvent.setup();
+  const browsePluginRepo = vi.fn().mockRejectedValue(rateLimited);
+  renderWithToasts(<PluginHubPage client={baseClient({ browsePluginRepo })} />);
+
+  // 限额是「等等就好」：提示用会自动消失的 info（danger 才带 role="alert"）。
+  const notifications = await screen.findByLabelText('通知');
+  expect(within(notifications).getByText('GitHub 接口的访问频率已用尽')).toBeInTheDocument();
+  expect(within(notifications).queryByRole('alert')).not.toBeInTheDocument();
+
+  await user.click(await screen.findByRole('button', { name: '详情' }));
+  await user.click(screen.getByRole('button', { name: '重试' }));
+
+  // 重试期间那一行先消失；它带着折叠态回来＝第二次失败已经落地，而提示还只有第一条。
+  await waitFor(() => expect(screen.getByRole('button', { name: '详情' })).toHaveAttribute('aria-expanded', 'false'));
+  expect(browsePluginRepo).toHaveBeenCalledTimes(2);
+  expect(within(notifications).getAllByText('GitHub 接口的访问频率已用尽')).toHaveLength(1);
+});
+
+it('目录取到了但里面没有技能，才说「还没有可浏览的内容」', async () => {
+  const client = baseClient({ browsePluginRepo: vi.fn().mockResolvedValue({ ...catalog, skills: [] }) });
+  renderWithToasts(<PluginHubPage client={client} />);
+
+  expect(await screen.findByText('还没有可浏览的内容')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '详情' })).not.toBeInTheDocument();
 });
 
 describe('已安装列表', () => {

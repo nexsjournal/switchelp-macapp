@@ -29,6 +29,8 @@ const SOURCE_PREFIXES = new Set([
   'usage',
   // 应用内更新：侧栏左上角的更新按钮与更新弹窗。
   'update',
+  // 跨板块的共用件：可展开的小提醒（components/Notice）与 GitHub 令牌弹窗（两页共用一份令牌）。
+  'notice', 'github',
 ]);
 /** Rust 侧只会以 messageKey 形式给出这些前缀的键。 */
 const CORE_PREFIXES = new Set(['action', 'capability', 'compat', 'credential', 'error', 'group', 'host', 'instance', 'probe', 'reason', 'stage', 'warning']);
