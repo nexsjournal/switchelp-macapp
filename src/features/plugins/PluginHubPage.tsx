@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, ExternalLink, PackageOpen, Plus, RefreshCw, Trash2, TriangleAlert } from 'lucide-react';
+import { Check, ChevronLeft, Download, ExternalLink, PackageOpen, Plus, RefreshCw, Store, Trash2, TriangleAlert } from 'lucide-react';
+import { Github } from '@lobehub/icons';
 import type {
   ConflictChoice, CoreError, InstallPreview, InstallReport, PluginSource, RepoCatalog, RepoSkill, SkillRecord, SkillTarget, UpdateInfo,
 } from '@/contracts/types';
@@ -75,7 +76,8 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
   const [catalogError, setCatalogError] = useState<CoreError | null>(null);
   const [tokenConfigured, setTokenConfigured] = useState(false);
   const [tokenDialog, setTokenDialog] = useState(false);
-  const [selected, setSelected] = useState<string>('');
+  /** 正在看详情的技能目录名；null ＝ 停在卡片网格上（列表视图与详情视图互斥）。 */
+  const [detailSkill, setDetailSkill] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [markdownOpen, setMarkdownOpen] = useState(false);
 
@@ -128,10 +130,11 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
     setLoadingCatalog(true);
     setCatalogError(null);
     setReport(null);
+    // 重新取目录就回列表：目录换了之后，刚才在看的那条技能可能已经不在里面了。
+    setDetailSkill(null);
     try {
       const result = await client.browsePluginRepo(target, search);
       setCatalog(result);
-      setSelected(result.skills[0]?.dirName ?? '');
       setMarkdownOpen(false);
     } catch (cause) {
       const core = toCoreError(cause);
@@ -178,8 +181,8 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
   }, [catalog, query, isRegistry]);
 
   const current: RepoSkill | undefined = useMemo(
-    () => catalog?.skills.find(skill => skill.dirName === selected),
-    [catalog, selected],
+    () => catalog?.skills.find(skill => skill.dirName === detailSkill),
+    [catalog, detailSkill],
   );
 
   /** 已经装过的（技能 + 工具）组合，用于卡片上的「已装」标记。 */
@@ -187,6 +190,12 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
     () => new Set(installed.map(record => `${record.skillId}::${record.targetTool}`)),
     [installed],
   );
+
+  /** 卡片 → 详情。展开状态跟着技能走：换一条就重新折叠。 */
+  const openDetail = (skill: RepoSkill) => {
+    setDetailSkill(skill.dirName);
+    setMarkdownOpen(false);
+  };
 
   const startInstall = async (skill: RepoSkill) => {
     setRunError('');
@@ -330,6 +339,19 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
     }
   };
 
+  /**
+   * 目录空态。
+   *
+   * 只在「真的取到了目录、里面没有技能」时说：取不到目录时说它会让人以为仓库是空的，
+   * 那种情况下上面的常驻提醒才是出口。技能市场另说一套——它不是「没选来源」，
+   * 而是「这个关键词没搜到」。
+   */
+  const emptyCatalog = (
+    <EmptyState icon={PackageOpen}
+      title={t(isRegistry ? 'plugins.market.emptyRegistry.title' : 'plugins.market.empty.title')}
+      description={t(isRegistry ? 'plugins.market.emptyRegistry.body' : 'plugins.market.empty.body')} />
+  );
+
   return (
     <div className={styles.page}>
       <SegmentedTabs
@@ -411,103 +433,136 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
             )}
           </section>
 
-          {loadingCatalog ? (
-            <div className={styles.empty} role="status" aria-live="polite">{t('plugins.loadingCatalog')}</div>
-          ) : catalogError ? null /* 原因与下一步都在上面那一行提醒里 */ : catalog && catalog.skills.length > 0 ? (
-            <div className={styles.marketLayout}>
-              <section className={styles.listColumn} aria-label={t('plugins.market.listLabel')}>
+          {/*
+            列表视图与详情视图互斥：列表是卡片网格（点卡片进详情），详情有返回按钮回列表。
+            目录报错时两个视图都不画——原因与下一步都在上面那一行提醒里。
+          */}
+          {detailSkill && current ? (
+            <section className={styles.detail} aria-label={t('plugins.detail.label')}>
+              <button type="button" className={`${styles.back} text-button`} onClick={() => setDetailSkill(null)}>
+                <ChevronLeft size={14} />{t('plugins.backToList')}
+              </button>
+
+              <h2 className={styles.detailTitle}>{current.document.id}</h2>
+              <p className={styles.detailPath}>
+                {current.sourcePath}
+                {catalog && <> · <span className="text-mono">{catalog.repo}@{catalog.commit.slice(0, 8)}</span></>}
+              </p>
+              <p className={styles.detailDescription}>
+                {current.document.description ?? t('plugins.noDescription')}
+              </p>
+              {!current.document.frontMatterParsed && (
+                <p className={styles.warnNote}>{t('plugins.unparsedFrontMatter')}</p>
+              )}
+              {current.document.requiresBins.length > 0 && (
+                <p className={styles.requires}>
+                  {t('plugins.requiresBins', { bins: current.document.requiresBins.join('、') })}
+                </p>
+              )}
+
+              {/* 技能是写给 AI 的指令这件事，必须在安装之前说清楚。 */}
+              <p className={styles.caution}>{t('plugins.caution')}</p>
+
+              <button type="button" className={styles.disclosure} aria-expanded={markdownOpen}
+                onClick={() => setMarkdownOpen(open => !open)}>
+                {markdownOpen ? t('plugins.hideDocument') : t('plugins.showDocument')}
+              </button>
+              {markdownOpen && <pre className={styles.markdown}>{current.files[0]?.text}</pre>}
+              {current.files.length > 1 && (
+                <p className={styles.fileList}>
+                  {t('plugins.siblingFiles', { count: current.files.length - 1 })}
+                  {' '}
+                  {current.files.slice(1).map(file => file.path).join('、')}
+                </p>
+              )}
+
+              <fieldset className={styles.targets}>
+                <legend>{t('plugins.targets.label')}</legend>
+                {targets.map(target => (
+                  <label key={target.toolId} className="check-label">
+                    <input type="checkbox" checked={chosen.includes(target.toolId)}
+                      onChange={() => toggleTarget(target.toolId)} />
+                    <span>{target.displayName}</span>
+                    <span className={styles.targetRoot}>{target.root}</span>
+                  </label>
+                ))}
+                {!targets.length && <p className={styles.warnNote}>{t('plugins.targets.none')}</p>}
+              </fieldset>
+
+              <div className="actions">
+                <button className="primary" disabled={!chosen.length} onClick={() => void startInstall(current)}>
+                  {t('plugins.install')}
+                </button>
+                <button type="button" onClick={() => void openRepo()}>
+                  <ExternalLink size={15} />{catalog?.homepage ? t('plugins.openSource') : t('plugins.openRepo')}
+                </button>
+              </div>
+            </section>
+          ) : catalogError ? null : (
+            /* 列表视图＝技能列表这一块（搜索框 + 卡片网格），与详情视图互斥。 */
+            <section className={styles.listView} aria-label={t('plugins.market.listLabel')}>
+              {/*
+                搜索框不跟加载态一起卸载：技能市场的搜索是一次服务端往返（防抖 400ms），
+                请求期间把输入框卸载，焦点与后半截关键词会一起丢；搜不到时空态写着
+                「换一个关键词再试」，那时也必须留着这个框。
+              */}
+              {catalog && (
                 <input className={styles.search} value={query} onChange={event => setQuery(event.target.value)}
                   placeholder={t('plugins.searchPlaceholder')} aria-label={t('plugins.search')} />
-                <ul className={styles.skillList}>
+              )}
+              {loadingCatalog ? (
+                <div className={styles.empty} role="status" aria-live="polite">{t('plugins.loadingCatalog')}</div>
+              ) : catalog && catalog.skills.length > 0 ? (
+                <ul className={styles.grid} aria-label={t('plugins.gridLabel')}>
                   {skills.map(skill => {
                     const installedHere = chosen.some(toolId => installedKeys.has(`${skill.document.id}::${toolId}`))
                       || installed.some(record => record.skillId === skill.document.id);
                     return (
-                      <li key={skill.dirName}>
-                        <button type="button" className={skill.dirName === selected ? styles.selected : ''}
-                          onClick={() => { setSelected(skill.dirName); setMarkdownOpen(false); }}>
+                      <li key={skill.dirName} className={styles.cardItem}>
+                        {/*
+                          整张卡可点：卡片本体是这一层 li，点击是那枚铺满卡片的透明按钮。
+                          不写成「按钮套按钮」——React 会报 validateDOMNesting（button 不能是 button 的
+                          后代），那既是无效 HTML，读屏也会把两张卡的名字与操作揉成一团。
+                          两个图标按钮是它的兄弟节点、压在点击层之上，所以点它们不会顺带跳进详情。
+                        */}
+                        <button type="button" className={styles.cardHit} aria-label={skill.document.id}
+                          onClick={() => openDetail(skill)} />
+                        <span className={styles.cardHead}>
                           <span className={styles.skillName}>{skill.document.id}</span>
                           {installedHere && <span className={styles.installedTag}>{t('plugins.installedTag')}</span>}
-                          <span className={styles.skillDescription}>
-                            {skill.document.description ?? t('plugins.noDescription')}
+                        </span>
+                        <span className={styles.skillDescription}>
+                          {skill.document.description ?? t('plugins.noDescription')}
+                        </span>
+                        <span className={styles.cardFoot}>
+                          <span className={styles.cardSource}>{skill.sourcePath}</span>
+                          <span className={styles.cardActions}>
+                            {/* 加号不直接装：走与详情页同一条安装计划弹窗，写文件之前先把
+                                「写到哪、装给哪些工具」说清。 */}
+                            <button type="button" className={styles.iconAction} aria-label={t('plugins.cardAdd')}
+                              onClick={() => void startInstall(skill)}>
+                              <Download size={18} aria-hidden="true" />
+                            </button>
+                            {/* 图标按来源类型分：GitHub 来源用 GitHub 标记，技能市场用它自己的
+                                含义（商店）——给市场放 GitHub 图标等于指错地方（ClawHub / SkillHub
+                                都不是 GitHub）。两个图标同尺寸同粗细，一行看起来是齐的。 */}
+                            <button type="button" className={styles.iconAction} aria-label={t('plugins.cardOpen')}
+                              onClick={() => void openRepo()}>
+                              {isRegistry
+                                ? <Store size={18} aria-hidden="true" />
+                                : <Github size={18} aria-hidden="true" />}
+                            </button>
                           </span>
-                        </button>
+                        </span>
                       </li>
                     );
                   })}
                   {!skills.length && <li className={styles.empty}>{t('plugins.noMatch')}</li>}
                 </ul>
-              </section>
-
-              <section className={styles.detailColumn} aria-label={t('plugins.detail.label')}>
-                {current ? (
-                  <>
-                    <h2 className={styles.detailTitle}>{current.document.id}</h2>
-                    <p className={styles.detailPath}>
-                      {current.sourcePath}
-                      {catalog && <> · <span className="text-mono">{catalog.repo}@{catalog.commit.slice(0, 8)}</span></>}
-                    </p>
-                    <p className={styles.detailDescription}>
-                      {current.document.description ?? t('plugins.noDescription')}
-                    </p>
-                    {!current.document.frontMatterParsed && (
-                      <p className={styles.warnNote}>{t('plugins.unparsedFrontMatter')}</p>
-                    )}
-                    {current.document.requiresBins.length > 0 && (
-                      <p className={styles.requires}>
-                        {t('plugins.requiresBins', { bins: current.document.requiresBins.join('、') })}
-                      </p>
-                    )}
-
-                    {/* 技能是写给 AI 的指令这件事，必须在安装之前说清楚。 */}
-                    <p className={styles.caution}>{t('plugins.caution')}</p>
-
-                    <button type="button" className={styles.disclosure} aria-expanded={markdownOpen}
-                      onClick={() => setMarkdownOpen(open => !open)}>
-                      {markdownOpen ? t('plugins.hideDocument') : t('plugins.showDocument')}
-                    </button>
-                    {markdownOpen && <pre className={styles.markdown}>{current.files[0]?.text}</pre>}
-                    {current.files.length > 1 && (
-                      <p className={styles.fileList}>
-                        {t('plugins.siblingFiles', { count: current.files.length - 1 })}
-                        {' '}
-                        {current.files.slice(1).map(file => file.path).join('、')}
-                      </p>
-                    )}
-
-                    <fieldset className={styles.targets}>
-                      <legend>{t('plugins.targets.label')}</legend>
-                      {targets.map(target => (
-                        <label key={target.toolId} className="check-label">
-                          <input type="checkbox" checked={chosen.includes(target.toolId)}
-                            onChange={() => toggleTarget(target.toolId)} />
-                          <span>{target.displayName}</span>
-                          <span className={styles.targetRoot}>{target.root}</span>
-                        </label>
-                      ))}
-                      {!targets.length && <p className={styles.warnNote}>{t('plugins.targets.none')}</p>}
-                    </fieldset>
-
-                    <div className="actions">
-                      <button className="primary" disabled={!chosen.length} onClick={() => void startInstall(current)}>
-                        {t('plugins.install')}
-                      </button>
-                      <button type="button" onClick={() => void openRepo()}>
-                        <ExternalLink size={15} />{catalog?.homepage ? t('plugins.openSource') : t('plugins.openRepo')}
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <p className={styles.empty}>{t('plugins.pickSkill')}</p>
-                )}
-              </section>
-            </div>
-          ) : (
-            /* 空状态只在「真的取到了目录、里面没有技能」时说，取不到时说它会让人以为仓库是空的。
-               技能市场要另说一套：它不是「没选来源」，而是「这个关键词没搜到」。 */
-            <EmptyState icon={PackageOpen}
-              title={t(isRegistry ? 'plugins.market.emptyRegistry.title' : 'plugins.market.empty.title')}
-              description={t(isRegistry ? 'plugins.market.emptyRegistry.body' : 'plugins.market.empty.body')} />
+              ) : (
+                emptyCatalog
+              )}
+            </section>
           )}
         </>
       ) : (

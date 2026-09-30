@@ -237,6 +237,25 @@ const pluginCatalog: RepoCatalog = {
       document: { id: 'doc-coauthoring', title: null, description: '与用户合写文档：先问再写，不替用户编。', requiresBins: ['pandoc'], body: '# 文档协作\n\n先确认受众与篇幅。', frontMatterParsed: true },
       files: [{ path: 'SKILL.md', bytes: 240, text: '# 文档协作' }],
     },
+    // 网格走查要看清「长描述两行截断」「等高」「已装徽标」三种情况，所以条目要长短不一。
+    {
+      dirName: 'pdf-fill-form', sourcePath: 'skills/pdf-fill-form',
+      document: { id: 'pdf-fill-form', title: null, description: '把表单数据填进 PDF 并另存为新文件，支持批量与字段校验；这是夹具里用来走查两行截断的超长描述，故意写得比别处长很多。', requiresBins: [], body: '# PDF 填表\n正文', frontMatterParsed: true },
+      files: [
+        { path: 'SKILL.md', bytes: 320, text: '# PDF 填表' },
+        { path: 'references/fields.md', bytes: 64, text: '字段说明' },
+      ],
+    },
+    {
+      dirName: 'data-viz', sourcePath: 'skills/data-viz',
+      document: { id: 'data-viz', title: null, description: '图表选型与配色。', requiresBins: [], body: '# 数据可视化\n正文', frontMatterParsed: true },
+      files: [{ path: 'SKILL.md', bytes: 96, text: '# 数据可视化' }],
+    },
+    {
+      dirName: 'code-review-checklist', sourcePath: 'skills/code-review-checklist',
+      document: { id: 'code-review-checklist', title: null, description: '评审清单：边界、并发、错误处理与契约一致性逐条对照。', requiresBins: ['rg'], body: '# 评审清单\n正文', frontMatterParsed: true },
+      files: [{ path: 'SKILL.md', bytes: 210, text: '# 评审清单' }],
+    },
     {
       dirName: 'internal-comms', sourcePath: 'skills/internal-comms',
       document: { id: 'internal-comms', title: null, description: null, requiresBins: [], body: '正文（这份文档的头部没能解析，名字回落到目录名）。', frontMatterParsed: false },
@@ -467,8 +486,8 @@ const client: DesktopClient = {
     // 两个技能市场：来源标识里没有 `/`（GitHub 来源永远是 owner/repo 形状），界面据此走服务端搜索。
     { repo: 'clawhub', label: 'ClawHub 技能市场', description: '社区技能注册表（ClawHub），按关键词搜索后直接安装。', builtin: true },
     { repo: 'skillhub', label: 'SkillHub 技能市场', description: '腾讯的技能市场，按关键词搜索后直接安装。', builtin: true },
+    // 与核心的 DEFAULT_SOURCES 保持一致：只留四个（两个市场 + 两个集合）。
     { repo: 'anthropics/skills', label: 'Anthropic 官方技能集合', description: '官方公开的 Agent Skills，包含文档、设计与协作相关的技能。', builtin: true },
-    { repo: 'obra/superpowers', label: 'Superpowers', description: '社区维护的技能框架，覆盖头脑风暴、排查与并行协作等做法。', builtin: true },
     { repo: 'wshobson/agents', label: 'Agents 插件合集', description: '面向编码 agent 的插件与技能合集，数量多但取向偏工程。', builtin: true },
   ]),
   addPluginSource: async () => ([]),
@@ -477,9 +496,11 @@ const client: DesktopClient = {
     // 市场来源：夹具按关键词合成一页结果，用来走查搜索、回链按钮与「0 个技能」的空目录。
     if (repo === 'clawhub' || repo === 'skillhub') {
       const keyword = (query ?? '').trim();
-      // 无关键词＝平台的默认列表（真实后端就是这样）；关键词 none 用来走查「没搜到」的空状态。
-      if (!keyword) return { ...pluginCatalog, repo, homepage: null };
-      if (keyword === 'none') return { ...pluginCatalog, repo, homepage: null, skills: [] };
+      // 无关键词＝平台的默认列表（真实后端就是这样，且**一定有回链地址**：后端对市场来源
+      // 永远给 homepage，见 registry::homepage_of）；关键词 none 用来走查「没搜到」的空状态。
+      const site = repo === 'clawhub' ? 'https://clawhub.ai' : 'https://skillhub.cn';
+      if (!keyword) return { ...pluginCatalog, repo, homepage: `${site}/skills` };
+      if (keyword === 'none') return { ...pluginCatalog, repo, homepage: `${site}/skills?q=none`, skills: [] };
       return {
         ...pluginCatalog,
         repo,

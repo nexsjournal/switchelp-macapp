@@ -65,6 +65,22 @@ function notice(): HTMLElement {
   return screen.getByRole('button', { name: /详情|收起/ }).closest('section') as HTMLElement;
 }
 
+/**
+ * 从卡片网格进详情。
+ *
+ * 卡片上那枚铺满整张卡的点击层按钮带着技能名的可访问名；
+ * 进去之后用详情标题（h2）确认落地，免得后续断言对着一份还在的列表跑。
+ */
+async function enterDetail(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(await screen.findByRole('button', { name: new RegExp(name) }));
+  await screen.findByRole('heading', { name });
+}
+
+/** 卡片网格（列表视图的那个 ul）。 */
+function grid(): HTMLElement {
+  return screen.getByRole('list', { name: '技能卡片' });
+}
+
 function baseClient(overrides = {}) {
   return testClient({
     listPluginSources: vi.fn().mockResolvedValue([
@@ -90,10 +106,11 @@ function baseClient(overrides = {}) {
 }
 
 it('技能被明确说明是给 AI 的指令，不只是普通内容', async () => {
+  const user = userEvent.setup();
   renderWithToasts(<PluginHubPage client={baseClient()} />);
 
-  // 名字同时出现在列表与详情里，这里按详情标题断言。
-  expect(await screen.findByRole('heading', { name: 'frontend-design' })).toBeInTheDocument();
+  // 列表里只有卡片（名字＋描述）：那句警告只在详情里，进去才看得到。
+  await enterDetail(user, 'frontend-design');
   expect(screen.getByText(/技能是给 AI 的执行说明/)).toBeInTheDocument();
   expect(screen.getByText(/看清它会要求 AI 执行哪些命令/)).toBeInTheDocument();
 });
@@ -102,7 +119,7 @@ it('front-matter 解析不了时说明回落，且不阻止安装', async () => 
   const user = userEvent.setup();
   renderWithToasts(<PluginHubPage client={baseClient()} />);
 
-  await user.click(await screen.findByRole('button', { name: /no-front-matter/ }));
+  await enterDetail(user, 'no-front-matter');
   expect(screen.getByText(/头部没能解析/)).toBeInTheDocument();
   expect(screen.getByText(/它需要这些命令：pandoc/)).toBeInTheDocument();
   expect(screen.getByText(/另外还会写入 1 个同目录文件/)).toBeInTheDocument();
@@ -114,7 +131,8 @@ it('安装前先出计划：写哪些文件、装到哪些工具', async () => {
   const client = baseClient();
   renderWithToasts(<PluginHubPage client={client} />);
 
-  await user.click(await screen.findByRole('button', { name: '添加技能' }));
+  await enterDetail(user, 'frontend-design');
+  await user.click(screen.getByRole('button', { name: '添加技能' }));
 
   const dialog = await screen.findByRole('dialog');
   expect(within(dialog).getByRole('heading', { name: '确认安装' })).toBeInTheDocument();
@@ -140,7 +158,8 @@ it('目标目录不是我们装的时候，默认跳过并且不给「覆盖」�
   });
   renderWithToasts(<PluginHubPage client={client} />);
 
-  await user.click(await screen.findByRole('button', { name: '添加技能' }));
+  await enterDetail(user, 'frontend-design');
+  await user.click(screen.getByRole('button', { name: '添加技能' }));
   const dialog = await screen.findByRole('dialog');
 
   expect(within(dialog).getByText('冲突')).toBeInTheDocument();
@@ -165,7 +184,8 @@ it('选择保留两者后，安装请求带上冲突处置', async () => {
   });
   renderWithToasts(<PluginHubPage client={client} />);
 
-  await user.click(await screen.findByRole('button', { name: '添加技能' }));
+  await enterDetail(user, 'frontend-design');
+  await user.click(screen.getByRole('button', { name: '添加技能' }));
   const dialog = await screen.findByRole('dialog');
   await user.click(within(dialog).getByRole('radio', { name: /保留两者/ }));
   await user.click(within(dialog).getByRole('button', { name: '确认安装' }));
@@ -191,7 +211,8 @@ it('部分完成如实分开报：装了哪些、跳过哪些、失败哪些', a
   });
   renderWithToasts(<PluginHubPage client={client} />);
 
-  await user.click(await screen.findByRole('button', { name: '添加技能' }));
+  await enterDetail(user, 'frontend-design');
+  await user.click(screen.getByRole('button', { name: '添加技能' }));
   await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '确认安装' }));
 
   expect(await screen.findByText('安装结果')).toBeInTheDocument();
@@ -277,8 +298,103 @@ it('打开仓库交给系统浏览器，而不是 webview 里没人接的 window
   renderWithToasts(<PluginHubPage client={client} />);
 
   // 回归：以前这里调 window.open，而 Tauri 的 webview 没有浏览器新窗口，点了没反应。
-  await user.click(await screen.findByRole('button', { name: /打开仓库/ }));
+  await enterDetail(user, 'frontend-design');
+  await user.click(screen.getByRole('button', { name: /打开仓库/ }));
   await waitFor(() => expect(openExternalUrl).toHaveBeenCalledWith('https://github.com/anthropics/skills'));
+});
+
+describe('卡片网格与详情', () => {
+  it('列表视图把所有技能都排成卡片，不再一页只看得见几条', async () => {
+    renderWithToasts(<PluginHubPage client={baseClient()} />);
+
+    // 网格一次铺开：两条技能各占一张卡（不是左列表 + 右详情）。
+    await screen.findByRole('list', { name: '技能卡片' });
+    expect(within(grid()).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(grid()).getByText('frontend-design')).toBeInTheDocument();
+    // 没写描述的也有话说，不留空白。
+    expect(within(grid()).getByText('这份技能没有写描述')).toBeInTheDocument();
+    // 卡片上就有两个快捷操作。
+    expect(within(grid()).getAllByRole('button', { name: '添加技能到工作台' })).toHaveLength(2);
+    expect(within(grid()).getAllByRole('button', { name: '打开来源页' })).toHaveLength(2);
+  });
+
+  it('点卡片进详情，返回按钮回列表', async () => {
+    const user = userEvent.setup();
+    renderWithToasts(<PluginHubPage client={baseClient()} />);
+
+    await enterDetail(user, 'frontend-design');
+    // 详情视图：列表连同搜索框一起让位，展开 SKILL.md 原文的入口在这里。
+    expect(screen.queryByRole('list', { name: '技能卡片' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查看 SKILL.md 原文' })).toBeInTheDocument();
+    expect(screen.getByText(/技能是给 AI 的执行说明/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '返回技能列表' }));
+    expect(grid()).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'frontend-design' })).not.toBeInTheDocument();
+  });
+
+  it('卡片上的加号走安装计划，不直接装、也不进详情', async () => {
+    const user = userEvent.setup();
+    const client = baseClient();
+    renderWithToasts(<PluginHubPage client={client} />);
+
+    await screen.findByRole('list', { name: '技能卡片' });
+    await user.click(screen.getAllByRole('button', { name: '添加技能到工作台' })[0]!);
+
+    // 快捷操作只是省一次点击，写文件之前的那张计划弹窗不能省。
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: '确认安装' })).toBeInTheDocument();
+    expect(client.previewPluginInstall).toHaveBeenCalledWith(expect.objectContaining({ skillDirs: ['frontend-design'] }));
+    expect(client.installPlugin).not.toHaveBeenCalled();
+    // 加号不是「进详情」：关掉弹窗后人还留在网格上（弹窗开着时整页被 aria-hidden，量不了）。
+    await user.click(within(dialog).getByRole('button', { name: '取消' }));
+    expect(grid()).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'frontend-design' })).not.toBeInTheDocument();
+  });
+
+  it('卡片上的来源图标交回系统浏览器，且不会顺带把人带进详情', async () => {
+    const user = userEvent.setup();
+    const openExternalUrl = vi.fn().mockResolvedValue(undefined);
+    renderWithToasts(<PluginHubPage client={baseClient({ openExternalUrl })} />);
+
+    await screen.findByRole('list', { name: '技能卡片' });
+    await user.click(screen.getAllByRole('button', { name: '打开来源页' })[0]!);
+
+    await waitFor(() => expect(openExternalUrl).toHaveBeenCalledWith('https://github.com/anthropics/skills'));
+    // 回归：整张卡也是可点的（点击层铺满卡片），图标按钮压在它之上，点它不该连带跳进详情。
+    expect(screen.queryByRole('heading', { name: 'frontend-design' })).not.toBeInTheDocument();
+    expect(grid()).toBeInTheDocument();
+  });
+});
+
+describe('技能市场', () => {
+  it('搜索按关键词送到服务端，打开的是市场自己的页面', async () => {
+    const user = userEvent.setup();
+    const browsePluginRepo = vi.fn().mockResolvedValue({
+      ...catalog, repo: 'clawhub', homepage: 'https://clawhub.ai/skills/frontend-design',
+    });
+    const openExternalUrl = vi.fn().mockResolvedValue(undefined);
+    const client = baseClient({
+      listPluginSources: vi.fn().mockResolvedValue([
+        { repo: 'clawhub', label: 'ClawHub 技能市场', description: '社区技能注册表', builtin: true },
+      ]),
+      browsePluginRepo, openExternalUrl,
+    });
+    renderWithToasts(<PluginHubPage client={client} />);
+
+    // 来源标识里没有 `/` ＝ 市场：本地筛几千条没有意义，关键词要交给对方的搜索接口（400ms 防抖）。
+    await screen.findByRole('list', { name: '技能卡片' });
+    await user.type(screen.getByLabelText('搜索技能'), 'pdf');
+    await waitFor(() => expect(browsePluginRepo).toHaveBeenLastCalledWith('clawhub', 'pdf'), { timeout: 2000 });
+
+    // 市场不是 GitHub：卡片上的来源图标回链到它自己的技能页。
+    await user.click(screen.getAllByRole('button', { name: '打开来源页' })[0]!);
+    await waitFor(() => expect(openExternalUrl).toHaveBeenCalledWith('https://clawhub.ai/skills/frontend-design'));
+
+    // 详情视图同样可用，按钮也按来源改口。
+    await enterDetail(user, 'frontend-design');
+    expect(screen.getByRole('button', { name: '在市场里查看' })).toBeInTheDocument();
+  });
 });
 
 it('仓库里没有技能时说清楚，而不是显示一个空市场', async () => {
@@ -354,7 +470,8 @@ it('点「填写令牌」开弹窗，存好之后自动重抓一次目录', asyn
   await waitFor(() => expect(setContentGithubToken).toHaveBeenCalledWith('ghp_secret'));
   // 存了令牌立刻再抓一次：不自动重试等于让用户自己再点一遍。
   await waitFor(() => expect(browsePluginRepo).toHaveBeenCalledTimes(2));
-  expect(await screen.findByRole('heading', { name: 'frontend-design' })).toBeInTheDocument();
+  expect(await screen.findByRole('list', { name: '技能卡片' })).toBeInTheDocument();
+  expect(within(grid()).getByText('frontend-design')).toBeInTheDocument();
 });
 
 it('首次失败弹一次提示；同一个原因再失败只留那一行', async () => {

@@ -1,4 +1,4 @@
-import type { UsageDay } from '@/contracts/types';
+import type { UsageDay, UsageTotals } from '@/contracts/types';
 
 /**
  * 用量页的数字与日期格式化。集中放在这里，不在组件里内联判断：
@@ -40,8 +40,21 @@ export function planWindowLabel(minutes: number): {
 
 /** 已用百分比取整：小数位在这里没有意义，只会让一行文字变长。 */
 export function usedPercentLabel(percent: number): string {
-  if (!Number.isFinite(percent)) return '0';
-  return String(Math.min(100, Math.max(0, Math.round(percent))));
+  return percentLabel(percent);
+}
+
+/**
+ * 百分比取整并夹在 0..100。与已用百分比同一条规则，供占比、命中率这类口径一致的地方用：
+ * 页面上所有百分数（命中率、两条构成比、两张排行的占比）必须同一口径，否则同一件事会读出两个数。
+ */
+export function percentLabel(percent: number): string {
+  return Number.isFinite(percent) ? String(Math.round(clampPercent(percent))) : '0';
+}
+
+/** 夹在 0..100 的百分比数值。直接喂给条的宽度（`width: {n}%`）——越界的宽度会被算成溢出。 */
+export function clampPercent(percent: number): number {
+  if (!Number.isFinite(percent)) return 0;
+  return Math.min(100, Math.max(0, percent));
 }
 
 /** Unix 秒 → 本地日期时间。重置时间要能一眼对上手表的日期。 */
@@ -59,6 +72,80 @@ export function shortDate(date: string): string {
 /** 图表峰值。全部为零时返回 0——图表按零绘制，不编一个高度出来。 */
 export function peakTotal(days: UsageDay[]): number {
   return days.reduce((max, day) => Math.max(max, day.totals.totalTokens), 0);
+}
+
+/* ---- 结论带与图表的派生值 ---- */
+
+/**
+ * 日均：总 Token ÷ 请求的天数。
+ *
+ * 分母用 `rangeDays`（请求的范围）而不是 `daily.length`：报告契约保证 daily 逐日零填充，
+ * 两者本来就相等；用 rangeDays 是为了在 data 被裁剪的报告上也不会把日均算大。
+ * 天数非正时返回 0，不做除法。
+ */
+export function avgPerDay(total: number, rangeDays: number): number {
+  return rangeDays > 0 ? total / rangeDays : 0;
+}
+
+/** 每会话均量。会话为 0 时返回 0——没有会话就没有「每次」可言。 */
+export function perSession(total: number, sessions: number): number {
+  return sessions > 0 ? total / sessions : 0;
+}
+
+/** 缓存命中率（%）：缓存读取 ÷ 输入。输入为 0 时返回 0，不做 0/0。 */
+export function cacheRate(totals: UsageTotals): number {
+  return totals.inputTokens > 0 ? (totals.cachedTokens / totals.inputTokens) * 100 : 0;
+}
+
+/**
+ * 占比（%）：分项 ÷ 本范围总量。
+ *
+ * 两张排行与构成条都走这一个函数，所以「按模型 46%」与「按供应商 61%」是同一个分母下的数，
+ * 能横着比。分母为 0 时返回 0。
+ */
+export function sharePercent(part: number, whole: number): number {
+  return whole > 0 ? (part / whole) * 100 : 0;
+}
+
+/**
+ * 峰值日：总量最大的那天。并列时取最早的一天（严格大于才替换）。
+ * 范围内没有任何用量（或 daily 为空）时返回 null——不指定某一天当峰值，也不编一个日期出来。
+ */
+export function peakDay(days: UsageDay[]): UsageDay | null {
+  let best: UsageDay | null = null;
+  for (const day of days) {
+    if (day.totals.totalTokens > 0 && (best === null || day.totals.totalTokens > best.totals.totalTokens)) best = day;
+  }
+  return best;
+}
+
+/** 热力图分档：0 = 没有记录，1..4 = 当日用量相对本范围峰值的四档。 */
+export function heatLevel(value: number, peak: number): number {
+  if (!(value > 0) || !(peak > 0)) return 0;
+  const ratio = value / peak;
+  if (ratio > 0.75) return 4;
+  if (ratio > 0.5) return 3;
+  if (ratio > 0.25) return 2;
+  return 1;
+}
+
+/**
+ * 热力图的列序：周一 = 0 … 周日 = 6。
+ *
+ * 用 `T00:00:00` 构造本地时间再取星期：`new Date('2026-09-25')` 会被当成 UTC 零点，
+ * 东八区以下的时区会把日期挪到前一天、星期整整错一列。
+ */
+export function weekdayIndex(date: string): number {
+  const day = new Date(`${date}T00:00:00`).getDay();
+  return Number.isNaN(day) ? 0 : (day + 6) % 7;
+}
+
+/**
+ * 热力图列头的星期窄名（中文「一」、英文「M」）。用固定的一周取名字，与"今天是星期几"无关。
+ * 2026-01-05 是周一，所以 index 0..6 依次是周一到周日。
+ */
+export function weekdayNarrow(locale: string, index: number): string {
+  return new Intl.DateTimeFormat(locale, { weekday: 'narrow' }).format(new Date(2026, 0, 5 + index));
 }
 
 /** 去掉小数末尾的 0：`7.0` → `7`，`3.35` 保留。 */

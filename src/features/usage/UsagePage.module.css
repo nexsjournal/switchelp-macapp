@@ -16,27 +16,35 @@
 .cardMeta { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 /* 卡片里紧跟标题的说明（计划额度读不到、表里没有记录）要与标题隔开，不能贴住。 */
 .card > .cardTitle:first-child + .note, .card > .cardHeader:first-child + .note { margin-top: 12px; }
+/* 标题与紧随其后的构成条之间留出间距；卡片四边内边距保持相等。 */
+.card > .cardTitle:first-child + .compose { margin-top: 16px; }
 
-/* ---- 指标卡 ---- */
+/* ---- 结论带：主数字 + 派生指标 ---- */
 /*
- * 两层才等宽等高：grid 只把 li 拉伸到行高，里面的卡片不跟着长，字数不同就会高低不一。
- * 所以 li 用 flex，内层卡片自己 flex:1 撑满。
- * `grid-auto-rows: 1fr` 让各排统一取最高那一排的高度：窄窗口降到两列时，第二排因为
- * 多一行「含在输入内」会比第一排高（实测 110 vs 88），两排不等看着像没对齐。
+ * 左边是唯一的主数字（总 Token）与它的口径，右边四个派生指标。两列在窄窗口下叠成一列
+ * （见文件末尾的断点）：主数字掉到第二行会像「另一个指标卡」。
  */
-.metrics { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 16px; }
+/* 主数字与派生指标块垂直居中对齐：两边高度不同（大字块 ~85、四个小卡 ~160），顶对齐会让左边空出一截。 */
+.summary { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 24px; align-items: center; }
+.hero { display: grid; gap: 4px; align-content: start; }
+.heroLabel { font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); }
+/* 主数字：全页最大的一处字号，等宽栈便于与口径行里的数字对齐。 */
+.heroValue { font-family: var(--font-mono); font-size: var(--font-size-page-title); line-height: var(--line-height-page-title); font-weight: 500; letter-spacing: -0.4px; color: var(--text-primary); }
+/* 口径行：三个并列口径 + 包含关系，写在主数字下面而不是塞进 tooltip。 */
+.heroMeta { margin: 4px 0 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); }
+.heroNum { font-family: var(--font-mono); color: var(--text-primary); }
+
 /*
- * 两层才等宽等高：grid 只把 li 拉伸到行高，里面的卡片不跟着长，字数不同就会高低不一。
- * 所以 li 用 flex，内层卡片自己 flex:1 撑满。
+ * 派生指标 2×2。两层才等宽等高：grid 只把 li 拉伸到行高，里面的卡片不跟着长，
+ * 字数不同就会高低不一（同 07 号规范的指标卡做法）。`grid-auto-rows: 1fr` 让两排统一取高的一排。
  */
-.metrics li { display: flex; }
-.metricCard { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; justify-items: start;
-  align-content: start; gap: 4px; padding: var(--space-4);
+.derived { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 12px; }
+.derived li { display: flex; }
+.derivedCard { flex: 1; display: grid; align-content: start; gap: 4px; padding: var(--space-4);
   border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); }
-.metricLabel { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); white-space: nowrap; }
-/* 数字用等宽栈（已含中文回退），固定宽度便于上下两行数字对齐。 */
-.metricValue { font-family: var(--font-mono); font-size: var(--font-size-metric); line-height: var(--line-height-metric); color: var(--text-primary); }
-.metricNote { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+/* 每张卡是一句话（键本身带数值），整句走等宽栈：中文由等宽栈里的中文字体回退，数字则对齐。 */
+.derivedValue { font-family: var(--font-mono); font-size: var(--font-size-card-title); line-height: var(--line-height-card-title); font-weight: 500; color: var(--text-primary); }
+.derivedNote { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 
 /* ---- 每日趋势 ---- */
 .chart { display: grid; gap: 8px; }
@@ -70,18 +78,92 @@
 .chartTipMeta { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
 .chartAxis { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 
-/* ---- 计划额度 ---- */
-.planRow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.planTrack { flex: 1 1 220px; min-width: 160px; height: 8px; border-radius: var(--radius-pill); background: var(--border-subtle); overflow: hidden; }
-.planFill { height: 100%; background: var(--accent); }
-/* 百分比与重置时间都用等宽：进度条按目测读不准，数字要能直接读。 */
-.planValue { font-family: var(--font-mono); font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-primary); }
-.planReset { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+/* ---- 日历热力图 ---- */
+/*
+ * 单元格尺寸写成本地变量：格子与列头必须同宽同缝，两处各写一遍迟早会漂移。
+ * 28 是方形格子里「看得清又不会把 90 天撑成一堵墙」的一档（90 天 = 13 行 ≈ 412 高）。
+ */
+/*
+ * 作图区：格子只有 7 列宽（一周 7 天，格子保持正方），宽卡片里右侧一定会有余量，
+ * 所以把视角图收进一块有底色的区域，并让「峰值 / 覆盖日期」那一行横跨整块，右边缘才是齐的。
+ */
+.heatPlot { --heat-cell: 28px; --heat-gap: 4px; display: grid; gap: 12px; padding: var(--space-4);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-input); }
+.heatMeta { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.heatBlock { display: grid; gap: 8px; justify-items: start; }
+.heatWeekdays { display: grid; grid-template-columns: repeat(7, var(--heat-cell)); gap: var(--heat-gap);
+  font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); text-align: center; }
+.heatGrid { display: grid; grid-template-columns: repeat(7, var(--heat-cell)); gap: var(--heat-gap); }
+/*
+ * 空格（这天没用过）与四档用量。分档只用强调色的深浅（accent 一族的底/描边），不引入新的色值：
+ * 深浅是同一个色相，读起来是「多 / 少」而不是「不同的状态」。
+ * 逐档用 opacity 而不是另配颜色：同一份强调色在深色与浅色主题下都不会跑出色系。
+ */
+.heatCell { width: var(--heat-cell); height: var(--heat-cell); border-radius: var(--radius-xs); background: var(--bg-hover); }
+.heatCell[data-level='1'] { background: var(--accent); opacity: 0.24; }
+.heatCell[data-level='2'] { background: var(--accent); opacity: 0.44; }
+.heatCell[data-level='3'] { background: var(--accent); opacity: 0.68; }
+.heatCell[data-level='4'] { background: var(--accent); }
+/* 悬停指出「是这一格」：颜色本身是刻度，不能再拿它当悬停反馈。 */
+.heatCell:hover { outline: 2px solid var(--accent-border); outline-offset: 1px; }
+.heatPeak { font-family: var(--font-mono); font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); }
+.heatRange { font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.heatLegend { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.legendSwatch { width: 12px; height: 12px; border-radius: var(--radius-xs); background: var(--bg-hover); }
+.legendSwatch[data-level='1'] { background: var(--accent); opacity: 0.24; }
+.legendSwatch[data-level='2'] { background: var(--accent); opacity: 0.44; }
+.legendSwatch[data-level='3'] { background: var(--accent); opacity: 0.68; }
+.legendSwatch[data-level='4'] { background: var(--accent); }
 
-/* ---- 表格 ---- */
+/* ---- Token 构成 ---- */
+.compose { display: grid; gap: 16px; }
+/*
+ * 一行 = 标签 / 条 / 读数。读数那一列必须是**定宽**的：这一列的宽度随内容变（第一行多了「含在输入内」
+ * 这几个字）时，两条的条长就不一样，而两条各自归一化（都代表 100%），条长不同会把「52%」画得比
+ * 「46%」还短——实测未定宽时 809 对 925。定宽后两条严格等长，长度差只来自百分比本身。
+ */
+.composeRow { display: grid; grid-template-columns: 64px minmax(0, 1fr) 240px; align-items: center; gap: 16px; }
+.composeLabel { font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); }
+/*
+ * 整条 = 这一项自己的总量（淡一档的强调色），深色子段 = 它内部的缓存命中 / 推理。
+ * 条按自身归一化（子段宽度 = 子项 ÷ 本项），所以两行之间没有可加性。
+ *
+ * 子段用 accent-strong、整条用 accent 压到 28%：这一对是同一色系现成的两档（accent-strong
+ * 在深浅两套主题里都比 accent 更实），不必自己调色；子段因此读成「整条里更深的那一段」。
+ * 两段都是绝对定位的纯色块（没有文字），子段宽度直接由百分比给，永远不会越出整条。
+ */
+.composeTrack { position: relative; display: block; height: 12px; border-radius: var(--radius-xs); overflow: hidden; }
+.composeRest { position: absolute; inset: 0; background: var(--accent); opacity: 0.28; }
+.composePart { position: absolute; inset: 0 auto 0 0; background: var(--accent-strong); }
+.composeReadout { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.composePartName { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
+.composeValue { font-family: var(--font-mono); font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-primary); font-weight: 500; }
+.composePercent { font-family: var(--font-mono); font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); }
+.composeNoteInline { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+.composeNote { margin: 16px 0 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+
+/* ---- 排行（按模型 / 按供应商）---- */
+/* 两张卡等高（grid 默认 stretch）：一行里两张卡底边不齐会像没对齐。 */
+/*
+ * 节奏（左窄）与构成（右宽）并排。
+ * 日历热力图天生只有 7 列（220px 上下），给它一整行会在右侧空出 500px；横条正相反——
+ * 越长越好读。所以左边给固定上限、右边吃掉剩余宽度。窄到放不下时落成一列。
+ */
+.splitRow { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 1080px) { .splitRow { grid-template-columns: minmax(0, 1fr); } }
+
+.rankRow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 /* 给焦点环留 2px：不留的话滚动容器会把外圈描边裁掉（与全局 .scroll-area 同一做法）。 */
 .tableScroll { overflow-x: auto; padding: 2px; margin: -2px; }
-.table { width: 100%; border-collapse: collapse; text-align: left; font-size: var(--font-size-label); line-height: var(--line-height-label); }
+/*
+ * 固定表布局 + 给两个数值列定宽：比例条的长度只由占比决定。
+ * 自动表布局会按每行内容分列，同一张表里「46%」与「8%」的两行条长就不同（实测 296 对 304），
+ * 两张卡之间也会不同——条是量占比的刻度，长度必须只随占比变。定宽之后条长同一张表内相等，
+ * 两张卡（同宽）之间也相等。首列给余量，长模型 ID 换行而不是把表撑破。
+ */
+.table { width: 100%; table-layout: fixed; border-collapse: collapse; text-align: left; font-size: var(--font-size-label); line-height: var(--line-height-label); }
+.table th:nth-child(2), .table td:nth-child(2) { width: 64px; }
+.table th:nth-child(3), .table td:nth-child(3) { width: 76px; }
 .table th { padding: 0 12px 12px; color: var(--text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-caption); font-weight: 500; white-space: nowrap; }
 .table td { padding: 12px; border-top: 1px solid var(--border-subtle); vertical-align: middle; }
 /* 首列贴左缘、末列贴右缘：表格自己不再多一层内缩。 */
@@ -90,13 +172,45 @@
 .num { text-align: right; font-family: var(--font-mono); white-space: nowrap; }
 /*
  * 数值列的表头也要右对齐：单元格是右对齐的数字，表头默认左对齐时两者对不上——
- * 「输入」两个字贴在列的左边、下面的数字贴在右边，中间空一大段（用户截图指的就是这个）。
+ * 「会话」两个字贴在列的左边、下面的数字贴在右边，中间空一大段（用户截图指的就是这个）。
  * 单独一个类而不是复用 `.num`：表头是标签不是数字，不该跟着换成等宽栈。
  */
 .numHead { text-align: right; }
 .numStrong { font-weight: 500; color: var(--text-primary); }
 /* 模型名与供应商名是标识符，不是文案：走等宽栈，长 id 也不会挤成两行。 */
 .mono { font-family: var(--font-mono); }
+/* 名称 + 比例条 + 百分比：条与数字同一行，读「谁占多少」时视线不用上下跳。 */
+.rankName { display: grid; gap: 4px; }
+/* 长模型 ID 只换行、不截断：它是辨识模型的唯一线索。 */
+.rankName > span:first-child { overflow-wrap: anywhere; }
+.rankBar { display: flex; align-items: center; gap: 8px; }
+.rankTrack { flex: 1 1 auto; min-width: 48px; height: 4px; border-radius: var(--radius-pill); background: var(--border-subtle); overflow: hidden; }
+.rankFill { display: block; height: 100%; border-radius: var(--radius-pill); background: var(--accent); }
+/*
+ * 百分比的宽度钉死（等宽栈 + 右对齐）：它是轨道唯一的同行兄弟，宽度随「46%」/「8%」变化时，
+ * 同一张表里两行的轨道长度就不同，「长条代表大占比」这条读法当场失效（实测 296 对 304）。
+ */
+.rankShare { flex: 0 0 auto; width: 40px; text-align: right; font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
+
+/* ---- 计划额度（环形）---- */
+.planRow { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; margin-top: 16px; }
+.ring { position: relative; width: 112px; height: 112px; flex: 0 0 auto; }
+.ringSvg { display: block; width: 100%; height: 100%; }
+.ringTrack { fill: none; stroke: var(--border-subtle); stroke-width: 10; }
+.ringFill { fill: none; stroke: var(--accent); stroke-width: 10; stroke-linecap: round; transition: stroke-dashoffset var(--motion-hover); }
+/*
+ * 环里的百分比：13/20 而不是更大的字号——「已用 35%」是一句话，中文在 112 的环里再大就挤出去。
+ * 环是挖空的（只有描边），文字压在卡片底色上，对比度按卡片底色算。
+ */
+.ringValue { position: absolute; inset: 0; display: grid; place-items: center; padding: 0 8px;
+  font-family: var(--font-mono); font-size: var(--font-size-label); line-height: var(--line-height-label); font-weight: 500;
+  color: var(--text-primary); text-align: center; }
+/* 计划名 / 窗口 / 重置时间：横向铺开成一条事实带，窄窗口自己换行。 */
+.planFacts { list-style: none; margin: 0; padding: 0; flex: 1 1 320px; min-width: 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 24px;
+  font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-secondary); }
+/* 重置时间要能对上手表的日期：数字部分走等宽栈。 */
+.planFacts li { font-family: var(--font-mono); }
 
 /* ---- 证据行与说明 ---- */
 .note { margin: 0; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
@@ -107,7 +221,11 @@
 .spin { animation: usage-spin 900ms linear infinite; }
 @keyframes usage-spin { to { transform: rotate(360deg); } }
 
-/* 最小窗口（规范 960 宽）下指标卡从四列降到两列。沿用 App.module.css 的 1120 断点。 */
+/*
+ * 最小窗口（规范 960 宽）下：结论带叠成一列（主数字不该被挤成半栏），
+ * 派生指标仍是两列，两张排行表各占一行。沿用 App.module.css 的 1120 断点。
+ */
 @media (max-width: 1120px) {
-  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary { grid-template-columns: minmax(0, 1fr); }
+  .rankRow { grid-template-columns: minmax(0, 1fr); }
 }
