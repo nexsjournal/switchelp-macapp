@@ -12,10 +12,6 @@
 .statusBar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
 .statusOk { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
 .statusWarn { display: inline-flex; align-items: center; gap: 6px; color: var(--status-warning); }
-.failureList { list-style: none; margin: 0; padding: 12px 16px; display: grid; gap: 6px; border-radius: var(--radius-sm); background: var(--status-warning-bg); color: var(--status-warning); font-size: var(--font-size-caption); line-height: var(--line-height-caption); }
-.failureList li { display: flex; align-items: flex-start; gap: 8px; }
-.failureList li svg { margin-top: 3px; flex: none; }
-.failureHint { color: var(--text-secondary); }
 .report { display: grid; gap: 6px; padding: 14px 20px; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-surface); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
 .report > strong { font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-primary); }
 .report > button { justify-self: start; }
@@ -35,7 +31,10 @@
 .newsCard:hover:not(:disabled) { border-color: var(--accent-border); }
 .newsCard:hover .newsTitle { color: var(--accent); }
 .newsTitle { font-size: var(--font-size-label); line-height: var(--line-height-label); color: var(--text-primary);
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  /* `white-space` 是继承属性：卡片本身是 button，全局规则给了 nowrap，不显式改回来
+     多行截断就永远只有一行——文字冲出容器被 overflow 硬切，连省略号都没有。 */
+  white-space: normal; }
 .newsMeta { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 8px;
   font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
 .newsSource { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -51,7 +50,8 @@
 .repoCard:hover { border-color: var(--accent-border); }
 .repoName { font-family: var(--font-mono); font-size: var(--font-size-label); line-height: var(--line-height-label); }
 .repoStars { font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--status-warning); }
-.repoSummary { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+/* 同上：仓库卡片也是 button，nowrap 会把它压成一行。 */
+.repoSummary { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; }
 
 .schedule { font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
 .addRow select, .addRow input { height: var(--control-height); padding: 0 10px; border: 1px solid var(--border-field); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-primary); font-size: var(--font-size-label); }
@@ -72,9 +72,4 @@
 .spin { animation: content-spin 900ms linear infinite; }
 @keyframes content-spin { to { transform: rotate(360deg); } }
 
-/* 令牌弹窗的输入框：与供应商表单的密钥字段同一套做法（输入框 + 显隐按钮压在右侧，
-   输入框留出按钮的位置）。同样要压过全局输入框规则，所以类名写两遍。 */
-.secret { position: relative; display: block; }
-.secret .secretInput.secretInput { padding-right: 48px; }
-.secret button { position: absolute; right: 4px; top: 4px; }
 

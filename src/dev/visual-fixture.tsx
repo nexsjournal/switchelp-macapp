@@ -144,6 +144,50 @@ const toolStates: ToolState[] = [
     agentUsage: { tags: ['代码托管', 'GitHub'], nonInteractive: ['gh repo clone <owner/repo>', 'gh pr create --fill'] },
     versionProbeTail: 'gh version 2.62.0 (2025-01-15)', authProbeTail: 'operation not permitted: unable to read keyring', notes: [], probedAt: 1_789_956_000, cacheSeconds: 300,
   },
+  /*
+   * 有品牌图标的这几家：走查要看的是「图标到底出没出来」，所以夹具里必须有它们——
+   * 用户截图里缺图标的正是这几行（Gemini / Qwen / Goose / OpenCode / OpenClaw）。
+   */
+  {
+    id: 'gemini-cli', displayName: 'Gemini CLI', category: 'cliCode', description: 'Google 的编码 agent CLI。',
+    status: 'ready',
+    installed: { path: '/opt/homebrew/bin/gemini', pathSource: 'path', version: '0.9.0', configPath: null, configExists: false, skillsPath: null, skillsCount: 0 },
+    website: null, docs: 'https://github.com/google-gemini/gemini-cli', modelConfig: false, skillTarget: false,
+    agentUsage: { tags: ['编码 agent'], nonInteractive: ['gemini -p "<任务>"'] },
+    versionProbeTail: '0.9.0', authProbeTail: null, notes: [], probedAt: 1_789_956_000, cacheSeconds: 300,
+  },
+  {
+    id: 'qwen-code', displayName: 'Qwen Code', category: 'cliCode', description: '通义千问的编码 agent CLI。',
+    status: 'notInstalled',
+    installed: null,
+    website: null, docs: 'https://github.com/QwenLM/qwen-code', modelConfig: false, skillTarget: false,
+    agentUsage: { tags: ['编码 agent'], nonInteractive: [] },
+    versionProbeTail: '', authProbeTail: null, notes: [], probedAt: 1_789_956_000, cacheSeconds: 300,
+  },
+  {
+    id: 'goose', displayName: 'Goose', category: 'cliCode', description: 'Block 开源的本地 agent。',
+    status: 'notInstalled',
+    installed: null,
+    website: null, docs: 'https://block.github.io/goose/', modelConfig: false, skillTarget: false,
+    agentUsage: { tags: ['编码 agent'], nonInteractive: [] },
+    versionProbeTail: '', authProbeTail: null, notes: [], probedAt: 1_789_956_000, cacheSeconds: 300,
+  },
+  {
+    id: 'opencode', displayName: 'OpenCode', category: 'cliCode', description: '开源终端编码 agent，配置走 opencode.json。',
+    status: 'notInstalled',
+    installed: null,
+    website: null, docs: 'https://opencode.ai/docs/', modelConfig: false, skillTarget: false,
+    agentUsage: { tags: ['编码 agent'], nonInteractive: [] },
+    versionProbeTail: '', authProbeTail: null, notes: [], probedAt: 1_789_956_000, cacheSeconds: 300,
+  },
+  {
+    id: 'openclaw', displayName: 'OpenClaw', category: 'cliCode', description: '开源 agent 运行时，带 MCP 网关与技能目录。',
+    status: 'notInstalled',
+    installed: null,
+    website: null, docs: null, modelConfig: false, skillTarget: false,
+    agentUsage: { tags: ['编码 agent'], nonInteractive: [] },
+    versionProbeTail: '', authProbeTail: null, notes: [], probedAt: 1_789_956_000, cacheSeconds: 300,
+  },
   {
     id: 'aider', displayName: 'Aider', category: 'cliCode', description: '在终端里结对改代码的 agent，按 diff 提交到 git。',
     status: 'unverified',
@@ -305,6 +349,13 @@ function usageFixture(days: number): UsageReport {
   };
 }
 
+/*
+ * 走查用的错误态开关：`?view=plugins&case=rateLimited` 让目录浏览按限额失败，
+ * `case=repoNotFound` 按仓库不存在失败。真实的失败态只在特定网络条件下出现，
+ * 而「一行小提醒 + 点开看详情」这两个态必须能随时量版面。
+ */
+const fixtureCase = new URLSearchParams(window.location.search).get('case') ?? '';
+
 const client: DesktopClient = {
   detectInstances: async () => [instance],
   platformInfo: async () => ({ platform: 'macos', titlebarHeight: 44, leadingReserve: 84, systemDecorations: true }),
@@ -419,7 +470,21 @@ const client: DesktopClient = {
   ]),
   addPluginSource: async () => ([]),
   removePluginSource: async () => ([]),
-  browsePluginRepo: async () => pluginCatalog,
+  browsePluginRepo: async () => {
+    if (fixtureCase === 'rateLimited') {
+      throw {
+        code: 'INTERNAL', messageKey: 'error.pluginRateLimited', retryable: true, recoveryActions: [],
+        safeDetails: ['公开接口的访问频率已用尽（约 12 分钟后恢复），稍后再试或在设置里填一个 GitHub 令牌'],
+      };
+    }
+    if (fixtureCase === 'repoNotFound') {
+      throw {
+        code: 'NOT_FOUND', messageKey: 'error.pluginRepoNotFound', retryable: false, recoveryActions: [],
+        safeDetails: ['https://api.github.com/repos/anthropics/skills 返回 404'],
+      };
+    }
+    return pluginCatalog;
+  },
   previewPluginInstall: async request => ({
     repo: pluginCatalog.repo,
     commit: pluginCatalog.commit,

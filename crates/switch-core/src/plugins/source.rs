@@ -6,7 +6,7 @@
 //!
 //! 网络访问抽成 `RepoFetcher`，测试用假实现，不去打真实接口。
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
@@ -355,14 +355,22 @@ fn skill_directory(path: &str) -> Option<String> {
     Some(name.to_owned())
 }
 
+/// 令牌来源：**每次请求现读一次**。
+///
+/// 不存快照的理由：抓取器是应用启动时装配的，而令牌是用户之后才填的。
+/// 存一份 `Option<String>` 就等于把「填令牌之前的那一刻」冻结下来，用户填完也仍旧按
+/// 匿名限额（每小时 60 次）发请求——正是「设置里填了令牌，插件中心还说限额用尽」的成因。
+/// 返回 `None` 表示这次请求按匿名发出。
+pub type TokenSource = Arc<dyn Fn() -> Option<String> + Send + Sync>;
+
 /// 真实抓取器：GitHub 的公开 REST 接口。
 ///
 /// 只用三个只读端点：仓库信息（拿默认分支）、commit 解析、git tree（拿文件列表）。
 /// 文件正文走 `raw.githubusercontent.com`，它不占用 API 的限额。
 pub struct GithubFetcher {
     agent: ureq::Agent,
-    /// 可选令牌。填了能把 API 限额从每小时 60 次提到 5000 次。
-    token: Option<String>,
+    /// 令牌来源。来源给出令牌时，API 限额从每小时 60 次提到 5000 次。
+    token: TokenSource,
     api_base: String,
     raw_base: String,
     /// 随包标识。源站至少能看到是谁在请求。
@@ -370,7 +378,13 @@ pub struct GithubFetcher {
 }
 
 impl GithubFetcher {
+    /// 固定令牌。测试与镜像用；应用里请用 [`Self::with_token_source`]。
     pub fn new(token: Option<String>, user_agent: String) -> Self {
+        Self::with_token_source(Arc::new(move || token.clone()), user_agent)
+    }
+
+    /// 令牌来源版本：每次请求都问一次来源，用户在设置里换了令牌，下一页就生效。
+    pub fn with_token_source(token: TokenSource, user_agent: String) -> Self {
         let agent = ureq::Agent::new_with_config(
             ureq::Agent::config_builder()
                 .http_status_as_error(false)
@@ -405,13 +419,28 @@ impl GithubFetcher {
         fetcher
     }
 
+    /// 同 [`Self::with_bases`]，令牌按来源现读。
+    pub fn with_token_source_and_bases(
+        token: TokenSource,
+        user_agent: String,
+        api_base: impl Into<String>,
+        raw_base: impl Into<String>,
+    ) -> Self {
+        let mut fetcher = Self::with_token_source(token, user_agent);
+        fetcher.api_base = api_base.into();
+        fetcher.raw_base = raw_base.into();
+        fetcher
+    }
+
     fn request(&self, url: &str, accept: &str) -> Result<Vec<u8>, CoreError> {
         let mut request = self
             .agent
             .get(url)
             .header("accept", accept)
             .header("user-agent", &self.user_agent);
-        if let Some(token) = self.token.as_deref() {
+        // 现读，且**只在这里读**：上一次请求拿到的令牌不留给下一次。
+        let token = (self.token)().map(|token| token.trim().to_owned());
+        if let Some(token) = token.filter(|token| !token.is_empty()) {
             request = request.header("authorization", format!("Bearer {token}"));
         }
         let mut response = request.call().map_err(|error| {
@@ -426,10 +455,23 @@ impl GithubFetcher {
             );
         }
         if status == 403 || status == 429 {
+            let header = |name: &str| {
+                response
+                    .headers()
+                    .get(name)
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_owned)
+            };
+            // 状态码只说「不行」，响应头里才有「等多久」。这几个头是 GitHub 限额响应的
+            // 固定字段，读不到就退回「稍后再试」——不能因为读不到头就把错误变成失败。
+            let detail = rate_limit_detail(
+                header("retry-after").as_deref(),
+                header("x-ratelimit-reset").as_deref(),
+                header("x-ratelimit-remaining").as_deref(),
+                crate::time_now(),
+            );
             return Err(
-                CoreError::new(ErrorCode::Internal, "error.pluginRateLimited").with_detail(
-                    "公开接口的访问频率已用尽，稍后再试或在设置里填一个 GitHub 令牌".to_owned(),
-                ),
+                CoreError::new(ErrorCode::Internal, "error.pluginRateLimited").with_detail(detail),
             );
         }
         if !(200..300).contains(&status) {
@@ -451,6 +493,35 @@ impl GithubFetcher {
         serde_json::from_slice(&bytes)
             .map_err(|error| CoreError::internal(format!("{url} 的响应不是合法 JSON：{error}")))
     }
+}
+
+/// 限额响应的可行动说明：等多久、怎么把额度提上去。
+///
+/// 只说「稍后再试」等于让用户自己猜——GitHub 的响应头带了恢复时间，界面就该把它说出来。
+/// `retry-after`（上游直接要求等多少秒）优先于 `x-ratelimit-reset`（窗口重置的绝对时刻，
+/// Unix 秒）；`x-ratelimit-remaining` 只在确实为 0 时提一句，避免拿一个没读到的头当事实。
+fn rate_limit_detail(
+    retry_after: Option<&str>,
+    reset: Option<&str>,
+    remaining: Option<&str>,
+    now: i64,
+) -> String {
+    let mut detail = String::from("GitHub 公开接口的访问频率已用尽（未认证每小时 60 次）");
+    if let Some(seconds) = retry_after.and_then(|value| value.trim().parse::<u64>().ok()) {
+        detail.push_str(&format!("，上游要求大约 {seconds} 秒后重试"));
+    } else if let Some(reset) = reset.and_then(|value| value.trim().parse::<i64>().ok()) {
+        // 向上取整：还剩 20 秒时说「1 分钟」也比说「0 分钟」有用。
+        let seconds = (reset - now).max(0);
+        let minutes = (seconds + 59) / 60;
+        detail.push_str(&format!("，距恢复还有约 {minutes} 分钟"));
+    } else {
+        detail.push_str("，稍后再试");
+    }
+    if remaining.and_then(|value| value.trim().parse::<u64>().ok()) == Some(0) {
+        detail.push_str("，本小时剩余 0 次");
+    }
+    detail.push_str("；在设置里填一个 GitHub 令牌可以把限额提到每小时 5000 次");
+    detail
 }
 
 impl RepoFetcher for GithubFetcher {
@@ -573,6 +644,8 @@ pub(crate) mod fake {
 mod tests {
     use super::fake::FakeFetcher;
     use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::{Ipv4Addr, TcpListener};
 
     #[test]
     fn parses_plain_and_ref_pinned_specs() {
@@ -741,5 +814,184 @@ mod tests {
         let catalog = assemble(&fetcher, "o/r", "deadbeef", &blobs, 0).unwrap();
         assert_eq!(catalog.skills[0].document.id, "noname");
         assert!(!catalog.skills[0].document.front_matter_parsed);
+    }
+
+    /// 一个预设响应：状态码、附加响应头、正文。
+    type Reply = (u16, Vec<(&'static str, String)>, &'static str);
+
+    /// 合成上游：按序返回预设响应，并记下每次请求的 authorization 头。
+    ///
+    /// 用真的 socket 而不是假 agent：这里要验证的正是**请求头**——令牌有没有按当前值
+    /// 带上去，只有在真实的请求上才看得出来（写法照 `diagnostics::probe` 的用例）。
+    struct Mock {
+        endpoint: String,
+        seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl Mock {
+        fn start(replies: Vec<Reply>) -> Self {
+            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let sink = seen.clone();
+            std::thread::spawn(move || {
+                let mut replies = replies.into_iter();
+                for incoming in listener.incoming() {
+                    let Ok(stream) = incoming else { break };
+                    let Some((status, headers, body)) = replies.next() else {
+                        break;
+                    };
+                    let sink = sink.clone();
+                    std::thread::spawn(move || {
+                        let mut reader = BufReader::new(stream.try_clone().unwrap());
+                        let mut auth = String::new();
+                        loop {
+                            let mut line = String::new();
+                            if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                                break;
+                            }
+                            // 头名比较用小写，取回来的是原样的大小写：令牌本身要原样断言。
+                            if line.to_ascii_lowercase().starts_with("authorization:") {
+                                auth = line["authorization:".len()..].trim().to_owned();
+                            }
+                        }
+                        sink.lock().unwrap().push(auth);
+                        let extra: String = headers
+                            .into_iter()
+                            .map(|(name, value)| format!("{name}: {value}\r\n"))
+                            .collect();
+                        let mut stream = stream;
+                        let _ = stream.write_all(
+                            format!(
+                                "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\n{extra}connection: close\r\n\r\n{body}",
+                                body.len()
+                            )
+                            .as_bytes(),
+                        );
+                        let _ = stream.flush();
+                    });
+                }
+            });
+            Self {
+                endpoint: format!("http://127.0.0.1:{port}"),
+                seen,
+            }
+        }
+
+        fn authorizations(&self) -> Vec<String> {
+            self.seen.lock().unwrap().clone()
+        }
+    }
+
+    /// 令牌每次请求现读：先匿名发一次，把来源换成有令牌后再发一次，第二次必须带上。
+    ///
+    /// 这是「插件中心一直提示限额用尽、而用户在设置里明明填过令牌」的回归测试：
+    /// 抓取器是进程启动时装配的，它拿到的不该是那一刻的令牌快照。
+    #[test]
+    fn the_token_is_read_again_for_every_request() {
+        let mock = Mock::start(vec![
+            (200, Vec::new(), "{\"sha\":\"deadbeef\"}"),
+            (200, Vec::new(), "{\"sha\":\"deadbeef\"}"),
+        ]);
+        let token: std::sync::Arc<std::sync::Mutex<Option<String>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
+        let source: TokenSource = {
+            let token = token.clone();
+            Arc::new(move || token.lock().unwrap().clone())
+        };
+        let fetcher = GithubFetcher::with_token_source_and_bases(
+            source,
+            "test-agent".to_owned(),
+            mock.endpoint.clone(),
+            mock.endpoint.clone(),
+        );
+
+        fetcher.resolve_commit("owner/repo", Some("main")).unwrap();
+        assert_eq!(
+            mock.authorizations(),
+            vec![String::new()],
+            "没有令牌时不该带 authorization 头"
+        );
+
+        *token.lock().unwrap() = Some("synthetic-github-token".to_owned());
+        fetcher.resolve_commit("owner/repo", Some("main")).unwrap();
+        assert_eq!(
+            mock.authorizations(),
+            vec![String::new(), "Bearer synthetic-github-token".to_owned()],
+            "令牌源换上新值后，下一次请求就要带上它"
+        );
+    }
+
+    /// 限额用尽的说明要能行动：告诉用户大约等多久，以及填令牌能到多少额度。
+    #[test]
+    fn a_rate_limited_response_says_when_the_limit_comes_back() {
+        // 用真实时钟算重置时刻：这条路径不接时间注入，头里的值就是 Unix 秒。
+        let reset = crate::time_now() + 1800;
+        let mock = Mock::start(vec![(
+            403,
+            vec![
+                ("x-ratelimit-limit", "60".to_owned()),
+                ("x-ratelimit-remaining", "0".to_owned()),
+                ("x-ratelimit-reset", reset.to_string()),
+            ],
+            "{\"message\":\"API rate limit exceeded\"}",
+        )]);
+        let fetcher = GithubFetcher::with_bases(
+            None,
+            "test-agent".to_owned(),
+            mock.endpoint.clone(),
+            mock.endpoint.clone(),
+        );
+        let error = fetcher
+            .resolve_commit("owner/repo", Some("main"))
+            .unwrap_err();
+        assert_eq!(
+            error.message_key, "error.pluginRateLimited",
+            "前端按这个 key 区分限额与其它错误，不能改"
+        );
+        let detail = &error.safe_details[0];
+        assert!(detail.contains("30 分钟"), "剩余时间要在说明里：{detail}");
+        assert!(detail.contains("剩余 0 次"), "剩余次数要在说明里：{detail}");
+        assert!(
+            detail.contains("5000"),
+            "要说清填令牌能提到每小时 5000 次：{detail}"
+        );
+    }
+
+    /// `retry-after`（上游直接要求等多少秒）优先于 `x-ratelimit-reset`。
+    #[test]
+    fn retry_after_wins_over_the_reset_header() {
+        let reset = crate::time_now() + 3600;
+        let mock = Mock::start(vec![(
+            429,
+            vec![
+                ("retry-after", "90".to_owned()),
+                ("x-ratelimit-reset", reset.to_string()),
+            ],
+            "",
+        )]);
+        let fetcher = GithubFetcher::with_bases(
+            None,
+            "test-agent".to_owned(),
+            mock.endpoint.clone(),
+            mock.endpoint.clone(),
+        );
+        let error = fetcher
+            .resolve_commit("owner/repo", Some("main"))
+            .unwrap_err();
+        let detail = &error.safe_details[0];
+        assert!(detail.contains("90 秒"), "{detail}");
+        assert!(
+            !detail.contains("60 分钟"),
+            "有 retry-after 就不看重置时刻: {detail}"
+        );
+    }
+
+    /// 一个头都没读到也仍然可用：不能把「读不到恢复时间」变成另一个失败。
+    #[test]
+    fn a_rate_limit_without_headers_still_says_what_to_do() {
+        let detail = rate_limit_detail(None, None, None, 1_000);
+        assert!(detail.contains("稍后再试"), "{detail}");
+        assert!(detail.contains("5000"), "{detail}");
     }
 }

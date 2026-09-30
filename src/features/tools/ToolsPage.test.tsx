@@ -1,8 +1,9 @@
-import { screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { ToolState } from '@/contracts/types';
 import { ToolsPage } from './ToolsPage';
+import { toolIcon } from './toolIcons';
 import { categoryLabel, catalogLocale, describeProbedAt, statusBadge } from './toolsPolicy';
 import { testClient } from '../../../tests/helpers/client';
 import { renderWithToasts } from '../../../tests/helpers/render';
@@ -175,6 +176,38 @@ it('搜索按名称与路径过滤，空结果给可执行的下一步', async (
   await user.clear(search);
   await user.type(search, '不存在的工具');
   expect(screen.getByText('没有匹配的工具')).toBeInTheDocument();
+});
+
+/**
+ * 图标映射本身要有覆盖：界面上的 SVG 是 jsdom 不画的，但「这个 id 到底有没有图标」
+ * 必须由断言说话——否则把映射写错或写漏，测试仍然全绿（用户看到的就是一个首字方块）。
+ */
+describe('品牌图标', () => {
+  const withIcon = ['claude-code', 'codex', 'github-cli', 'gemini-cli', 'qwen-code', 'goose', 'opencode', 'openclaw'];
+  // hermes 的官方图形是人物肖像插画，18px 下认不出来；aider / crush 两个图标包里都没有。
+  const withoutIcon = ['aider', 'crush', 'hermes', 'ffmpeg', 'yt-dlp', 'whisper', 'exiftool', 'node', 'uv', 'ripgrep'];
+
+
+  it('有品牌图标的 id 渲染出 SVG', () => {
+    const { container } = render(<>{withIcon.map(id => <span key={id}>{toolIcon(id)}</span>)}</>);
+    expect(container.querySelectorAll('svg')).toHaveLength(withIcon.length);
+  });
+
+  it('没有公开可用标志的 id 返回 null，界面回退首字方块', () => {
+    for (const id of withoutIcon) expect(toolIcon(id)).toBeNull();
+  });
+});
+
+it('文档链接交给系统浏览器，而不是 webview 里没人接的 window.open', async () => {
+  const user = userEvent.setup();
+  const openExternalUrl = vi.fn().mockResolvedValue(undefined);
+  const withDocs = tool({ id: 'codex', displayName: 'Codex CLI', docs: 'https://github.com/openai/codex' });
+  renderWithToasts(<ToolsPage client={testClient({ listTools: vi.fn().mockResolvedValue([withDocs]), openExternalUrl })} />);
+
+  // 回归：以前这里调 window.open，而 Tauri 的 webview 没有浏览器新窗口，点了没反应。
+  await user.click(await screen.findByRole('button', { name: /Codex CLI/ }));
+  await user.click(screen.getByRole('button', { name: '打开文档' }));
+  await waitFor(() => expect(openExternalUrl).toHaveBeenCalledWith('https://github.com/openai/codex'));
 });
 
 it('本版不放安装入口：做不到的事不出现在界面上', async () => {

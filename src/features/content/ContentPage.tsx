@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Eye, EyeOff, Newspaper, Plus, RefreshCw, Rss, Trash2, TriangleAlert } from 'lucide-react';
+import { ExternalLink, Newspaper, Plus, RefreshCw, Rss, Trash2, TriangleAlert } from 'lucide-react';
 import type { ContentStatus, FeedItem, FeedSource, FeedSourceDraft, RefreshReport } from '@/contracts/types';
 import { type DesktopClient, toCoreError } from '@/desktop/client';
-import { Dialog } from '@/components/Dialog';
 import { EmptyState } from '@/components/EmptyState';
+import { Notice } from '@/components/Notice';
 import { SegmentedTabs } from '@/components/SegmentedTabs';
+import { GithubTokenDialog } from '@/components/GithubTokenDialog';
 import { showToast } from '@/components/Toast';
 import { t, useLocale } from '@/i18n';
 import styles from './ContentPage.module.css';
@@ -17,6 +18,17 @@ const GITHUB_WINDOWS = [
   { key: 'github-week', label: 'content.window.week' },
   { key: 'github-month', label: 'content.window.month' },
 ] as const;
+
+/**
+ * 已经播报过的失败集合签名。
+ *
+ * 签名只取失败源的 id 集合（排序后拼接）：`failStreak` 每抓一次就加一，把它算进签名
+ * 等于每次抓取都弹一遍，而这里要的是「开始时说一声」。
+ *
+ * 记在模块级变量里而不是组件状态里：应用重启即重置，正合「开始展示一次就好」的语义；
+ * 失败全部恢复后清空，之后再坏才算一件新事。
+ */
+let announcedFailures = '';
 
 /**
  * 相对时间。**入参带符号**：负数＝过去（「11 秒前」），正数＝未来（「5 分钟后」）。
@@ -33,69 +45,6 @@ function relative(seconds: number, locale: string): string {
   if (magnitude < 3600) return formatter.format(sign * Math.round(magnitude / 60), 'minute');
   if (magnitude < 86_400) return formatter.format(sign * Math.round(magnitude / 3600), 'hour');
   return formatter.format(sign * Math.round(magnitude / 86_400), 'day');
-}
-
-/**
- * 「设置 GitHub 令牌」弹窗。
- *
- * 从前这个入口是一个 `window.prompt`：WKWebView 要实现 `WKUIDelegate` 的输入面板才会显示，
- * 而 wry 没有实现，于是真机上它不弹任何界面、直接返回 null——用户点了按钮什么都不会发生。
- * 令牌是敏感值，所以输入框、显隐按钮与提示文案的写法照供应商表单里的密钥字段来。
- *
- * 提交空值＝清除（原代码里 `value.trim() || null` 就是这个语义）；已配置时底栏另有
- * 一个显式的「清除令牌」，省得人靠猜「留空」才知道怎么移除。
- */
-function TokenDialog({ client, configured, onSaved, onClose }: {
-  client: DesktopClient;
-  /** 当前是否已配置：只决定要不要给出「清除令牌」那条路径。 */
-  configured: boolean;
-  onSaved: (configured: boolean) => void;
-  onClose: () => void;
-}) {
-  const [token, setToken] = useState('');
-  const [visible, setVisible] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  const submit = async (value: string | null) => {
-    setBusy(true);
-    try {
-      const next = await client.setContentGithubToken(value);
-      onSaved(next);
-      showToast(next ? t('content.token.saved') : t('content.token.cleared'));
-      onClose();
-    } catch (cause) {
-      // 失败不关弹窗：人还在这里，改一下就能重试。
-      const core = toCoreError(cause);
-      showToast(core.safeDetails[0] ?? t(core.messageKey));
-    } finally { setBusy(false); }
-  };
-
-  return (
-    <Dialog width="narrow" title={t('content.token.title')} busy={busy} onClose={onClose}
-      footer={<footer className="form-footer">
-        <div className="actions">
-          {configured && <button type="button" onClick={() => void submit(null)} disabled={busy}>{t('content.token.clear')}</button>}
-        </div>
-        <div className="actions">
-          <button type="button" onClick={onClose} disabled={busy}>{t('action.cancel')}</button>
-          <button className="primary" type="button" disabled={busy} onClick={() => void submit(token.trim() || null)}>
-            {busy ? t('key.saving') : t('action.save')}
-          </button>
-        </div>
-      </footer>}>
-      <div className="form-fields">
-        <label><span className="field-label">{t('content.token.label')}</span>
-          <span className={styles.secret}>
-            <input type={visible ? 'text' : 'password'} value={token} maxLength={4096} spellCheck={false}
-              autoComplete="new-password" aria-label={t('content.token.label')} className={styles.secretInput}
-              placeholder={t('content.token.prompt')} autoFocus
-              onChange={event => setToken(event.target.value)} />
-            <button type="button" className="icon-button" aria-label={visible ? t('key.hide') : t('key.reveal')}
-              onClick={() => setVisible(current => !current)}>{visible ? <EyeOff size={16} /> : <Eye size={16} />}</button>
-          </span></label>
-      </div>
-    </Dialog>
-  );
 }
 
 /**
@@ -194,7 +143,23 @@ export function ContentPage({ client }: { client: DesktopClient }) {
     () => items.filter(item => item.sourceId === window_),
     [items, window_],
   );
-  const failing = status?.failing ?? [];
+  // 引用保持稳定：下面的播报 effect 以它作依赖，否则每次重渲染都要重判一次签名。
+  const failing = useMemo(() => status?.failing ?? [], [status]);
+
+  /*
+   * 「开始展示一次就好」：观察到失败集合就弹一次提示，之后只留状态行下面那行小提醒。
+   * 触发点是 status（抓取后整份重下发的状态），不是每次渲染——签名没变就不再打扰。
+   */
+  useEffect(() => {
+    const signature = failing.map(failure => failure.sourceId).sort().join('\n');
+    if (!signature) {
+      announcedFailures = '';
+      return;
+    }
+    if (signature === announcedFailures) return;
+    announcedFailures = signature;
+    showToast(t('content.failure.summary', { count: failing.length }), 'info');
+  }, [failing]);
 
   const saveSource = async () => {
     if (!draftLabel.trim() || !draftUrl.trim()) return;
@@ -293,18 +258,27 @@ export function ContentPage({ client }: { client: DesktopClient }) {
         </section>
       )}
 
+      {/* 失败不再整块铺在页面上：常驻只有一行摘要，点开「详情」才给逐条原因。 */}
       {failing.length > 0 && tab !== 'sources' && (
-        <ul className={styles.failureList} role="status">
-          {failing.map(failure => (
-            <li key={failure.sourceId}>
-              <TriangleAlert size={13} />
-              {t('content.failure.line', {
-                label: failure.label, streak: failure.failStreak, message: failure.message,
-              })}
-            </li>
-          ))}
-          <li className={styles.failureHint}>{t('content.failure.kept')}</li>
-        </ul>
+        <Notice
+          tone="warning"
+          summary={t('content.failure.summary', { count: failing.length })}
+          details={
+            <>
+              <ul>
+                {failing.map(failure => (
+                  <li key={failure.sourceId}>
+                    <TriangleAlert size={13} aria-hidden="true" />
+                    {t('content.failure.line', {
+                      label: failure.label, streak: failure.failStreak, message: failure.message,
+                    })}
+                  </li>
+                ))}
+              </ul>
+              <span>{t('content.failure.kept')}</span>
+            </>
+          }
+        />
       )}
 
       {error && <div className="error-message" role="alert">{error}</div>}
@@ -415,17 +389,17 @@ export function ContentPage({ client }: { client: DesktopClient }) {
 
           <section className={styles.card}>
             <div className={styles.header}>
-              <h2>{t('content.token.title')}</h2>
-              <span className="badge">{tokenConfigured ? t('content.token.configured') : t('content.token.absent')}</span>
+              <h2>{t('github.token.title')}</h2>
+              <span className="badge">{tokenConfigured ? t('github.token.configured') : t('github.token.absent')}</span>
             </div>
-            <p className={styles.note}>{t('content.token.body')}</p>
+            <p className={styles.note}>{t('github.token.body')}</p>
             <div className="actions">
               <button type="button" onClick={() => setTokenDialog(true)}>
-                {tokenConfigured ? t('content.token.update') : t('content.token.set')}
+                {tokenConfigured ? t('github.token.update') : t('github.token.set')}
               </button>
               {tokenConfigured && (
                 <button type="button" onClick={() => void client.setContentGithubToken(null).then(() => setTokenConfigured(false))}>
-                  {t('content.token.clear')}
+                  {t('github.token.clear')}
                 </button>
               )}
             </div>
@@ -485,7 +459,7 @@ export function ContentPage({ client }: { client: DesktopClient }) {
         </>
       )}
 
-      {tokenDialog && <TokenDialog client={client} configured={tokenConfigured}
+      {tokenDialog && <GithubTokenDialog client={client} configured={tokenConfigured}
         onSaved={setTokenConfigured} onClose={() => setTokenDialog(false)} />}
     </div>
   );

@@ -9,8 +9,8 @@ pub mod skill;
 pub mod source;
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
+    collections::{BTreeMap, BTreeSet, HashMap},
+    sync::{Arc, Mutex},
 };
 
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,7 @@ pub use install::{
     FileFingerprint, ManagedManifest, PlannedAction, PlannedFile, TargetPlan, UninstallOutcome,
 };
 pub use skill::SkillDocument;
-pub use source::{GithubFetcher, RepoCatalog, RepoFetcher, RepoSkill, SkillSourceRef};
+pub use source::{GithubFetcher, RepoCatalog, RepoFetcher, RepoSkill, SkillSourceRef, TokenSource};
 
 /// 预置来源。四个都经实测存在且含 `SKILL.md`（2026-09-24 用 `api.github.com` 的 git tree 复核：
 /// anthropics/skills 20 个、openai/skills 44 个、obra/superpowers 15 个、wshobson/agents 183 个）。
@@ -57,6 +57,16 @@ pub const DEFAULT_SOURCES: [(&str, &str, &str); 4] = [
 
 /// 用户自己添加的来源存在设置表里的键。
 const SOURCES_KEY: &str = "plugins.sources";
+
+/// 目录缓存的存活时间（秒）。
+///
+/// 一次浏览要打 3 次 GitHub API（仓库信息 / commit / tree；钉住 ref 时 2 次），而匿名
+/// 限额只有 60 次/小时：用户从列表进详情、装完退回列表、切走再切回来，每次都会重新浏览
+/// 同一个来源——没有缓存的话，在插件页来回十几趟就能把一小时的额度用光。
+const CATALOG_TTL_SECONDS: i64 = 300;
+
+/// 进程内最多留几份目录。来源数量本身有限（预置 4 个 + 用户手填），这里只是兜底。
+const MAX_CACHED_CATALOGS: usize = 8;
 
 /// 一个可浏览的来源。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,6 +185,11 @@ pub struct PluginService {
     repository: Arc<dyn Repository>,
     tools: Arc<ToolHubService>,
     fetcher: Arc<dyn RepoFetcher>,
+    /// 最近一次成功浏览的结果，键是「仓库 + ref」。
+    ///
+    /// 只在这一层缓存，不改任何公开类型的形状：界面拿到的 `RepoCatalog` 与从前完全一样，
+    /// 变的只是「这几次浏览之间有没有再联网」。失败不进缓存，用户点重试时要真的重试。
+    catalogs: Mutex<HashMap<String, (i64, RepoCatalog)>>,
 }
 
 impl PluginService {
@@ -189,6 +204,7 @@ impl PluginService {
             repository,
             tools,
             fetcher,
+            catalogs: Mutex::new(HashMap::new()),
         }
     }
 
@@ -256,8 +272,15 @@ impl PluginService {
     /// 都不影响浏览这一页——从前每个技能都会重下一遍整棵 git tree 并把同目录文件全读下来
     /// （实测默认源 anthropics/skills：21 次 tree 请求 + 394 个文件 10.4 MB），
     /// 页面停在「正在读取仓库」好几分钟。
+    ///
+    /// `now` 还决定缓存是否新鲜（见 [`CATALOG_TTL_SECONDS`]）：同一个来源在 TTL 内重复浏览
+    /// 直接返回上一次的成功结果，不再联网。
     pub fn browse(&self, repo_spec: &str, now: i64) -> Result<RepoCatalog, CoreError> {
         let (repo, git_ref) = source::parse_repo_spec(repo_spec)?;
+        let key = catalog_key(&repo, git_ref.as_deref());
+        if let Some(catalog) = self.cached_catalog(&key, now) {
+            return Ok(catalog);
+        }
         let commit = self.fetcher.resolve_commit(&repo, git_ref.as_deref())?;
         let blobs = self.fetcher.list_blobs(&repo, &commit)?;
         if source::skill_paths(&blobs).is_empty() {
@@ -270,7 +293,35 @@ impl PluginService {
                 ),
             );
         }
-        source::assemble(self.fetcher.as_ref(), &repo, &commit, &blobs, now)
+        let catalog = source::assemble(self.fetcher.as_ref(), &repo, &commit, &blobs, now)?;
+        self.remember_catalog(&key, now, &catalog);
+        Ok(catalog)
+    }
+
+    /// 取缓存。`now` 比记录还早时（`preview` 不关心时间，传的是 0）按「刚取过」处理：
+    /// 那种时刻本来就该复用已有结果，重新联网只会白烧限额。
+    fn cached_catalog(&self, key: &str, now: i64) -> Option<RepoCatalog> {
+        let catalogs = self.catalogs.lock().ok()?;
+        let (fetched_at, catalog) = catalogs.get(key)?;
+        (now.saturating_sub(*fetched_at) < CATALOG_TTL_SECONDS).then(|| catalog.clone())
+    }
+
+    /// 记下成功结果。**失败不缓存**：用户看到限额提示后点重试，必须真的再打一次网络。
+    fn remember_catalog(&self, key: &str, now: i64, catalog: &RepoCatalog) {
+        let Ok(mut catalogs) = self.catalogs.lock() else {
+            return;
+        };
+        if catalogs.len() >= MAX_CACHED_CATALOGS && !catalogs.contains_key(key) {
+            // 满了先丢最旧的一份：缓存只省请求，丢哪一份都不影响正确性。
+            let oldest = catalogs
+                .iter()
+                .min_by_key(|(_, (fetched_at, _))| *fetched_at)
+                .map(|(key, _)| key.clone());
+            if let Some(oldest) = oldest {
+                catalogs.remove(&oldest);
+            }
+        }
+        catalogs.insert(key.to_owned(), (now, catalog.clone()));
     }
 
     /// 生成安装计划。**不写文件**，界面据此展示将写入什么、哪里会冲突。
@@ -590,6 +641,14 @@ fn next_available_dir(root: &std::path::Path, dir_name: &str) -> String {
     install::suffixed_dir_name(dir_name, &taken)
 }
 
+/// 缓存键：仓库 + 钉住的 ref。同一个仓库的不同分支/提交是两个不同的目录。
+fn catalog_key(repo: &str, git_ref: Option<&str>) -> String {
+    match git_ref {
+        Some(git_ref) => format!("{repo}@{git_ref}"),
+        None => repo.to_owned(),
+    }
+}
+
 /// 安装请求对应的来源写法：带 ref 时拼成 `owner/repo@ref`。
 fn spec_of(request: &InstallRequest) -> String {
     match &request.git_ref {
@@ -864,5 +923,130 @@ mod tests {
 
         // 假抓取器的提交固定，所以此刻不该报出更新。
         assert!(service.check_updates().unwrap().is_empty());
+    }
+
+    /// 计数抓取器：转调假抓取器，并记下打了多少次网络。
+    ///
+    /// `fail_listings` 次列文件请求先失败，用来验证失败不进缓存。
+    struct Counting {
+        inner: source::fake::FakeFetcher,
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+        fail_listings: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Counting {
+        fn calls(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl RepoFetcher for Counting {
+        fn resolve_commit(&self, repo: &str, git_ref: Option<&str>) -> Result<String, CoreError> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.resolve_commit(repo, git_ref)
+        }
+
+        fn list_blobs(&self, repo: &str, commit: &str) -> Result<Vec<source::RepoBlob>, CoreError> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self
+                .fail_listings
+                .fetch_update(
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                    |remaining| Some(remaining.saturating_sub(1)),
+                )
+                .unwrap_or(0)
+                > 0
+            {
+                return Err(CoreError::internal("合成的失败"));
+            }
+            self.inner.list_blobs(repo, commit)
+        }
+
+        fn read_file(&self, repo: &str, commit: &str, path: &str) -> Result<Vec<u8>, CoreError> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.read_file(repo, commit, path)
+        }
+    }
+
+    /// 带计数抓取器的服务；`fail_listings` 是前几次列文件请求要失败的次数。
+    fn service_with_counts(
+        files: &[(&str, &str)],
+        fail_listings: usize,
+    ) -> (PluginService, Arc<Counting>) {
+        let store = Arc::new(InMemoryHubStore::new());
+        let repository = Arc::new(crate::storage::InMemoryRepository::new());
+        let catalog = ToolCatalog::embedded().unwrap();
+        let tools = Arc::new(ToolHubService::new(
+            catalog,
+            crate::platform::Platform::Macos,
+            std::path::PathBuf::from("/tmp"),
+            store.clone(),
+        ));
+        let fetcher = Arc::new(Counting {
+            inner: source::fake::FakeFetcher::new(files),
+            calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            fail_listings: std::sync::atomic::AtomicUsize::new(fail_listings),
+        });
+        (
+            PluginService::new(store, repository, tools, fetcher.clone()),
+            fetcher,
+        )
+    }
+
+    /// 同一个来源在 TTL 内重复浏览只打一次网络，过了 TTL 才重新取。
+    ///
+    /// 一次浏览 = 2–3 次 GitHub API（仓库信息 / commit / tree），匿名限额 60 次/小时：
+    /// 用户反复进出插件页不该把一小时的额度磨光。
+    #[test]
+    fn browsing_the_same_source_twice_does_not_hit_the_network_again() {
+        let (service, fetcher) = service_with_counts(&repo_files(), 0);
+
+        let first = service.browse("owner/repo", 1_000).unwrap();
+        let after_first = fetcher.calls();
+        assert!(after_first > 0, "第一次浏览要联网");
+
+        let second = service.browse("owner/repo", 1_100).unwrap();
+        assert_eq!(second, first, "缓存命中的结果应当与上次完全一致");
+        assert_eq!(fetcher.calls(), after_first, "TTL 内不该再打网络");
+
+        // 同一个来源写成别的方式（前后带空格、带 .git 后缀）也归一化成同一个键。
+        assert!(service.browse(" owner/repo.git ", 1_200).is_ok());
+        assert_eq!(fetcher.calls(), after_first);
+
+        // 过了 TTL 就要重新取；这时也会重新读到（可能已经变了的）提交。
+        assert!(service
+            .browse("owner/repo", 1_000 + CATALOG_TTL_SECONDS)
+            .is_ok());
+        assert!(fetcher.calls() > after_first, "过了 TTL 之后必须重新联网");
+    }
+
+    /// 不同 ref 是两份目录，不能互相顶掉缓存。
+    #[test]
+    fn a_pinned_ref_is_cached_separately() {
+        let (service, fetcher) = service_with_counts(&repo_files(), 0);
+        service.browse("owner/repo", 1_000).unwrap();
+        let after_first = fetcher.calls();
+        service.browse("owner/repo@v1.0", 1_000).unwrap();
+        assert!(
+            fetcher.calls() > after_first,
+            "钉了另一个 ref 就是另一个目录，不能拿默认分支的缓存顶上"
+        );
+    }
+
+    /// 失败不缓存：用户点重试时必须真的重试，而不是把上次那句错误再显示一遍。
+    #[test]
+    fn a_failed_browse_is_retried_on_the_next_call() {
+        let (service, fetcher) = service_with_counts(&repo_files(), 1);
+        assert!(service.browse("owner/repo", 1_000).is_err());
+        let after_failure = fetcher.calls();
+
+        let catalog = service.browse("owner/repo", 1_000).unwrap();
+        assert_eq!(catalog.skills.len(), 2);
+        assert!(fetcher.calls() > after_failure, "失败过的那次不能进缓存");
+
+        let replayed = fetcher.calls();
+        service.browse("owner/repo", 1_050).unwrap();
+        assert_eq!(fetcher.calls(), replayed, "成功之后才轮到缓存生效");
     }
 }

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ContentStatus, FeedItem, FeedSource, RefreshReport } from '@/contracts/types';
 import { ContentPage } from './ContentPage';
 import { testClient } from '../../../tests/helpers/client';
+import { resetToasts } from '@/components/Toast';
 import { renderWithToasts } from '../../../tests/helpers/render';
 
 const NOW = Math.floor(Date.now() / 1000);
@@ -83,18 +84,56 @@ it('从没成功过时不写成「已更新」', async () => {
   expect(await screen.findByText(/还没成功抓取过/)).toBeInTheDocument();
 });
 
-it('抓取失败保留旧内容，并把失败原因与连续次数摆出来', async () => {
-  const client = baseClient({
-    contentStatus: vi.fn().mockResolvedValue(status({
-      failing: [{ sourceId: 'hn', label: 'Hacker News', message: '连接超时', failStreak: 2 }],
-    })),
-  });
-  renderWithToasts(<ContentPage client={client} />);
+/**
+ * 播报签名是 ContentPage 的模块级状态，同一个测试文件里跨用例共享（每个文件一份模块实例），
+ * 所以每个涉及失败的用例都用自己的源 id：前一个用例播报过，后一个就看不到提示了。
+ */
+describe('抓取失败', () => {
+  it('折叠时只有一行摘要，点开才看逐条原因，旧内容照旧保留', async () => {
+    const user = userEvent.setup();
+    const client = baseClient({
+      contentStatus: vi.fn().mockResolvedValue(status({
+        failing: [{ sourceId: 'hn', label: 'Hacker News', message: '连接超时', failStreak: 2 }],
+      })),
+    });
+    renderWithToasts(<ContentPage client={client} />);
 
-  expect(await screen.findByText(/Hacker News 连续失败 2 次：连接超时/)).toBeInTheDocument();
-  expect(screen.getByText(/下面显示的是上一次成功的结果/)).toBeInTheDocument();
-  // 旧内容必须还在。
-  expect(screen.getByText('资讯 1')).toBeInTheDocument();
+    // 常驻的只有一行摘要；逐条原因默认不占版面（以前是整块琥珀色列表铺在状态行下面）。
+    const toggle = await screen.findByRole('button', { name: '详情' });
+    expect(toggle.closest('section')!.textContent).toContain('1 个源抓取失败');
+    expect(screen.queryByText(/连续失败 2 次/)).not.toBeInTheDocument();
+
+    await user.click(toggle);
+
+    expect(await screen.findByText(/Hacker News 连续失败 2 次：连接超时/)).toBeInTheDocument();
+    expect(screen.getByText(/下面显示的是上一次成功的结果/)).toBeInTheDocument();
+    // 旧内容必须还在。
+    expect(screen.getByText('资讯 1')).toBeInTheDocument();
+  });
+
+  it('同一失败集合只播报一次：连抓一次、连续次数变了，也不算新事件', async () => {
+    const user = userEvent.setup();
+    // 每抓一次核心都把状态整份重新下发、连续失败次数加一，用递增的次数模拟第二次抓取。
+    let streak = 3;
+    const contentStatus = vi.fn().mockImplementation(async () => status({
+      failing: [{ sourceId: 'zhihu-daily', label: '知乎日报', message: '超时', failStreak: streak++ }],
+    }));
+    renderWithToasts(<ContentPage client={baseClient({ contentStatus })} />);
+
+    // 首屏观察到失败：一条提示 + 折叠摘要，页面上两处同样的文案。
+    await waitFor(() => expect(screen.getAllByText('1 个源抓取失败')).toHaveLength(2));
+
+    // 把首屏那条提示清掉再触发第二次抓取：这样断言的是「没有播报第二条」，
+    // 而不是「提示恰好还没到 7 秒的自毁时间」——后者在慢机器上会反向 flake。
+    resetToasts();
+
+    await user.click(screen.getByRole('button', { name: '立即刷新' }));
+    // 等第二次 load 落地（刷新完成的提示排在它后面）。
+    expect(await screen.findByText('新增 2 条')).toBeInTheDocument();
+
+    // 失败集合没变：只剩常驻的那一行摘要，没有第二条提示。
+    expect(screen.getAllByText('1 个源抓取失败')).toHaveLength(1);
+  });
 });
 
 it('刷新报告把「成功 / 未变化 / 失败 / 未轮到」分开说', async () => {

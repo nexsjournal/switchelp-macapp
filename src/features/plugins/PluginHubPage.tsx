@@ -1,15 +1,48 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, ExternalLink, PackageOpen, Plus, RefreshCw, Trash2, TriangleAlert } from 'lucide-react';
 import type {
-  ConflictChoice, InstallPreview, InstallReport, PluginSource, RepoCatalog, RepoSkill, SkillRecord, SkillTarget, UpdateInfo,
+  ConflictChoice, CoreError, InstallPreview, InstallReport, PluginSource, RepoCatalog, RepoSkill, SkillRecord, SkillTarget, UpdateInfo,
 } from '@/contracts/types';
 import { type DesktopClient, toCoreError } from '@/desktop/client';
 import { Dialog } from '@/components/Dialog';
+import { GithubTokenDialog } from '@/components/GithubTokenDialog';
+import { Notice } from '@/components/Notice';
 import { SegmentedTabs } from '@/components/SegmentedTabs';
 import { EmptyState } from '@/components/EmptyState';
 import { showToast } from '@/components/Toast';
 import { t } from '@/i18n';
 import styles from './PluginHubPage.module.css';
+
+/**
+ * 目录失败的摘要：限额与其它失败各一句。
+ *
+ * 两者的下一步完全不同——限额是「等等或填个令牌」，仓库不存在 / 连不上是「换个来源或查网络」——
+ * 所以摘要不能合并成一句「加载失败」。核心给的完整原因放详情里，不铺在页面上。
+ */
+function catalogSummary(error: CoreError): string {
+  return error.messageKey === 'error.pluginRateLimited'
+    ? t('plugins.catalog.rateLimited')
+    : t('plugins.catalog.failed');
+}
+
+/** 限额是唯一能靠令牌解决的失败。其它失败也给令牌按钮，等于让人去做一件没用的事。 */
+function isRateLimited(error: CoreError): boolean {
+  return error.messageKey === 'error.pluginRateLimited';
+}
+
+/**
+ * 已经弹过提示的错误签名（`messageKey`）。
+ *
+ * 目录每进这一页都会重抓，而限额不会自己恢复——每挂载一次就弹一条，用户看到的就是
+ * 「一直提示这个信息」（报告原文）。所以提示只在**第一次**撞上时说一声，之后只留常驻的
+ * 那一行 `Notice`。模块级：切走再切回、组件重新挂载都不该再弹。
+ */
+const announcedCatalogErrors = new Set<string>();
+
+/** 测试用：清掉「已经弹过」的记录，免得用例之间互相吞掉提示（与 Toast 的 `resetToasts` 同理）。 */
+export function resetCatalogErrorAnnouncements() {
+  announcedCatalogErrors.clear();
+}
 
 /**
  * 插件中心（设计 P-T2）。
@@ -31,7 +64,10 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
   const [addingSource, setAddingSource] = useState(false);
   const [catalog, setCatalog] = useState<RepoCatalog | null>(null);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
-  const [catalogError, setCatalogError] = useState('');
+  /** 保留整个 CoreError：限额与其它失败要说不同的话、给不同的下一步。 */
+  const [catalogError, setCatalogError] = useState<CoreError | null>(null);
+  const [tokenConfigured, setTokenConfigured] = useState(false);
+  const [tokenDialog, setTokenDialog] = useState(false);
   const [selected, setSelected] = useState<string>('');
   const [query, setQuery] = useState('');
   const [markdownOpen, setMarkdownOpen] = useState(false);
@@ -56,8 +92,10 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
       setSources(list);
       setRepo(current => current || list[0]?.repo || '');
     } catch (cause) {
+      // 来源列表取不到只影响上面那个选择器，走一次性提示；目录错误的那行提醒只属于
+      // 「浏览目录」这条路径，不能拿它顶替。
       const core = toCoreError(cause);
-      setCatalogError(core.safeDetails[0] ?? t(core.messageKey));
+      showToast(core.safeDetails[0] ?? t(core.messageKey), 'danger');
     }
   }, [client]);
 
@@ -81,7 +119,7 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
   const browse = useCallback(async (target: string) => {
     if (!target) return;
     setLoadingCatalog(true);
-    setCatalogError('');
+    setCatalogError(null);
     setReport(null);
     try {
       const result = await client.browsePluginRepo(target);
@@ -91,13 +129,22 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
     } catch (cause) {
       const core = toCoreError(cause);
       setCatalog(null);
-      setCatalogError(core.safeDetails[0] ?? t(core.messageKey));
+      setCatalogError(core);
+      // 第一次撞上时弹一次（之后只留那一行提醒，见 announcedCatalogErrors）。
+      // 限额等一会儿会自己好，用会自动消失的 info；其它失败要人决定下一步，留到手动关掉。
+      if (!announcedCatalogErrors.has(core.messageKey)) {
+        announcedCatalogErrors.add(core.messageKey);
+        showToast(catalogSummary(core), isRateLimited(core) ? 'info' : 'danger');
+      }
     } finally {
       setLoadingCatalog(false);
     }
   }, [client]);
 
   useEffect(() => { if (repo) void browse(repo); }, [repo, browse]);
+  useEffect(() => {
+    void client.contentGithubTokenStatus().then(setTokenConfigured).catch(() => setTokenConfigured(false));
+  }, [client]);
 
   const skills = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -198,6 +245,20 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
     } catch (cause) {
       const core = toCoreError(cause);
       showToast(core.safeDetails[0] ?? t(core.messageKey));
+    }
+  };
+
+  /**
+   * 打开仓库主页。**必须交回系统**：`window.open` 在 Tauri 的 webview 里没有浏览器新窗口，
+   * 点了就是没反应（内容中心的资讯卡片踩过同一个坑，那边也只走 `open_external_url`）。
+   */
+  const openRepo = async () => {
+    if (!catalog) return;
+    try {
+      await client.openExternalUrl(`https://github.com/${catalog.repo}`);
+    } catch (cause) {
+      const core = toCoreError(cause);
+      showToast(core.safeDetails[0] ?? t(core.messageKey), 'danger');
     }
   };
 
@@ -310,14 +371,23 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
             {catalog && (
               <p className={styles.commit}>{t('plugins.source.commit', { commit: catalog.commit.slice(0, 8), count: catalog.skills.length })}</p>
             )}
-            {catalogError && <div className="error-message" role="alert">{catalogError}</div>}
+            {catalogError && (
+              <Notice tone="warning" summary={catalogSummary(catalogError)}
+                details={catalogError.safeDetails[0] ?? t(catalogError.messageKey)}
+                actions={<>
+                  <button type="button" onClick={() => void browse(repo)}>{t('action.retry')}</button>
+                  {isRateLimited(catalogError) && (
+                    <button type="button" onClick={() => setTokenDialog(true)}>
+                      {tokenConfigured ? t('github.token.update') : t('github.token.set')}
+                    </button>
+                  )}
+                </>} />
+            )}
           </section>
 
           {loadingCatalog ? (
             <div className={styles.empty} role="status" aria-live="polite">{t('plugins.loadingCatalog')}</div>
-          ) : !catalog ? (
-            <EmptyState icon={PackageOpen} title={t('plugins.market.empty.title')} description={t('plugins.market.empty.body')} />
-          ) : (
+          ) : catalogError ? null /* 原因与下一步都在上面那一行提醒里 */ : catalog && catalog.skills.length > 0 ? (
             <div className={styles.marketLayout}>
               <section className={styles.listColumn} aria-label={t('plugins.market.listLabel')}>
                 <input className={styles.search} value={query} onChange={event => setQuery(event.target.value)}
@@ -396,7 +466,7 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
                       <button className="primary" disabled={!chosen.length} onClick={() => void startInstall(current)}>
                         {t('plugins.install')}
                       </button>
-                      <button type="button" onClick={() => window.open(`https://github.com/${catalog?.repo}`, '_blank', 'noreferrer')}>
+                      <button type="button" onClick={() => void openRepo()}>
                         <ExternalLink size={15} />{t('plugins.openRepo')}
                       </button>
                     </div>
@@ -406,6 +476,9 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
                 )}
               </section>
             </div>
+          ) : (
+            /* 空状态只在「真的取到了目录、里面没有技能」时说，取不到时说它会让人以为仓库是空的。 */
+            <EmptyState icon={PackageOpen} title={t('plugins.market.empty.title')} description={t('plugins.market.empty.body')} />
           )}
         </>
       ) : (
@@ -526,6 +599,13 @@ export function PluginHubPage({ client }: { client: DesktopClient }) {
           </ul>
           <p className={styles.note}>{t('plugins.uninstallConfirm.managed')}</p>
         </Dialog>
+      )}
+
+      {tokenDialog && (
+        <GithubTokenDialog client={client} configured={tokenConfigured}
+          // 存了令牌立刻再抓一次：限额的解法就是它，不自动重试等于让用户自己再点一遍。
+          onSaved={next => { setTokenConfigured(next); void browse(repo); }}
+          onClose={() => setTokenDialog(false)} />
       )}
     </div>
   );
