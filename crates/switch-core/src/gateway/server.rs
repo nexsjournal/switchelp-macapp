@@ -23,11 +23,11 @@ use super::auth::{GatewayToken, InboundHeaders, RequestGuard, MAX_REQUEST_BYTES}
 use super::routing::{AdmissionError, GatewayRouter};
 use super::sse::SseParser;
 use super::timeouts::TimeoutPolicy;
-use crate::credentials::{CredentialResolver, SecretVault};
+use crate::credentials::{CredentialResolver, ResolvedSecret, SecretVault};
 use crate::diagnostics::{DiagnosticEvent, DiagnosticLog, LogLevel};
 use crate::domain::error::{CoreError, ErrorCode};
 use crate::domain::ids::InstanceId;
-use crate::protocols::{chat, responses, ResponsesEvent, CHAT_COMPLETIONS_V1};
+use crate::protocols::{chat, responses, PreparedRequest, ResponsesEvent, CHAT_COMPLETIONS_V1};
 use crate::storage::Repository;
 
 /// 请求头区上限：单行 8 KiB，最多 64 行。
@@ -35,6 +35,11 @@ const MAX_HEADER_LINE: usize = 8 * 1024;
 const MAX_HEADER_LINES: usize = 64;
 /// 转发上游错误正文的上限：足够定位，又不至于把整个响应体搬给宿主。
 const MAX_UPSTREAM_ERROR_CHARS: usize = 2_000;
+/// 图像响应体上限：4K PNG 的 base64 约十几 MB，留足余量。
+const MAX_IMAGES_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
+/// 图像生成的响应等待下限：整张图生成完上游才回包（实测可到一两分钟），
+/// 推理用的首事件预算（默认 90 s）会把正常生成误判成超时。
+const IMAGE_FIRST_BYTE_BUDGET_MS: u64 = 300_000;
 
 /// 网关装配参数。
 pub struct GatewayConfig {
@@ -57,6 +62,8 @@ pub struct Gateway {
     vault: Arc<dyn SecretVault>,
     router: Arc<GatewayRouter>,
     agent: ureq::Agent,
+    /// 图像专用客户端：单次生成可能要一两分钟才回包，等待预算比推理长。
+    image_agent: ureq::Agent,
     listener: Mutex<Option<TcpListener>>,
     local_addr: Mutex<Option<SocketAddr>>,
     running: AtomicBool,
@@ -89,12 +96,26 @@ impl Gateway {
                 .proxy(ureq::Proxy::try_from_env())
                 .build(),
         );
+        let image_agent = ureq::Agent::new_with_config(
+            ureq::Agent::config_builder()
+                .http_status_as_error(false)
+                .timeout_connect(Some(Duration::from_millis(config.timeouts.connect_ms)))
+                .timeout_recv_response(Some(Duration::from_millis(
+                    config
+                        .timeouts
+                        .first_event_ms
+                        .max(IMAGE_FIRST_BYTE_BUDGET_MS),
+                )))
+                .proxy(ureq::Proxy::try_from_env())
+                .build(),
+        );
         Self {
             config,
             repository,
             vault,
             router,
             agent,
+            image_agent,
             listener: Mutex::new(None),
             local_addr: Mutex::new(None),
             running: AtomicBool::new(false),
@@ -246,6 +267,9 @@ impl Gateway {
                 self.handle_models(&mut response, &request.path, &revision)
             }
             ("POST", RouteKind::Responses) => self.handle_inference(&mut response, &request),
+            ("POST", RouteKind::Images { edits }) => {
+                self.handle_images(&mut response, &request, edits)
+            }
             ("POST", RouteKind::Realtime) => response.write_error(
                 &CoreError::new(
                     ErrorCode::CapabilityUnsupported,
@@ -419,17 +443,42 @@ impl Gateway {
 
         // 模态在执行前判定：把图片塞给只声明文本的模型属于模态虚报，
         // 也等于偷偷借用另一个模型的能力，必须显式拒绝而不是转发。
-        let unsupported =
-            crate::protocols::unsupported_modalities(&payload, &route.native_modalities);
+        // 视频与 PDF 是声明出来给网关用的：宿主发不出来，但 Responses 上游
+        // 原样透传，声明过就放行；chat 上游的适配器没有携带通路，声明了也拒——
+        // 显式拒绝好过把内容悄悄丢掉再回一段「没看见视频」的回答。
+        let is_responses = route.protocol_id.starts_with("responses");
+        let mut native = route.native_modalities.clone();
+        if is_responses {
+            native.extend(route.passthrough_modalities.iter().cloned());
+        }
+        let unsupported = crate::protocols::unsupported_modalities(&payload, &native);
         if !unsupported.is_empty() {
-            let error = CoreError::new(
-                ErrorCode::CapabilityUnsupported,
-                "error.modalityNotDeclared",
-            )
-            .with_detail(format!(
-                "该模型未声明 {} 输入，本次请求包含这类内容，已拒绝转发",
-                unsupported.join("、")
-            ));
+            let carryless = !is_responses
+                && unsupported.iter().all(|modality| {
+                    route
+                        .passthrough_modalities
+                        .iter()
+                        .any(|value| value == modality)
+                });
+            let error = if carryless {
+                CoreError::new(
+                    ErrorCode::CapabilityUnsupported,
+                    "error.modalityNoCarryPath",
+                )
+                .with_detail(format!(
+                    "模型声明支持 {} 输入，但当前上游是 chat 协议，网关没有携带这类内容的通路，已拒绝转发",
+                    unsupported.join("、")
+                ))
+            } else {
+                CoreError::new(
+                    ErrorCode::CapabilityUnsupported,
+                    "error.modalityNotDeclared",
+                )
+                .with_detail(format!(
+                    "该模型未声明 {} 输入，本次请求包含这类内容，已拒绝转发",
+                    unsupported.join("、")
+                ))
+            };
             self.config.diagnostics.record(
                 DiagnosticEvent::new(
                     crate::diagnostics::now_rfc3339(),
@@ -452,7 +501,7 @@ impl Gateway {
             }
             _ => responses::prepare(&provider.endpoint, &route.upstream_id, &payload, &limits),
         };
-        let prepared = match prepared {
+        let mut prepared = match prepared {
             Ok(prepared) => prepared,
             Err(error) => return response.write_error(&error),
         };
@@ -480,49 +529,75 @@ impl Gateway {
             );
         }
 
-        let mut call = self
-            .agent
-            .post(&prepared.url)
-            .header("accept", "text/event-stream")
-            .header("authorization", format!("Bearer {}", secret.expose()));
-        for (name, value) in &prepared.headers {
-            if name.eq_ignore_ascii_case("content-type") {
-                call = call.header(name, value);
-            }
-        }
-        let upstream = match call.send(prepared.body.as_slice()) {
+        let mut upstream = match send_inference(&self.agent, &prepared, &secret) {
             Ok(response) => response,
             Err(error) => {
                 return response.write_error(&upstream_transport_error(&error));
             }
         };
 
-        let status = upstream.status().as_u16();
+        let mut status = upstream.status().as_u16();
         if !(200..300).contains(&status) {
-            let mut upstream = upstream;
-            let text = upstream
-                .body_mut()
-                .with_config()
-                .limit((MAX_UPSTREAM_ERROR_CHARS * 4) as u64)
-                .read_to_string()
-                .unwrap_or_default();
-            let detail = redact(&text, secret.expose());
-            let error = upstream_status_error(status, &detail);
-            self.config.diagnostics.record(
-                DiagnosticEvent::new(
-                    crate::diagnostics::now_rfc3339(),
-                    LogLevel::Error,
-                    "gateway",
-                    alias.to_owned(),
-                    "result.upstreamFailed",
-                )
-                .with_metadata("alias", alias)
-                .with_metadata("provider_id", route.provider_id.as_str())
-                .with_metadata("model_id", route.model_id.as_str())
-                .with_metadata("http_status", status.to_string())
-                .with_metadata("error_code", format!("{:?}", error.code)),
-            );
-            return response.write_error(&error);
+            let mut error_text = read_upstream_error_text(&mut upstream);
+
+            // 上下文超限的定向自救。上游 400 的正文里带着真实窗口与本次输入计数，
+            // 两者相减就是这次真正放得下的输出预算；刚性输出预留（声明的输出上限）
+            // 在线程贴边时会把「本可以成功」的请求变成致命 400。宿主不会自己重试，
+            // 也认不得这类 400（0.160 二进制里没有对应分类），任务就此死在原地
+            // （2026-10-06 deepseek 1M 线程实测：输入 1,010,177 + 输出 38,400，超窗 1 个 token）。
+            // 只在数字可读、且确实放得下时缩一次输出预算重发；只缩不涨，救不回就归类报错。
+            if status == 400 {
+                if let Some(overflow) = parse_context_overflow(&error_text) {
+                    if let Some((shrunk, budget)) = shrink_output_budget(&prepared.body, overflow) {
+                        prepared.body = shrunk;
+                        match send_inference(&self.agent, &prepared, &secret) {
+                            Ok(mut retry) => {
+                                status = retry.status().as_u16();
+                                if (200..300).contains(&status) {
+                                    self.config.diagnostics.record(
+                                        DiagnosticEvent::new(
+                                            crate::diagnostics::now_rfc3339(),
+                                            LogLevel::Warning,
+                                            "gateway",
+                                            alias.to_owned(),
+                                            "result.outputBudgetRescued",
+                                        )
+                                        .with_metadata("alias", alias)
+                                        .with_metadata("model_id", route.model_id.as_str())
+                                        .with_metadata("output_budget", budget.to_string()),
+                                    );
+                                } else {
+                                    error_text = read_upstream_error_text(&mut retry);
+                                }
+                                upstream = retry;
+                            }
+                            Err(error) => {
+                                return response.write_error(&upstream_transport_error(&error));
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !(200..300).contains(&status) {
+                let detail = redact(&error_text, secret.expose());
+                let error = upstream_status_error(status, &detail);
+                self.config.diagnostics.record(
+                    DiagnosticEvent::new(
+                        crate::diagnostics::now_rfc3339(),
+                        LogLevel::Error,
+                        "gateway",
+                        alias.to_owned(),
+                        "result.upstreamFailed",
+                    )
+                    .with_metadata("alias", alias)
+                    .with_metadata("provider_id", route.provider_id.as_str())
+                    .with_metadata("model_id", route.model_id.as_str())
+                    .with_metadata("http_status", status.to_string())
+                    .with_metadata("error_code", format!("{:?}", error.code)),
+                );
+                return response.write_error(&error);
+            }
         }
 
         self.config.diagnostics.record(
@@ -545,7 +620,7 @@ impl Gateway {
 
         let translator = if route.protocol_id == CHAT_COMPLETIONS_V1 {
             Translator::Chat {
-                state: chat::ChatStream::new(alias),
+                state: Box::new(chat::ChatStream::new(alias, prepared.tool_names.clone())),
             }
         } else {
             Translator::Passthrough {
@@ -559,6 +634,281 @@ impl Gateway {
             translator,
             secret.expose(),
         )
+    }
+
+    /// 图像接口：Codex 内置 `image_gen` 工具的生成 / 编辑调用。
+    ///
+    /// 与推理路径共用准入、凭据与错误归类。三处差别：
+    /// 1. 模型按「上游模型 ID」匹配（宿主不经过目录 alias——它写死发送 `gpt-image-2`）；
+    /// 2. 上游是非流式 JSON，一次性回包；
+    /// 3. 响应做最小归一化：宿主客户端要求 `created` 与 `data[].b64_json` 两个字段
+    ///    一定存在，缺了会让整次生成在宿主侧解码失败。
+    fn handle_images(
+        &self,
+        response: &mut Response,
+        request: &IncomingRequest,
+        edits: bool,
+    ) -> Result<(), CoreError> {
+        let mut payload: Value = match serde_json::from_slice(&request.body) {
+            Ok(value) => value,
+            Err(_) => return response.write_error(&CoreError::validation("请求体不是合法 JSON")),
+        };
+        let model = match payload.get("model").and_then(Value::as_str) {
+            Some(model) if !model.trim().is_empty() => model.to_owned(),
+            _ => {
+                return response.write_error(&CoreError::validation(
+                    "图像请求缺少 model；本机网关按目录里的上游模型 ID 路由",
+                ))
+            }
+        };
+
+        let admission =
+            match crate::storage::snapshot::RuntimePublication::parse_prefix(&request.path)
+                .ok_or_else(|| AdmissionError::UnknownPrefix {
+                    catalog_revision: request.path.clone(),
+                })
+                .and_then(|(instance, revision)| {
+                    self.router
+                        .admission_for_images(&revision, &model, &InstanceId::new(instance))
+                }) {
+                Ok(admission) => admission,
+                Err(error) => {
+                    let error = AdmissionError::to_core_error(&error);
+                    self.config.diagnostics.record(
+                        DiagnosticEvent::new(
+                            crate::diagnostics::now_rfc3339(),
+                            LogLevel::Warning,
+                            "gateway",
+                            model.clone(),
+                            "result.routeRejected",
+                        )
+                        .with_metadata("alias", model)
+                        .with_metadata("error_code", format!("{:?}", error.code)),
+                    );
+                    return response.write_error(&error);
+                }
+            };
+        let route = admission.route;
+        self.router.retain(&route.catalog_revision, 0);
+        let _held = InferenceGuard {
+            router: self.router.clone(),
+            revision: route.catalog_revision.clone(),
+        };
+
+        let provider = self
+            .repository
+            .get_provider(&route.provider_id)?
+            .ok_or_else(|| {
+                CoreError::not_found("供应商").with_detail("该路由引用的供应商已被删除".to_owned())
+            })?;
+        let credential = self
+            .repository
+            .get_credential(&route.credential_id)?
+            .ok_or_else(|| {
+                CoreError::new(ErrorCode::CredentialMissing, "error.credentialMissing")
+                    .with_detail("该路由引用的 Key 不存在".to_owned())
+            })?;
+        if credential.secret_version != route.credential_version {
+            return response.write_error(
+                &CoreError::new(
+                    ErrorCode::ContinuationBound,
+                    "error.credentialVersionChanged",
+                )
+                .with_detail("该模型发布后 Key 已更换，请重新生成应用计划".to_owned()),
+            );
+        }
+        let resolver = CredentialResolver::new(self.vault.as_ref());
+        let secret = match resolver.resolve(&credential) {
+            Ok(secret) => secret,
+            Err(error) => return response.write_error(&error),
+        };
+
+        if self.is_paused() {
+            let error = CoreError::new(ErrorCode::Internal, "error.gatewayPaused")
+                .with_detail("本机网关已暂停接受新请求；在途请求不受影响。".to_owned());
+            return response.write_error(&error);
+        }
+
+        // 按 alias 命中时上游 ID 可能不同：一律改写成上游精确 ID 再发。
+        if let Some(object) = payload.as_object_mut() {
+            object.insert("model".to_owned(), json!(route.upstream_id));
+        }
+        let body = match serde_json::to_vec(&payload) {
+            Ok(body) => body,
+            Err(_) => return response.write_error(&CoreError::internal("请求体序列化失败")),
+        };
+
+        let endpoint = if edits {
+            "images/edits"
+        } else {
+            "images/generations"
+        };
+        let url = format!("{}/{}", provider.endpoint.trim_end_matches('/'), endpoint);
+        let upstream = match self
+            .image_agent
+            .post(&url)
+            .header("authorization", format!("Bearer {}", secret.expose()))
+            .header("content-type", "application/json")
+            .header("accept", "application/json")
+            .send(body.as_slice())
+        {
+            Ok(upstream) => upstream,
+            Err(error) => return response.write_error(&upstream_transport_error(&error)),
+        };
+
+        let status = upstream.status().as_u16();
+        if !(200..300).contains(&status) {
+            let mut upstream = upstream;
+            let text = upstream
+                .body_mut()
+                .with_config()
+                .limit((MAX_UPSTREAM_ERROR_CHARS * 4) as u64)
+                .read_to_string()
+                .unwrap_or_default();
+            let detail = redact(&text, secret.expose());
+            let error = upstream_status_error(status, &detail);
+            self.config.diagnostics.record(
+                DiagnosticEvent::new(
+                    crate::diagnostics::now_rfc3339(),
+                    LogLevel::Error,
+                    "gateway",
+                    route.alias.clone(),
+                    "result.upstreamFailed",
+                )
+                .with_metadata("alias", route.alias.clone())
+                .with_metadata("provider_id", route.provider_id.as_str())
+                .with_metadata("model_id", route.model_id.as_str())
+                .with_metadata("http_status", status.to_string())
+                .with_metadata("error_code", format!("{:?}", error.code)),
+            );
+            return response.write_error(&error);
+        }
+
+        let mut upstream = upstream;
+        let text = upstream
+            .body_mut()
+            .with_config()
+            .limit(MAX_IMAGES_RESPONSE_BYTES as u64)
+            .read_to_string()
+            .unwrap_or_default();
+        let parsed: Value = match serde_json::from_str(&text) {
+            Ok(parsed) => parsed,
+            Err(_) => return response.write_error(&image_response_invalid("响应不是合法 JSON")),
+        };
+        let normalized = match self.normalize_image_response(parsed, secret.expose()) {
+            Ok(normalized) => normalized,
+            Err(error) => return response.write_error(&error),
+        };
+
+        self.config.diagnostics.record(
+            DiagnosticEvent::new(
+                crate::diagnostics::now_rfc3339(),
+                LogLevel::Info,
+                "gateway",
+                route.alias.clone(),
+                "result.upstreamAccepted",
+            )
+            .with_metadata("alias", route.alias.clone())
+            .with_metadata("provider_id", route.provider_id.as_str())
+            .with_metadata("model_id", route.model_id.as_str())
+            .with_metadata("http_status", status.to_string())
+            .with_metadata("revision_id", route.catalog_revision.clone())
+            .with_metadata("credential_version", route.credential_version.to_string())
+            .with_metadata("app_version", env!("CARGO_PKG_VERSION")),
+        );
+        response.write_json(200, &normalized)
+    }
+
+    /// 图像响应归一化。宿主客户端（Codex 内置工具）对响应形状有硬要求：
+    /// `created` 必须存在，`data[].b64_json` 必须是非空字符串。
+    /// 上游只给 `url` 时代下载并转成 base64；两者都没有就明确报错。
+    fn normalize_image_response(
+        &self,
+        mut payload: Value,
+        secret: &str,
+    ) -> Result<Value, CoreError> {
+        let Some(object) = payload.as_object_mut() else {
+            return Err(image_response_invalid("响应不是 JSON 对象"));
+        };
+        if object.get("created").and_then(Value::as_u64).is_none() {
+            let created = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_secs())
+                .unwrap_or(0);
+            object.insert("created".to_owned(), json!(created));
+        }
+        let Some(data) = object.get_mut("data").and_then(Value::as_array_mut) else {
+            return Err(image_response_invalid("响应缺少 data 数组"));
+        };
+        if data.is_empty() {
+            return Err(image_response_invalid("响应 data 为空，没有图片数据"));
+        }
+        for item in data.iter_mut() {
+            let Some(item) = item.as_object_mut() else {
+                return Err(image_response_invalid("data 条目不是 JSON 对象"));
+            };
+            if item
+                .get("b64_json")
+                .and_then(Value::as_str)
+                .is_some_and(|data| !data.is_empty())
+            {
+                continue;
+            }
+            let Some(url) = item
+                .get("url")
+                .and_then(Value::as_str)
+                .filter(|url| !url.is_empty())
+            else {
+                return Err(image_response_invalid(
+                    "图片条目既没有 b64_json 也没有可下载的 url",
+                ));
+            };
+            let encoded = self.fetch_image_as_base64(url, secret)?;
+            item.insert("b64_json".to_owned(), json!(encoded));
+        }
+        Ok(payload)
+    }
+
+    /// 取回图片并编码成 base64。只接受 http(s) 与 `data:` 两种来源。
+    fn fetch_image_as_base64(&self, url: &str, secret: &str) -> Result<String, CoreError> {
+        use base64::Engine as _;
+        if let Some(rest) = url.strip_prefix("data:") {
+            let Some((meta, payload)) = rest.split_once(',') else {
+                return Err(image_response_invalid("data URL 缺少逗号分隔"));
+            };
+            if !meta.contains(";base64") {
+                return Err(image_response_invalid("data URL 不是 base64 编码"));
+            }
+            return Ok(payload.to_owned());
+        }
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return Err(image_response_invalid("图片 url 不是 http(s)"));
+        }
+        let upstream = self
+            .image_agent
+            .get(url)
+            .call()
+            .map_err(|error| upstream_transport_error(&error))?;
+        let status = upstream.status().as_u16();
+        if !(200..300).contains(&status) {
+            return Err(image_response_invalid(&format!(
+                "下载图片失败：上游返回 {status}"
+            )));
+        }
+        let mut upstream = upstream;
+        let bytes = upstream
+            .body_mut()
+            .with_config()
+            .limit(MAX_IMAGES_RESPONSE_BYTES as u64)
+            .read_to_vec()
+            .map_err(|error| {
+                let text = error.to_string();
+                image_response_invalid(&format!("下载图片失败：{}", redact(&text, secret)))
+            })?;
+        if bytes.is_empty() {
+            return Err(image_response_invalid("下载图片失败：内容为空"));
+        }
+        Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
     }
 
     /// 上游 SSE → 宿主 SSE。逐事件转发并立即 flush，保证宿主能增量看到输出。
@@ -707,9 +1057,16 @@ impl Gateway {
 #[derive(Debug, PartialEq, Eq)]
 enum RouteKind {
     Health,
-    Models { revision: String },
+    Models {
+        revision: String,
+    },
     Responses,
     Realtime,
+    /// 图像生成 / 编辑。这两个端点由 Codex 的内置 `image_gen` 工具调用，
+    /// 请求里的 `model` 是上游模型名（当前版本写死 `gpt-image-2`），不是目录 alias。
+    Images {
+        edits: bool,
+    },
     Unknown,
 }
 
@@ -733,14 +1090,21 @@ fn route_kind(path: &str) -> RouteKind {
         ["i", _, "c", _, "v1", "responses"] => RouteKind::Responses,
         ["i", _, "c", _, "v1", "models"] => RouteKind::Models { revision },
         ["i", _, "c", _, "v1", "realtime"] => RouteKind::Realtime,
+        ["i", _, "c", _, "v1", "images", "generations"] => RouteKind::Images { edits: false },
+        ["i", _, "c", _, "v1", "images", "edits"] => RouteKind::Images { edits: true },
         _ => RouteKind::Unknown,
     }
 }
 
 /// 流式翻译的两条路径。透传保留上游事件名，chat 走状态机重建事件。
 enum Translator {
-    Passthrough { alias: String },
-    Chat { state: chat::ChatStream },
+    Passthrough {
+        alias: String,
+    },
+    /// 盒装：chat 状态机明显大于另一个变体，直接内联会让枚举整体膨胀。
+    Chat {
+        state: Box<chat::ChatStream>,
+    },
 }
 
 impl Translator {
@@ -1085,10 +1449,132 @@ fn upstream_status_error(status: u16, detail: &str) -> CoreError {
         ),
         404 => (ErrorCode::NotFound, "error.upstreamModelMissing"),
         429 => (ErrorCode::Internal, "error.upstreamRateLimited"),
-        400..=499 => (ErrorCode::ValidationFailed, "error.upstreamRejected"),
+        400..=499 => {
+            // 上下文超限是唯一值得从「上游拒绝」里单列出来的 400：宿主对它既不重试
+            // 也不压缩，用户看到通用文案只会原地重发。单列后建议页能给到对应动作。
+            if status == 400 && parse_context_overflow(detail).is_some() {
+                (ErrorCode::ValidationFailed, "error.contextOverflow")
+            } else {
+                (ErrorCode::ValidationFailed, "error.upstreamRejected")
+            }
+        }
         _ => (ErrorCode::Internal, "error.upstreamFailed"),
     };
     CoreError::new(code, message_key).with_detail(format!("上游返回 {status}：{detail}"))
+}
+
+/// 上游 400 正文里的「上下文超限」指纹与两个关键数字。
+///
+/// 已知两家模板同宗（LiteLLM 转发层与 OpenAI 上游）：
+/// "This model's maximum context length is 1048576 tokens. However, you
+///  requested 38400 output tokens and your prompt contains at least 1010177
+///  input tokens, ..."
+/// 经典补全模板则是 "…4097 in the messages, 1 in the completion"。
+/// 只在两个数字都读得到时才算命中；取不到就走通用归类，绝不猜。
+#[derive(Debug, Clone, Copy)]
+struct ContextOverflow {
+    /// 上游声明的模型窗口。
+    window: u64,
+    /// 上游本次报的输入计数（「at least」口径，只小不大）。
+    input: u64,
+}
+
+fn parse_context_overflow(detail: &str) -> Option<ContextOverflow> {
+    let window = digits_after(detail, "maximum context length is ")?;
+    let input = digits_before(detail, " input tokens")
+        .or_else(|| digits_before(detail, " in the messages"))?;
+    Some(ContextOverflow { window, input })
+}
+
+/// 取 marker 后面紧邻的十进制数字，容忍 `,` / `_` 分隔。
+fn digits_after(text: &str, marker: &str) -> Option<u64> {
+    let start = text.find(marker)? + marker.len();
+    let digits: String = text[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == ',' || *c == '_')
+        .filter(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse().ok().filter(|value| *value > 0)
+}
+
+/// 取 marker 前面紧邻的十进制数字，容忍 `,` / `_` 分隔。
+fn digits_before(text: &str, marker: &str) -> Option<u64> {
+    let end = text.find(marker)?;
+    let digits: String = text[..end]
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit() || *c == ',' || *c == '_')
+        .filter(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    digits.parse().ok().filter(|value| *value > 0)
+}
+
+/// 按上游报出的窗口与输入计数，把请求体里的输出上限缩到这次真正放得下的值。
+/// 返回 `(新请求体, 应用后的预算)`。
+///
+/// 两条约束：
+/// - 只缩不涨：预算不低于现值时不动——宿主本来就要得少，失败与输出预留无关；
+/// - 请求体没有输出上限字段时不新增：个别上游只认 `max_completion_tokens`，
+///   凭空注入 `max_tokens` 可能把一类 400 换成另一类 400。
+fn shrink_output_budget(body: &[u8], overflow: ContextOverflow) -> Option<(Vec<u8>, u64)> {
+    /// 「at least」口径与网关转换的字数漂移留出的缓冲。
+    const SAFETY_MARGIN: u64 = 2_048;
+    /// 低于这个预算的续写没有意义，宁可老实报错。
+    const MIN_BUDGET: u64 = 1_024;
+
+    let mut value: Value = serde_json::from_slice(body).ok()?;
+    let object = value.as_object_mut()?;
+    let key = ["max_tokens", "max_output_tokens"]
+        .into_iter()
+        .find(|key| object.contains_key(*key))?;
+    let current = object.get(key)?.as_u64()?;
+    let budget = overflow
+        .window
+        .saturating_sub(overflow.input)
+        .saturating_sub(SAFETY_MARGIN);
+    if budget < MIN_BUDGET || budget >= current {
+        return None;
+    }
+    object.insert(key.to_owned(), json!(budget));
+    Some((serde_json::to_vec(&value).ok()?, budget))
+}
+
+/// 推理请求的上游发送。自救重发与首发共用同一份头与端点，只有请求体可能不同。
+fn send_inference(
+    agent: &ureq::Agent,
+    prepared: &PreparedRequest,
+    secret: &ResolvedSecret,
+) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
+    let mut call = agent
+        .post(&prepared.url)
+        .header("accept", "text/event-stream")
+        .header("authorization", format!("Bearer {}", secret.expose()));
+    for (name, value) in &prepared.headers {
+        if name.eq_ignore_ascii_case("content-type") {
+            call = call.header(name, value);
+        }
+    }
+    call.send(prepared.body.as_slice())
+}
+
+/// 读上游非 2xx 的错误正文，供脱敏与超限解析。
+fn read_upstream_error_text(upstream: &mut ureq::http::Response<ureq::Body>) -> String {
+    upstream
+        .body_mut()
+        .with_config()
+        .limit((MAX_UPSTREAM_ERROR_CHARS * 4) as u64)
+        .read_to_string()
+        .unwrap_or_default()
+}
+
+/// 上游 2xx 但图像数据不可用。与传输/权限失败区分开：这一类是响应形状问题，
+/// 宿主（Codex 内置工具）拿到同一种错误只会看到「解码失败」，不如这里说清楚。
+fn image_response_invalid(detail: &str) -> CoreError {
+    CoreError::new(ErrorCode::Internal, "error.upstreamImageInvalid")
+        .with_detail(format!("上游图像响应不可用：{detail}"))
 }
 
 /// 传输层失败：连接被拒、TLS 失败、首事件超时等。
@@ -1223,6 +1709,20 @@ mod tests {
                 revision: "rev_1".to_owned()
             }
         );
+        // 图像端点：Codex 内置 image_gen 工具的生成 / 编辑。
+        assert_eq!(
+            route_kind(&format!("{base}/v1/images/generations")),
+            RouteKind::Images { edits: false }
+        );
+        assert_eq!(
+            route_kind(&format!("{base}/v1/images/edits")),
+            RouteKind::Images { edits: true }
+        );
+        assert_eq!(
+            route_kind(&format!("{base}/v1/images/generations/extra")),
+            RouteKind::Unknown
+        );
+        assert_eq!(route_kind(&format!("{base}/v1/images")), RouteKind::Unknown);
 
         // 多一段尾路径不是本网关的路由，不能因为最后一段叫 responses 就当推理端点。
         assert_eq!(
@@ -1233,5 +1733,64 @@ mod tests {
         assert_eq!(route_kind(&format!("{base}/responses")), RouteKind::Unknown);
         assert_eq!(route_kind("/v1/responses"), RouteKind::Unknown);
         assert_eq!(route_kind("/"), RouteKind::Unknown);
+    }
+
+    /// 两种已知模板（LiteLLM 转发层 / 经典 OpenAI）都必须取到窗口与输入计数。
+    #[test]
+    fn parses_overflow_numbers_from_both_known_templates() {
+        let litellm = "上游返回 400：{\"error\":{\"message\":\"This model's maximum context length is 1048576 tokens. However, you requested 38400 output tokens and your prompt contains at least 1010177 input tokens, for a total of at least 1048577 tokens. Please reduce the length of the input prompt.\"}}";
+        let overflow = parse_context_overflow(litellm).unwrap();
+        assert_eq!(overflow.window, 1_048_576);
+        assert_eq!(overflow.input, 1_010_177);
+
+        let classic = "This model's maximum context length is 4097 tokens. However, you requested 4098 tokens (4097 in the messages, 1 in the completion). Please reduce the length of the messages or completion.";
+        let overflow = parse_context_overflow(classic).unwrap();
+        assert_eq!(overflow.window, 4_097);
+        assert_eq!(overflow.input, 4_097);
+
+        // 数字带分隔符也要读得出来。
+        let grouped = "This model's maximum context length is 1,048,576 tokens. However, your prompt contains at least 1_010_177 input tokens.";
+        let overflow = parse_context_overflow(grouped).unwrap();
+        assert_eq!(overflow.window, 1_048_576);
+        assert_eq!(overflow.input, 1_010_177);
+
+        // 不相干的 400 与缺数字的模板都不命中：宁可走通用归类，绝不猜。
+        assert!(parse_context_overflow("Invalid stream parameter").is_none());
+        assert!(parse_context_overflow("maximum context length is abc tokens").is_none());
+        assert!(parse_context_overflow("maximum context length is 8192 tokens").is_none());
+    }
+
+    /// 预算收缩的三条约束：只缩不涨、不凭空注入、放不下就不救。
+    #[test]
+    fn shrink_only_lowers_an_existing_limit() {
+        let overflow = ContextOverflow {
+            window: 20_000,
+            input: 15_000,
+        };
+        // 20_000 - 15_000 - 2_048 裕度 = 2_952。
+        let (body, budget) =
+            shrink_output_budget(br#"{"model":"m","max_tokens":8192}"#, overflow).unwrap();
+        assert_eq!(budget, 2_952);
+        let value: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["max_tokens"], 2_952);
+
+        // responses 路径的字段名同样认得。
+        let (body, _) = shrink_output_budget(br#"{"max_output_tokens":8192}"#, overflow).unwrap();
+        let value: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["max_output_tokens"], 2_952);
+
+        // 宿主本来就要得少：失败与输出预留无关，不动。
+        assert!(shrink_output_budget(br#"{"max_tokens":1024}"#, overflow).is_none());
+        // 没有输出上限字段：不凭空注入。
+        assert!(shrink_output_budget(br#"{"model":"m"}"#, overflow).is_none());
+        // 扣掉裕度后放不下值得发的输出：老实报错。
+        assert!(shrink_output_budget(
+            br#"{"max_tokens":8192}"#,
+            ContextOverflow {
+                window: 20_000,
+                input: 19_500
+            }
+        )
+        .is_none());
     }
 }

@@ -12,7 +12,8 @@ use crate::{
         coexist,
         config::{
             apply_managed, diff_managed, execute_restore, hash, plan_restore, write_atomic,
-            FieldChange, FieldOwnership, ManagedConfig, ManagedProvider, ProviderAuth, PROVIDER_ID,
+            FieldChange, FieldOwnership, ManagedConfig, ManagedProvider, ProviderAuth,
+            ACTOR_AUTHORIZATION_HEADER, ACTOR_AUTHORIZATION_VALUE, PROVIDER_ID,
         },
         detect::CodexInstance,
         plan::{
@@ -21,6 +22,7 @@ use crate::{
         },
     },
     domain::{
+        capability::{InputKind, Support},
         credential::Credential,
         error::{CoreError, ErrorCode},
         ids::{CredentialId, InstanceId, OperationId, PlanId, RevisionId},
@@ -1081,6 +1083,19 @@ impl ApplyService {
                     .into_iter()
                     .map(str::to_owned)
                     .collect(),
+                // 视频与 PDF 声明的是「上游模型支持」：宿主协议发不出来，进不了
+                // 上面的目录投影；Responses 上游靠原样透传，模态闸按协议放行。
+                passthrough_modalities: model
+                    .policy
+                    .inputs
+                    .iter()
+                    .filter(|entry| entry.upstream == Support::Supported)
+                    .filter_map(|entry| match entry.kind {
+                        InputKind::Video => Some("video".to_owned()),
+                        InputKind::Pdf => Some("pdf".to_owned()),
+                        _ => None,
+                    })
+                    .collect(),
                 // 内置工具（web_search 等）是上游自己的功能，同样随策略冻结：
                 // 请求期回读表单会让在途请求的行为随一次保存而改变。
                 builtin_tools: model.policy.tools.builtin_tools,
@@ -1177,6 +1192,12 @@ fn managed_config(
         provider: Some(ManagedProvider {
             base_url: layout.base_url(instance_id, catalog_revision),
             wire_api: "responses".to_owned(),
+            // 图像能力信号头：宿主的 image_gen 扩展要求自定义供应商带它才注册；
+            // 网关侧真的实现了 /v1/images/*，所以如实声明（见 codex::config 常量注释）。
+            http_headers: vec![(
+                ACTOR_AUTHORIZATION_HEADER.to_owned(),
+                ACTOR_AUTHORIZATION_VALUE.to_owned(),
+            )],
             auth: ProviderAuth::Command {
                 command: layout.auth_helper.clone(),
                 timeout_ms: 5000,

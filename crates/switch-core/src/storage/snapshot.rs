@@ -89,6 +89,14 @@ pub struct RouteEntry {
     /// 目录声明可由宿主原生发送的模态，用于显式拒绝未声明的输入。
     #[serde(default)]
     pub native_modalities: Vec<String>,
+    /// 上游声明支持、但宿主协议发不出来（进不了目录）的输入模态（视频 / PDF）。
+    ///
+    /// 宿主（Codex）的模态枚举只有 text/image/audio，这些类别永远不进
+    /// `native_modalities`；但上游是 Responses 协议时请求体原样透传，声明过就
+    /// 该放行——模态闸按协议用它。chat 上游没有携带这类内容的通路（适配器只
+    /// 翻译文本与图片），声明了也照拒：显式拒绝好过悄悄把内容丢掉。
+    #[serde(default)]
+    pub passthrough_modalities: Vec<String>,
     /// 该模型是否声明了上游自己执行的内置工具（`web_search` 等）。
     ///
     /// 老快照没有这项，缺省即未知＝不转发：把一份没有依据的内置工具转给上游，

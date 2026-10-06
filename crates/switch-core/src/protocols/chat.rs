@@ -9,7 +9,7 @@
 //! - 不重放已提交的流，不在流中更换凭据；
 //! - 生成的 `call_id` 必须可回传，供宿主把 function result 对回来。
 
-use super::{AdaptationLoss, PreparedRequest, ResponsesEvent, RouteLimits};
+use super::{AdaptationLoss, PreparedRequest, ResponsesEvent, RouteLimits, ToolNameMapping};
 use crate::domain::error::CoreError;
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -17,6 +17,24 @@ use std::collections::BTreeMap;
 /// 上游 chat 端点。
 pub fn endpoint(base: &str) -> String {
     format!("{}/chat/completions", base.trim_end_matches('/'))
+}
+
+/// 宿主默认函数命名空间：里面的工具名不折叠，原样发送。
+const DEFAULT_FUNCTION_NAMESPACE: &str = "functions";
+/// 折叠命名空间工具时的分隔符。上游函数名普遍只接受字母数字、下划线与短横线
+/// （点号会被拒），双下划线可读且不会撞上普通名字。
+const NAMESPACE_SEPARATOR: &str = "__";
+
+/// 把（命名空间，工具名）折叠成 chat 上游可接受的单个函数名。
+///
+/// 默认命名空间（`functions`）与空命名空间保持原名，普通工具的线上名字不变。
+pub(crate) fn flat_tool_name(namespace: Option<&str>, name: &str) -> String {
+    match namespace {
+        Some(namespace) if !namespace.is_empty() && namespace != DEFAULT_FUNCTION_NAMESPACE => {
+            format!("{namespace}{NAMESPACE_SEPARATOR}{name}")
+        }
+        _ => name.to_owned(),
+    }
 }
 
 /// 准备 chat 请求：把 Responses 请求体翻译成 chat 请求体。
@@ -41,11 +59,12 @@ pub fn prepare(
     // 让上游在最后一帧给出用量；不支持时只是少一次统计，不影响内容。
     body.insert("stream_options".to_owned(), json!({"include_usage": true}));
 
+    let mut tool_names: Vec<ToolNameMapping> = Vec::new();
     if let Some(tools) = object.get("tools").and_then(Value::as_array) {
-        let translated: Vec<Value> = tools
-            .iter()
-            .filter_map(|tool| translate_tool(tool, &mut losses))
-            .collect();
+        let mut translated: Vec<Value> = Vec::new();
+        for tool in tools {
+            translate_tool(tool, &mut losses, &mut translated, &mut tool_names);
+        }
         if !translated.is_empty() {
             body.insert("tools".to_owned(), Value::Array(translated));
         }
@@ -140,6 +159,7 @@ pub fn prepare(
         headers: vec![("content-type".to_owned(), "application/json".to_owned())],
         body: bytes,
         losses,
+        tool_names,
     })
 }
 
@@ -186,7 +206,7 @@ fn messages(request: &Value, losses: &mut Vec<AdaptationLoss>) -> Result<Vec<Val
                 }
             }
             Some("function_call") => push_function_call(&mut messages, item, losses),
-            Some("function_call_output") => push_tool_output(&mut messages, item),
+            Some("function_call_output") => push_tool_output(&mut messages, item, losses),
             Some("reasoning") => losses.push(AdaptationLoss::new(
                 "input.reasoning",
                 "loss.reasoningItemDropped",
@@ -303,6 +323,9 @@ fn push_message(messages: &mut Vec<Value>, item: &Value, losses: &mut Vec<Adapta
 }
 
 /// 助手发起的工具调用。连续的调用合并进同一条 assistant 消息，符合 chat 的惯例。
+///
+/// 带 `namespace` 的调用（如 `image_gen` 里的 `imagegen`）按发送时的规则重新折叠，
+/// 保证历史里的调用名与工具列表里的名字一致。
 fn push_function_call(messages: &mut Vec<Value>, item: &Value, losses: &mut Vec<AdaptationLoss>) {
     let call_id = item
         .get("call_id")
@@ -319,6 +342,7 @@ fn push_function_call(messages: &mut Vec<Value>, item: &Value, losses: &mut Vec<
         ));
         return;
     };
+    let name = flat_tool_name(item.get("namespace").and_then(Value::as_str), name);
     let call = json!({"id": call_id, "type": "function", "function": {"name": name, "arguments": arguments}});
     let appended = messages
         .last_mut()
@@ -332,31 +356,140 @@ fn push_function_call(messages: &mut Vec<Value>, item: &Value, losses: &mut Vec<
     }
 }
 
-fn push_tool_output(messages: &mut Vec<Value>, item: &Value) {
+fn push_tool_output(messages: &mut Vec<Value>, item: &Value, losses: &mut Vec<AdaptationLoss>) {
     let call_id = item
         .get("call_id")
         .and_then(Value::as_str)
         .unwrap_or_default();
     let output = match item.get("output") {
         Some(Value::String(text)) => text.clone(),
-        Some(other) => other.to_string(),
+        Some(other) => tool_output_text(other, losses),
         None => String::new(),
     };
     messages.push(json!({"role": "tool", "tool_call_id": call_id, "content": output}));
 }
 
-fn translate_tool(tool: &Value, losses: &mut Vec<AdaptationLoss>) -> Option<Value> {
-    if tool.get("type").and_then(Value::as_str) != Some("function") {
-        losses.push(AdaptationLoss::new(
+/// 工具输出里的结构化内容条目 → chat 工具消息能承载的文本。
+///
+/// 输出在线上是文本字符串或内容条目数组两种形态。数组里的图片（例如内置图像生成
+/// 回传的生成结果）没有可用的 chat 表达：整段 `to_string()` 会把 base64 原样送进
+/// 上下文，所以这里只取文本、图片记损失丢弃——图片已经落盘，路径在文本里。
+fn tool_output_text(output: &Value, losses: &mut Vec<AdaptationLoss>) -> String {
+    let items = match output {
+        Value::Array(items) => items,
+        other => {
+            let Some(items) = other.get("content_items").and_then(Value::as_array) else {
+                return other.to_string();
+            };
+            items
+        }
+    };
+    let mut texts: Vec<String> = Vec::new();
+    for part in items {
+        match part.get("type").and_then(Value::as_str) {
+            Some("input_text") | Some("output_text") | Some("text") => {
+                if let Some(text) = part.get("text").and_then(Value::as_str) {
+                    texts.push(text.to_owned());
+                }
+            }
+            Some("input_image") | Some("image_url") => losses.push(AdaptationLoss::new(
+                "input.toolOutput.image",
+                "loss.contentPartDropped",
+                "工具结果里的图片无法放进 chat 工具消息，未随上下文发送（文件已保存在本机）",
+            )),
+            Some(other) => losses.push(AdaptationLoss::new(
+                "input.toolOutput",
+                "loss.contentPartDropped",
+                format!("chat 工具消息没有 {other} 这类内容分片，未发送"),
+            )),
+            None => {}
+        }
+    }
+    texts.join("\n")
+}
+
+/// 翻译一个宿主工具条目，追加到 `out`。
+///
+/// - `function`：直接映射；
+/// - `namespace`：命名空间里的每个函数工具折叠成 `ns__name` 后逐个映射
+///   （chat 协议没有命名空间概念，整包丢弃会让模型根本看不到这些工具，例如
+///   内置图像生成 `image_gen.imagegen`）；映射记进 `tool_names` 供回程还原；
+/// - 其余类型：记录损失，不假装发送。
+fn translate_tool(
+    tool: &Value,
+    losses: &mut Vec<AdaptationLoss>,
+    out: &mut Vec<Value>,
+    tool_names: &mut Vec<ToolNameMapping>,
+) {
+    match tool.get("type").and_then(Value::as_str) {
+        Some("function") => {
+            if let Some(translated) = function_tool(tool, None, tool_names) {
+                out.push(translated);
+            }
+        }
+        Some("namespace") => {
+            let Some(namespace) = tool
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|name| !name.is_empty())
+            else {
+                losses.push(AdaptationLoss::new(
+                    "tools",
+                    "loss.nonFunctionToolDropped",
+                    "命名空间工具缺少 name，整包未发送",
+                ));
+                return;
+            };
+            let Some(inner) = tool.get("tools").and_then(Value::as_array) else {
+                losses.push(AdaptationLoss::new(
+                    "tools",
+                    "loss.nonFunctionToolDropped",
+                    format!("命名空间 {namespace} 没有 tools 列表，整包未发送"),
+                ));
+                return;
+            };
+            for entry in inner {
+                match entry.get("type").and_then(Value::as_str) {
+                    Some("function") => {
+                        if let Some(translated) = function_tool(entry, Some(namespace), tool_names) {
+                            out.push(translated);
+                        }
+                    }
+                    _ => losses.push(AdaptationLoss::new(
+                        "tools",
+                        "loss.nonFunctionToolDropped",
+                        format!("chat 协议只映射 function 工具，命名空间 {namespace} 里的自由格式工具未发送"),
+                    )),
+                }
+            }
+        }
+        _ => losses.push(AdaptationLoss::new(
             "tools",
             "loss.nonFunctionToolDropped",
             "chat 协议只映射 function 工具，其余宿主内置工具未发送",
-        ));
-        return None;
+        )),
     }
+}
+
+/// 把单个函数工具映射成 chat 的 `{"type":"function", ...}`。
+fn function_tool(
+    tool: &Value,
+    namespace: Option<&str>,
+    tool_names: &mut Vec<ToolNameMapping>,
+) -> Option<Value> {
     let name = tool.get("name").and_then(Value::as_str)?;
+    let flat = flat_tool_name(namespace, name);
+    if let Some(namespace) =
+        namespace.filter(|ns| !ns.is_empty() && *ns != DEFAULT_FUNCTION_NAMESPACE)
+    {
+        tool_names.push(ToolNameMapping {
+            flat: flat.clone(),
+            namespace: namespace.to_owned(),
+            name: name.to_owned(),
+        });
+    }
     let mut function = Map::new();
-    function.insert("name".to_owned(), json!(name));
+    function.insert("name".to_owned(), json!(flat));
     if let Some(description) = tool.get("description") {
         function.insert("description".to_owned(), description.clone());
     }
@@ -413,6 +546,8 @@ pub struct ChatStream {
     message_opened: bool,
     text: String,
     tool_calls: BTreeMap<u64, ToolCall>,
+    /// 折叠过的命名空间工具：上游函数名 → (namespace, name)，回程还原用。
+    tool_names: Vec<ToolNameMapping>,
     output: Vec<Value>,
     usage: Option<Value>,
     created: bool,
@@ -427,13 +562,14 @@ pub struct ChatStream {
 struct ToolCall {
     item_id: String,
     call_id: String,
+    /// 上游给的函数名（可能是折叠名，如 `image_gen__imagegen`）。
     name: String,
     arguments: String,
     output_index: u64,
 }
 
 impl ChatStream {
-    pub fn new(alias: &str) -> Self {
+    pub fn new(alias: &str, tool_names: Vec<ToolNameMapping>) -> Self {
         let response_id = format!("resp_{}", uuid::Uuid::new_v4().simple());
         let message_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
         Self {
@@ -446,6 +582,7 @@ impl ChatStream {
             message_opened: false,
             text: String::new(),
             tool_calls: BTreeMap::new(),
+            tool_names,
             output: Vec::new(),
             usage: None,
             created: false,
@@ -551,14 +688,15 @@ impl ChatStream {
                 .filter(|id| !id.is_empty())
                 .map(str::to_owned)
                 .unwrap_or_else(|| format!("call_{}", uuid::Uuid::new_v4().simple()));
+            let name = function
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
             let entry = ToolCall {
                 item_id: format!("fc_{}", uuid::Uuid::new_v4().simple()),
                 call_id,
-                name: function
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
+                name,
                 arguments: String::new(),
                 output_index,
             };
@@ -566,8 +704,7 @@ impl ChatStream {
                 "response.output_item.added",
                 json!({
                     "output_index": output_index,
-                    "item": {"id": entry.item_id, "type": "function_call", "call_id": entry.call_id,
-                             "name": entry.name, "arguments": "", "status": "in_progress"},
+                    "item": self.function_call_item(&entry, "in_progress", ""),
                 }),
             ));
             self.tool_calls.insert(key, entry);
@@ -599,6 +736,30 @@ impl ChatStream {
                 ));
             }
         }
+    }
+
+    /// Responses 形状的 `function_call` 条目。
+    ///
+    /// 折叠过的命名空间调用要还原：`name` 用命名空间内的原名、另加 `namespace`——
+    /// 宿主的工具注册表按 (namespace, name) 查找，只给平名字会找不到实现。
+    /// 没有映射的名字原样透传。
+    fn function_call_item(&self, entry: &ToolCall, status: &str, arguments: &str) -> Value {
+        let (name, namespace) = match self
+            .tool_names
+            .iter()
+            .find(|mapping| mapping.flat == entry.name)
+        {
+            Some(mapping) => (mapping.name.as_str(), Some(mapping.namespace.as_str())),
+            None => (entry.name.as_str(), None),
+        };
+        let mut item = json!({
+            "id": entry.item_id, "type": "function_call", "call_id": entry.call_id,
+            "name": name, "arguments": arguments, "status": status,
+        });
+        if let Some(namespace) = namespace {
+            item["namespace"] = json!(namespace);
+        }
+        item
     }
 
     /// 上游是否给过协议层终止标记（非 null 的 `finish_reason`）。
@@ -643,10 +804,7 @@ impl ChatStream {
             .map(|call| {
                 (
                     call.output_index,
-                    json!({
-                        "id": call.item_id, "type": "function_call", "call_id": call.call_id,
-                        "name": call.name, "arguments": call.arguments, "status": "completed",
-                    }),
+                    self.function_call_item(call, "completed", &call.arguments),
                 )
             })
             .collect();
@@ -850,6 +1008,98 @@ mod tests {
         assert_eq!(body["tools"][0]["function"]["name"], "read_file");
         assert_eq!(body["tools"][0]["function"]["parameters"]["type"], "object");
         assert_eq!(body["tool_choice"]["function"]["name"], "read_file");
+        assert!(loss_features(&prepared.losses).contains(&"tools"));
+    }
+
+    /// Codex 的内置图像工具以命名空间形态下发（`{"type":"namespace","name":"image_gen"}`）。
+    /// 过去整包被丢——模型根本看不到它；现在折叠成 `image_gen__imagegen` 发送，
+    /// 并在回程还原 `namespace`，宿主的工具注册表才找得到扩展实现。
+    #[test]
+    fn namespace_tools_are_flattened_and_restored_round_trip() {
+        let mut request = responses_request();
+        request["tools"] = json!([
+            {"type": "namespace", "name": "image_gen", "description": "图像工具", "tools": [
+                {"type": "function", "name": "imagegen", "description": "生成图像",
+                 "parameters": {"type": "object", "properties": {"prompt": {"type": "string"}}}},
+            ]},
+        ]);
+
+        let prepared = prepare("https://host/v1", "m", &request, &RouteLimits::default()).unwrap();
+        let body = body_of(&prepared);
+        assert_eq!(body["tools"][0]["function"]["name"], "image_gen__imagegen");
+        assert_eq!(body["tools"][0]["function"]["description"], "生成图像");
+        assert_eq!(
+            prepared.tool_names,
+            vec![ToolNameMapping {
+                flat: "image_gen__imagegen".to_owned(),
+                namespace: "image_gen".to_owned(),
+                name: "imagegen".to_owned(),
+            }]
+        );
+
+        // 回程：上游按折叠名调用 → item 必须还原 name 与 namespace。
+        let mut stream = ChatStream::new("gs/p_a/m_1", prepared.tool_names.clone());
+        let events = stream.feed(&json!({"choices": [{"index": 0, "delta": {"tool_calls": [
+            {"index": 0, "id": "call_1",
+             "function": {"name": "image_gen__imagegen", "arguments": "{\"prompt\":\"猫\"}"}}
+        ]}}]}));
+        let added = events
+            .iter()
+            .find(|event| event.name == "response.output_item.added")
+            .expect("工具调用必须产生 output_item.added");
+        assert_eq!(added.payload["item"]["name"], "imagegen");
+        assert_eq!(added.payload["item"]["namespace"], "image_gen");
+
+        let done = stream.finish();
+        let done_item = done
+            .iter()
+            .find(|event| event.name == "response.output_item.done")
+            .expect("收尾必须发出 output_item.done");
+        assert_eq!(done_item.payload["item"]["namespace"], "image_gen");
+    }
+
+    /// 历史回放：带 `namespace` 的调用按同一条规则重新折叠，与工具列表里的名字一致；
+    /// 工具结果里的图片没有 chat 表达，只取文本并记录损失（而不是把 base64 塞进上下文）。
+    #[test]
+    fn history_replays_namespaced_calls_and_keeps_tool_output_text() {
+        let mut request = responses_request();
+        request["input"] = json!([
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "再画一张"}]},
+            {"type": "function_call", "call_id": "call_1", "name": "imagegen", "namespace": "image_gen",
+             "arguments": "{\"prompt\":\"猫\"}"},
+            {"type": "function_call_output", "call_id": "call_1", "output": [
+                {"type": "input_text", "text": "已生成，文件：/tmp/cat.png"},
+                {"type": "input_image", "image_url": "data:image/png;base64,QUJD"}
+            ]},
+        ]);
+
+        let prepared = prepare("https://host/v1", "m", &request, &RouteLimits::default()).unwrap();
+        let body = body_of(&prepared);
+        // messages[0] 是合并出来的 system；[1] 是用户消息。
+        assert_eq!(
+            body["messages"][2]["tool_calls"][0]["function"]["name"],
+            "image_gen__imagegen"
+        );
+        assert_eq!(body["messages"][3]["role"], "tool");
+        assert_eq!(body["messages"][3]["content"], "已生成，文件：/tmp/cat.png");
+        assert!(loss_features(&prepared.losses).contains(&"input.toolOutput.image"));
+    }
+
+    /// 命名空间里的自由格式（custom）工具没有 chat 表达：记录损失而不是伪造。
+    #[test]
+    fn freeform_tools_inside_namespaces_are_dropped_with_a_loss() {
+        let mut request = responses_request();
+        request["tools"] = json!([
+            {"type": "namespace", "name": "image_gen", "tools": [
+                {"type": "function", "name": "imagegen", "parameters": {"type": "object"}},
+                {"type": "custom", "name": "sketch"},
+            ]},
+        ]);
+
+        let prepared = prepare("https://host/v1", "m", &request, &RouteLimits::default()).unwrap();
+        let body = body_of(&prepared);
+        assert_eq!(body["tools"].as_array().unwrap().len(), 1);
+        assert_eq!(body["tools"][0]["function"]["name"], "image_gen__imagegen");
         assert!(loss_features(&prepared.losses).contains(&"tools"));
     }
 
@@ -1119,7 +1369,7 @@ mod tests {
 
     #[test]
     fn stream_emits_the_verified_event_order_for_text() {
-        let mut stream = ChatStream::new("gs/p_a/m_1");
+        let mut stream = ChatStream::new("gs/p_a/m_1", Vec::new());
         let mut all = stream.starting();
         assert_eq!(event_names(&all), vec!["response.created"]);
 
@@ -1162,7 +1412,7 @@ mod tests {
 
     #[test]
     fn stream_unwraps_an_upstream_error_carried_in_the_chunk() {
-        let mut stream = ChatStream::new("gs/p_a/m_1");
+        let mut stream = ChatStream::new("gs/p_a/m_1", Vec::new());
         stream.starting();
         // data 帧带 error 而不是 choices 时不能产生半截会话。
         let events = stream.feed(&json!({"error": {"message": "上游拒绝"}}));
@@ -1171,7 +1421,7 @@ mod tests {
 
     #[test]
     fn stream_accumulates_tool_call_argument_fragments() {
-        let mut stream = ChatStream::new("gs/p_a/m_1");
+        let mut stream = ChatStream::new("gs/p_a/m_1", Vec::new());
         let mut all = stream.starting();
         all.extend(stream.feed(&json!({"choices": [{"index": 0, "delta": {"tool_calls": [
             {"index": 0, "id": "call_9", "type": "function", "function": {"name": "read_file", "arguments": "{\"pa"}}
@@ -1209,7 +1459,7 @@ mod tests {
 
     #[test]
     fn sequence_numbers_are_monotonic_across_the_whole_stream() {
-        let mut stream = ChatStream::new("gs/p_a/m_1");
+        let mut stream = ChatStream::new("gs/p_a/m_1", Vec::new());
         let mut all = stream.starting();
         all.extend(stream.feed(&json!({"choices": [{"index": 0, "delta": {"content": "x"}}]})));
         all.extend(stream.feed(&json!({"choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}})));
@@ -1223,7 +1473,7 @@ mod tests {
 
     #[test]
     fn finish_is_idempotent() {
-        let mut stream = ChatStream::new("gs/p_a/m_1");
+        let mut stream = ChatStream::new("gs/p_a/m_1", Vec::new());
         stream.starting();
         stream.feed(&json!({"choices": [{"index": 0, "delta": {"content": "x"}}]}));
         assert!(!stream.finish().is_empty());

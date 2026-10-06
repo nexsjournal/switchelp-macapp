@@ -9,6 +9,7 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -44,6 +45,7 @@ struct MockUpstream {
     received: Arc<Mutex<Vec<String>>>,
 }
 
+#[derive(Clone)]
 enum MockReply {
     Sse(&'static str),
     Status {
@@ -52,6 +54,8 @@ enum MockReply {
     },
     /// 先读请求、停一会儿再回：用来观察「请求进行中」的中间状态。
     SseDelayed(&'static str, Duration),
+    /// 按连接顺序依次应答，耗尽后重复最后一项：「上游先拒后收」这类多段剧本用。
+    Scripted(Vec<MockReply>),
 }
 
 impl MockUpstream {
@@ -60,17 +64,23 @@ impl MockUpstream {
         let port = listener.local_addr().unwrap().port();
         let received = Arc::new(Mutex::new(Vec::new()));
         let sink = received.clone();
+        let script_index = Arc::new(AtomicUsize::new(0));
         std::thread::spawn(move || {
             for incoming in listener.incoming() {
                 let Ok(stream) = incoming else { break };
                 let sink = sink.clone();
+                let script_index = script_index.clone();
                 let reply = match &reply {
-                    MockReply::Sse(body) => MockReply::Sse(body),
-                    MockReply::Status { code, body } => MockReply::Status {
-                        code: *code,
-                        body: body.clone(),
-                    },
-                    MockReply::SseDelayed(body, delay) => MockReply::SseDelayed(body, *delay),
+                    MockReply::Scripted(steps) => {
+                        // 按连接顺序消费脚本。错误应答带 connection: close，宿主侧
+                        // 重发必然开新连接，所以「第几次连接」就是「第几次请求」。
+                        let index = script_index.fetch_add(1, Ordering::SeqCst);
+                        steps
+                            .get(index)
+                            .unwrap_or_else(|| steps.last().expect("回复脚本不能为空"))
+                            .clone()
+                    }
+                    other => other.clone(),
                 };
                 std::thread::spawn(move || {
                     let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -109,6 +119,10 @@ impl MockUpstream {
                             "HTTP/1.1 {code} Error\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                             body.len()
                         ),
+                        // 脚本在连接侧就已拆成具体应答，这里不该再见到它。
+                        MockReply::Scripted(_) => {
+                            unreachable!("脚本应答已在连接分发时拆包")
+                        }
                     };
                     let _ = stream.write_all(response.as_bytes());
                     let _ = stream.flush();
@@ -128,6 +142,18 @@ impl MockUpstream {
     fn last_body(&self) -> Value {
         let bodies = self.received.lock().unwrap();
         serde_json::from_str(bodies.last().expect("上游应至少收到一次请求")).unwrap()
+    }
+
+    /// 第 index 次请求的请求体（自救重发的断言要区分首发与重发）。
+    fn nth_body(&self, index: usize) -> Value {
+        let bodies = self.received.lock().unwrap();
+        serde_json::from_str(
+            bodies
+                .get(index)
+                .unwrap_or_else(|| panic!("上游只收到 {} 次请求，没有第 {index} 次", bodies.len()))
+                .as_str(),
+        )
+        .unwrap()
     }
 }
 
@@ -150,6 +176,8 @@ struct TestPolicy {
     output_limit: Option<u64>,
     reasoning_efforts: Vec<String>,
     native_modalities: Vec<String>,
+    /// 上游声明支持、宿主发不出来的模态（视频 / PDF），随协议决定闸门行为。
+    passthrough_modalities: Vec<String>,
     /// 上游内置工具（`web_search` 等）是否声明支持；默认未知＝不转发。
     builtin_tools: Support,
 }
@@ -158,6 +186,13 @@ impl TestPolicy {
     fn declaring(modalities: &[&str]) -> Self {
         Self {
             native_modalities: modalities.iter().map(|value| (*value).to_owned()).collect(),
+            ..Self::default()
+        }
+    }
+
+    fn declaring_passthrough(modalities: &[&str]) -> Self {
+        Self {
+            passthrough_modalities: modalities.iter().map(|value| (*value).to_owned()).collect(),
             ..Self::default()
         }
     }
@@ -241,6 +276,7 @@ impl Harness {
                         output_limit: route_policy.output_limit,
                         reasoning_efforts: route_policy.reasoning_efforts.clone(),
                         native_modalities: route_policy.native_modalities.clone(),
+                        passthrough_modalities: route_policy.passthrough_modalities.clone(),
                         builtin_tools: route_policy.builtin_tools,
                     }],
                     "2026-09-18T00:00:00Z",
@@ -1007,6 +1043,87 @@ fn a_declared_modality_is_forwarded() {
     );
 }
 
+/// GW-05 扩展：声明了视频的模型走 Responses 上游时，视频内容按声明原样透传。
+///
+/// 宿主（Codex）发不出视频，这条链路服务的是说 Responses 协议的其他客户端；
+/// 透传前必须过模态闸，未声明照样拒。
+#[test]
+fn a_declared_video_is_passed_through_to_a_responses_upstream() {
+    let harness = Harness::start_with(
+        RESPONSES_V1,
+        MockReply::Sse(RESPONSES_SSE),
+        Protocol::Responses,
+        TestPolicy::declaring_passthrough(&["video", "pdf"]),
+    );
+    let token = harness.token.expose().to_owned();
+    let mut body = harness.request_body();
+    body["input"] = json!([{"type": "message", "role": "user", "content": [
+        {"type": "input_text", "text": "看这段视频"},
+        {"type": "input_video", "video_url": "https://example.com/a.mp4"}
+    ]}]);
+
+    let (status, text) = harness.post("responses", Some(&token), &body);
+
+    assert_eq!(status, 200, "{text}");
+    assert_eq!(harness.upstream.requests(), 1);
+    let upstream_body = harness.upstream.last_body();
+    assert_eq!(
+        upstream_body["input"][0]["content"][1]["type"], "input_video",
+        "Responses 上游透传，视频分片不得被改写或丢弃"
+    );
+}
+
+/// GW-05 扩展：没声明视频时，Responses 上游也不能让视频隐身穿闸。
+#[test]
+fn an_undeclared_video_is_rejected_before_reaching_the_upstream() {
+    let harness = Harness::start_with(
+        RESPONSES_V1,
+        MockReply::Sse(RESPONSES_SSE),
+        Protocol::Responses,
+        TestPolicy::default(),
+    );
+    let token = harness.token.expose().to_owned();
+    let mut body = harness.request_body();
+    body["input"] = json!([{"type": "message", "role": "user", "content": [
+        {"type": "input_text", "text": "看这段视频"},
+        {"type": "input_video", "video_url": "https://example.com/a.mp4"}
+    ]}]);
+
+    let (status, text) = harness.post("responses", Some(&token), &body);
+
+    assert_eq!(status, 400);
+    assert!(text.contains("未声明"), "{text}");
+    assert_eq!(harness.upstream.requests(), 0, "拒绝必须发生在上游调用之前");
+}
+
+/// GW-05 扩展：chat 上游没有携带视频/PDF 的通路——声明了也拒，宁可显式
+/// 报错也不能把内容悄悄丢掉再回一段「没看见视频」的回答。
+#[test]
+fn a_declared_video_is_rejected_on_a_chat_upstream_without_a_carry_path() {
+    let harness = Harness::start_with(
+        CHAT_COMPLETIONS_V1,
+        MockReply::Sse(CHAT_SSE),
+        Protocol::ChatCompletions,
+        TestPolicy::declaring_passthrough(&["video"]),
+    );
+    let token = harness.token.expose().to_owned();
+    let mut body = harness.request_body();
+    body["input"] = json!([{"type": "message", "role": "user", "content": [
+        {"type": "input_text", "text": "看这段视频"},
+        {"type": "input_video", "video_url": "https://example.com/a.mp4"}
+    ]}]);
+
+    let (status, text) = harness.post("responses", Some(&token), &body);
+
+    assert_eq!(status, 400);
+    assert!(text.contains("CAPABILITY_UNSUPPORTED"), "{text}");
+    assert!(
+        text.contains("没有携带"),
+        "错误详情要说明是 chat 上游没有通路：{text}"
+    );
+    assert_eq!(harness.upstream.requests(), 0, "拒绝必须发生在上游调用之前");
+}
+
 /// GW-05：模型声明的输出上限必须落到真实的上游请求参数上。
 #[test]
 fn the_declared_output_limit_reaches_the_upstream_request() {
@@ -1332,5 +1449,268 @@ mod every_failure_is_answerable {
         let payload: Value = serde_json::from_str(&body).expect("错误必须是 JSON 正文");
         assert_eq!(payload["error"]["code"], "NOT_FOUND");
         assert_eq!(harness.upstream.requests(), 0, "不该触达上游");
+    }
+}
+
+/// 图像接口：Codex 内置 `image_gen` 工具按上游模型名（写死 `gpt-image-2` 之类）
+/// 调用 `/v1/images/generations`，不走目录 alias。这组用例覆盖准入、转发与响应归一化。
+mod images_endpoint {
+    use super::*;
+
+    fn images_harness(reply: MockReply) -> Harness {
+        Harness::start(RESPONSES_V1, reply, Protocol::ChatCompletions)
+    }
+
+    fn image_ok(b64: &str) -> MockReply {
+        MockReply::Status {
+            code: 200,
+            body: json!({"data": [{"b64_json": b64}]}).to_string(),
+        }
+    }
+
+    #[test]
+    fn generation_routes_by_upstream_id_and_fills_created() {
+        // 回归：宿主的图像客户端要求 `created` 与 `data[].b64_json` 两个字段一定存在，
+        // 上游少给 `created` 时必须由网关补齐，否则整次生成在宿主侧解码失败。
+        let harness = images_harness(image_ok("QUJD"));
+        let token = harness.token.expose().to_owned();
+
+        let (status, body) = harness.post(
+            "images/generations",
+            Some(&token),
+            &json!({"model": "vendor/Upstream-Model", "prompt": "一只小猫"}),
+        );
+
+        assert_eq!(status, 200, "{body}");
+        let payload: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(payload["data"][0]["b64_json"], "QUJD");
+        assert!(
+            payload["created"].as_u64().is_some(),
+            "created 必须存在：{body}"
+        );
+        // 上游必须收到精确模型名与原始 prompt。
+        let forwarded = harness.upstream.last_body();
+        assert_eq!(forwarded["model"], "vendor/Upstream-Model");
+        assert_eq!(forwarded["prompt"], "一只小猫");
+    }
+
+    #[test]
+    fn a_url_only_response_is_downloaded_and_inlined_as_base64() {
+        // 上游只回 url（data: 或 http）时，网关负责取回并转成 b64_json。
+        let harness = images_harness(MockReply::Status {
+            code: 200,
+            body: json!({"created": 1, "data": [{"url": "data:image/png;base64,QUJD"}]})
+                .to_string(),
+        });
+        let token = harness.token.expose().to_owned();
+
+        let (status, body) = harness.post(
+            "images/generations",
+            Some(&token),
+            &json!({"model": "vendor/Upstream-Model", "prompt": "一只小猫"}),
+        );
+
+        assert_eq!(status, 200, "{body}");
+        let payload: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(payload["data"][0]["b64_json"], "QUJD");
+        assert_eq!(payload["created"], 1);
+    }
+
+    #[test]
+    fn a_response_without_image_data_is_rejected_with_a_named_error() {
+        let harness = images_harness(MockReply::Status {
+            code: 200,
+            body: json!({"data": [{"revised_prompt": "猫"}]}).to_string(),
+        });
+        let token = harness.token.expose().to_owned();
+
+        let (status, body) = harness.post(
+            "images/generations",
+            Some(&token),
+            &json!({"model": "vendor/Upstream-Model", "prompt": "一只小猫"}),
+        );
+
+        assert_eq!(status, 500);
+        let payload: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(payload["error"]["code"], "INTERNAL");
+        assert_eq!(
+            payload["error"]["message_key"], "error.upstreamImageInvalid",
+            "要说清是响应形状问题而不是网络问题：{body}"
+        );
+    }
+
+    #[test]
+    fn upstream_rejection_is_classified_like_inference() {
+        // 与推理路径同口径：4xx → upstreamRejected，原话保留在详情里。
+        let harness = images_harness(MockReply::Status {
+            code: 400,
+            body: json!({"error": {"message": "This model is not supported on the Chat Completions endpoint"}})
+                .to_string(),
+        });
+        let token = harness.token.expose().to_owned();
+
+        let (status, body) = harness.post(
+            "images/generations",
+            Some(&token),
+            &json!({"model": "vendor/Upstream-Model", "prompt": "一只小猫"}),
+        );
+
+        assert_eq!(status, 400);
+        let payload: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(payload["error"]["code"], "VALIDATION_FAILED");
+        assert_eq!(payload["error"]["message_key"], "error.upstreamRejected");
+        assert!(
+            payload["error"]["details"][0]
+                .as_str()
+                .unwrap_or_default()
+                .contains("not supported"),
+            "上游原话要保留在详情里：{body}"
+        );
+    }
+
+    #[test]
+    fn alias_and_unknown_model_are_handled_without_guessing() {
+        let harness = images_harness(image_ok("QUJD"));
+        let token = harness.token.expose().to_owned();
+
+        // alias 也认（按目录 alias 调用的客户端）。
+        let (status, _) = harness.post(
+            "images/generations",
+            Some(&token),
+            &json!({"model": harness.alias, "prompt": "猫"}),
+        );
+        assert_eq!(status, 200);
+
+        // 不认识的名字必须拒绝，绝不回落。
+        let (status, body) = harness.post(
+            "images/generations",
+            Some(&token),
+            &json!({"model": "gpt-image-999", "prompt": "猫"}),
+        );
+        assert_eq!(status, 404);
+        let payload: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(payload["error"]["code"], "ROUTE_MISMATCH");
+    }
+
+    #[test]
+    fn images_require_the_gateway_token() {
+        let harness = images_harness(image_ok("QUJD"));
+        let (status, _) = harness.post(
+            "images/generations",
+            None,
+            &json!({"model": "vendor/Upstream-Model", "prompt": "猫"}),
+        );
+        assert_eq!(status, 401);
+        assert_eq!(harness.upstream.requests(), 0, "认证失败绝不能触达上游");
+    }
+
+    #[test]
+    fn edits_are_forwarded_to_the_edits_endpoint() {
+        let harness = images_harness(image_ok("QUJD"));
+        let token = harness.token.expose().to_owned();
+        let (status, _) = harness.post(
+            "images/edits",
+            Some(&token),
+            &json!({"model": "vendor/Upstream-Model", "prompt": "换成夜晚",
+                    "images": [{"image_url": "data:image/png;base64,QUJD"}]}),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(harness.upstream.last_body()["prompt"], "换成夜晚");
+    }
+}
+
+/// 上下文超限的定向自救：解析上游 400 正文、缩输出预算重发一次、救不回时单列错误。
+/// 背景（2026-10-06 实测）：deepseek 1M 线程单轮输入暴涨 14 万 token，下一请求带着
+/// 38,400 的刚性输出预留撞窗（超 1 个 token）；宿主对这类 400 既不重试也不压缩，任务死锁。
+mod context_overflow {
+    use super::*;
+
+    /// 上游报「窗口 20000、本次输入 15000」：扣掉裕度后输出预算只剩 2952，比
+    /// 刚性预留的 8192 小。重发一次就该成功——宿主全程只见 200，重发的请求体
+    /// 必须带着缩过的输出上限，首发保持原值。
+    #[test]
+    fn context_overflow_is_rescued_with_a_reduced_output_budget() {
+        let overflow_body = json!({"error": {"message": "This model's maximum context length is 20000 tokens. However, you requested 8192 output tokens and your prompt contains at least 15000 input tokens, for a total of at least 23192 tokens. Please reduce the length of the input prompt or the number of requested output tokens."}})
+            .to_string();
+        let harness = Harness::start_with(
+            CHAT_COMPLETIONS_V1,
+            MockReply::Scripted(vec![
+                MockReply::Status {
+                    code: 400,
+                    body: overflow_body,
+                },
+                MockReply::Sse(CHAT_SSE),
+            ]),
+            Protocol::ChatCompletions,
+            TestPolicy {
+                // 刚性输出预留来自路由上声明的输出上限，这里必须声明。
+                output_limit: Some(8_192),
+                ..TestPolicy::default()
+            },
+        );
+        let token = harness.token.expose().to_owned();
+        // 请求不带输出上限：适配器会注入声明的 8192，这正是刚性预留的来源。
+        let mut request = request_body(&harness.alias);
+        request.as_object_mut().unwrap().remove("max_output_tokens");
+
+        let (status, text) = harness.post("responses", Some(&token), &request);
+
+        assert_eq!(status, 200, "{text}");
+        assert!(text.contains("你好"), "宿主要拿到完整 SSE 转发：{text}");
+        assert_eq!(harness.upstream.requests(), 2);
+        assert_eq!(harness.upstream.nth_body(0)["max_tokens"], 8192);
+        assert_eq!(harness.upstream.nth_body(1)["max_tokens"], 2952);
+    }
+
+    /// 扣掉裕度后放不下值得发的输出：不重试，错误单列成 contextOverflow，
+    /// 让用户知道该开新线程（或临时调低输出上限去压缩），而不是原地重发。
+    #[test]
+    fn context_overflow_without_headroom_is_named_not_generic() {
+        let overflow_body = json!({"error": {"message": "This model's maximum context length is 20000 tokens. However, you requested 8192 output tokens and your prompt contains at least 19500 input tokens, for a total of at least 27692 tokens."}})
+            .to_string();
+        let harness = Harness::start(
+            CHAT_COMPLETIONS_V1,
+            MockReply::Status {
+                code: 400,
+                body: overflow_body,
+            },
+            Protocol::ChatCompletions,
+        );
+        let token = harness.token.expose().to_owned();
+
+        let (status, text) = harness.post("responses", Some(&token), &request_body(&harness.alias));
+
+        assert_eq!(status, 400);
+        let payload: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(payload["error"]["message_key"], "error.contextOverflow");
+        assert!(
+            payload["error"]["details"][0]
+                .as_str()
+                .unwrap_or_default()
+                .contains("19500"),
+            "上游报的输入计数要保留在详情里：{text}"
+        );
+        assert_eq!(harness.upstream.requests(), 1, "没有余量时绝不盲目重试");
+    }
+
+    /// 不相干的 400 保持通用归类，自救逻辑不许误伤既有语义。
+    #[test]
+    fn unrelated_rejection_keeps_the_generic_classification() {
+        let harness = Harness::start(
+            CHAT_COMPLETIONS_V1,
+            MockReply::Status {
+                code: 400,
+                body: json!({"error": {"message": "Invalid stream parameter"}}).to_string(),
+            },
+            Protocol::ChatCompletions,
+        );
+        let token = harness.token.expose().to_owned();
+
+        let (status, text) = harness.post("responses", Some(&token), &request_body(&harness.alias));
+
+        assert_eq!(status, 400);
+        let payload: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(payload["error"]["message_key"], "error.upstreamRejected");
+        assert_eq!(harness.upstream.requests(), 1);
     }
 }

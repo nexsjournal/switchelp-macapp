@@ -9,18 +9,15 @@ const inputLabelKeys: Record<InputKind, string> = {
 };
 export const inputKinds = Object.keys(inputLabelKeys) as InputKind[];
 
+/**
+ * 视频 / PDF 的声明语义（2026-10-06 起可勾选，见 docs/design/04）：
+ * 勾选记录的是「上游模型支持这种输入」。宿主（Codex）协议发不出来，所以它们
+ * 永远不进 Codex 目录的原生能力；作用在网关——上游是 Responses 协议时按声明
+ * 放行透传，chat 协议上游没有携带通路（声明了请求也会被显式拒绝）。
+ */
+
 export function inputLabel(kind: InputKind): string {
   return t(inputLabelKeys[kind]);
-}
-
-/**
- * 当前链路不能原生发送的输入（需求 R22：可见但不可启用）。
- * 这是接入方式的硬边界，不随声明变化——核心层本来就会把它们排除出宿主能力。
- */
-const BLOCKED_INPUT_KINDS: ReadonlySet<InputKind> = new Set(['pdf', 'video']);
-
-export function inputBlocked(kind: InputKind): boolean {
-  return BLOCKED_INPUT_KINDS.has(kind);
 }
 
 /** 模型在 Codex 宿主侧的状态文案；供应商弹窗与模型目录共用一份。 */
@@ -277,8 +274,8 @@ export function policyFromForm(data: FormData, previous = defaultPolicy()): Mode
       budgetTokens: support === 'supported' && control === 'budget' ? parseTokens(String(data.get('budgetTokens') ?? '')) : null,
       mappingId: null },
     inputs: previous.inputs.map(input => ({ ...input,
-      // 链路不支持的输入不渲染 select，表单里没有这个字段；保持原值而不是读出 null。
-      upstream: inputBlocked(input.kind) || !data.has(`input-${input.kind}`)
+      // 界面上没渲染的输入类型没有表单字段；保持原值而不是读出 null。
+      upstream: !data.has(`input-${input.kind}`)
         ? input.upstream
         : data.get(`input-${input.kind}`) as Support })),
     tools: { ...previous.tools, functionTools: data.get('functionTools') as Support, parallelTools: data.get('parallelTools') as Support,

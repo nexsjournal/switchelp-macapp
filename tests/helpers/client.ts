@@ -112,6 +112,9 @@ export function testClient(overrides: Partial<DesktopClient> = {}): DesktopClien
     contentStatus: vi.fn().mockResolvedValue({ lastOkAt: null, nextFetchAt: 0, scheduleHours: [6, 18], failing: [], totalItems: 0 }),
     contentGithubTokenStatus: vi.fn().mockResolvedValue(false),
     setContentGithubToken: failing(),
+    // 默认失败：免费额度页的自动检查会吞掉失败（静默回落随包清单），要测在线
+    // 刷新的用例自己 mock 一个返回值——默认假装成功反而会掩盖未实现流程。
+    fetchFreeTierCatalog: failing(),
     // 默认「本机没有任何会话记录」：这是空态用例的前提，也免得每处渲染都要造一份数据。
     usageReport: vi.fn().mockResolvedValue(emptyUsageReport()),
     ...overrides,

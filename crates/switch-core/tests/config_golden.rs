@@ -23,6 +23,10 @@ fn gateway_provider() -> ManagedProvider {
     ManagedProvider {
         base_url: "http://127.0.0.1:18765/i/local-main/c/rev_0007/v1".to_owned(),
         wire_api: "responses".to_owned(),
+        http_headers: vec![(
+            config::ACTOR_AUTHORIZATION_HEADER.to_owned(),
+            config::ACTOR_AUTHORIZATION_VALUE.to_owned(),
+        )],
         auth: ProviderAuth::Command {
             command: "/Applications/Switchelp.app/Contents/MacOS/gptswitch-auth".to_owned(),
             timeout_ms: 5000,
@@ -425,6 +429,7 @@ fn rejects_upstream_key_as_env_key_projection() {
     config.provider = Some(ManagedProvider {
         base_url: "http://127.0.0.1:18765/v1".to_owned(),
         wire_api: "responses".to_owned(),
+        http_headers: Vec::new(),
         auth: ProviderAuth::EnvKey {
             env_key: "OPENAI_API_KEY=sk-upstream-canary".to_owned(),
         },

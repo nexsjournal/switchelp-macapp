@@ -18,6 +18,9 @@ percent-encoding = "2"
 rusqlite = { version = "0.40", features = ["bundled"] }
 zeroize = "1"
 ureq = "3.4.2"
+# 图像接口把上游的 url 形式图片转成宿主要求的 b64_json；base64 本就在依赖图里
+# （经 ureq / rustls 等），加成直接依赖，不新增下载面。
+base64 = "0.22"
 # 订阅源解析（RSS/Atom）。本就在依赖图里（经 plist → tauri），不新增下载面。
 quick-xml = "0.42"
 # 整仓下载（codeload 的 tar.gz）要 gzip 解压 + tar 解析：两个包本来就在依赖图里

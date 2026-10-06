@@ -32,13 +32,17 @@ test('是独立页面：分组标题、滚动区里的字段，页尾只有取�
   expect(screen.getByText(/保存后到「配置」页生成差异并应用/)).toBeInTheDocument();
 });
 
-test('输入类型与模型能力是勾选单元格：文本锁定，PDF 与视频不可启用', () => {
+test('输入类型与模型能力是勾选单元格：文本锁定，视频与 PDF 可声明', () => {
   renderEditor();
 
   expect(screen.getByRole('checkbox', { name: '文本' })).toBeDisabled();
   expect(screen.getByRole('checkbox', { name: '文本' })).toBeChecked();
-  expect(screen.getByRole('checkbox', { name: 'PDF' })).toBeDisabled();
-  expect(screen.getByRole('checkbox', { name: '视频' })).toBeDisabled();
+  // 视频 / PDF 宿主发不出来，但声明的是上游模型的能力（2026-10-06 起可勾选）：
+  // 说明写在单元格的 title 上，讲清「声明进网关、进不了 Codex 目录」。
+  expect(screen.getByRole('checkbox', { name: 'PDF' })).toBeEnabled();
+  expect(screen.getByRole('checkbox', { name: '视频' })).toBeEnabled();
+  // 两格共用同一条声明语义说明：讲清「声明进网关、进不了 Codex 目录」。
+  expect(screen.getAllByTitle(/声明上游模型是否支持/)).toHaveLength(2);
   expect(screen.getByRole('checkbox', { name: '图片' })).toBeEnabled();
   // 三态下拉没有了：勾＝支持、不勾＝不支持，没点过的项保存时原样保留。
   expect(screen.queryByRole('combobox', { name: '文本' })).not.toBeInTheDocument();
@@ -47,6 +51,18 @@ test('输入类型与模型能力是勾选单元格：文本锁定，PDF 与视�
   // 内置工具这一项决定要不要把 `web_search` 转发给上游；说明写在单元格的 title 上。
   expect(screen.getByRole('checkbox', { name: '上游内置工具' })).not.toBeChecked();
   expect(screen.getByTitle(/第三方网关收到它会整条请求报 400/)).toBeInTheDocument();
+});
+
+test('勾上视频会随保存写进模型策略，供网关按声明透传', async () => {
+  const user = userEvent.setup();
+  const saveModel = vi.fn().mockResolvedValue(model);
+  renderEditor({ saveModel });
+  await user.click(screen.getByRole('checkbox', { name: '视频' }));
+  await user.click(screen.getByRole('button', { name: '保存' }));
+
+  const draft = saveModel.mock.calls[0]![0];
+  const video = draft.policy.inputs.find((entry: { kind: string }) => entry.kind === 'video');
+  expect(video?.upstream).toBe('supported');
 });
 
 test('内置工具未声明时点一下就是「支持」', async () => {

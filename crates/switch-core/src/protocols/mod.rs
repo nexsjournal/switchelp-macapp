@@ -46,6 +46,22 @@ pub struct PreparedRequest {
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
     pub losses: Vec<AdaptationLoss>,
+    /// 命名空间工具被折叠成单个函数名时的映射（chat 适配器用；透传为空）。
+    ///
+    /// 回程要把上游返回的函数名还原成 `(namespace, name)` —— 宿主的工具注册表
+    /// 按这两段查找实现，只给平名字会找不到。
+    pub tool_names: Vec<ToolNameMapping>,
+}
+
+/// 一个被折叠的命名空间工具：上游看到的函数名 ↔ 宿主的 (namespace, name)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolNameMapping {
+    /// 发送给上游的函数名。
+    pub flat: String,
+    /// 宿主的命名空间（如 `image_gen`、`mcp__codex_apps__gmail`）。
+    pub namespace: String,
+    /// 命名空间内的工具名（如 `imagegen`）。
+    pub name: String,
 }
 
 /// 一次请求要执行的模型策略。全部来自发布时冻结的路由快照，
@@ -84,7 +100,11 @@ impl RouteLimits {
     }
 }
 
-/// 请求里实际用到的输入模态。只认宿主会真的发送内容的那几种。
+/// 请求里实际用到的输入模态。
+///
+/// image / audio 是宿主（Codex）真的会发送的；video / pdf 宿主发不出来，但
+/// 模态闸仍要认得它们——Responses 协议的客户端（不只有 Codex）发来的这类内容
+/// 要按模型声明决定放行还是拒绝，而不是隐身穿过闸门。
 pub fn requested_modalities(request: &serde_json::Value) -> Vec<&'static str> {
     let mut found = Vec::new();
     let Some(items) = request.get("input").and_then(|input| input.as_array()) else {
@@ -98,7 +118,8 @@ pub fn requested_modalities(request: &serde_json::Value) -> Vec<&'static str> {
             let modality = match part.get("type").and_then(|kind| kind.as_str()) {
                 Some("input_image") | Some("image_url") => "image",
                 Some("input_audio") | Some("audio") => "audio",
-                Some("input_file") | Some("input_pdf") => "pdf",
+                Some("input_file") | Some("input_pdf") | Some("file") => "pdf",
+                Some("input_video") | Some("video_url") | Some("video") => "video",
                 _ => continue,
             };
             if !found.contains(&modality) {
@@ -167,6 +188,25 @@ mod tests {
         assert!(requested_modalities(&json!({"input": []})).is_empty());
         assert!(requested_modalities(&json!({})).is_empty());
         assert!(requested_modalities(&json!({"input": [{"type": "message"}]})).is_empty());
+        // 宿主发不出来、但 Responses 客户端可能发来的类型也要认得：
+        // 模态闸靠它决定「声明的透传、未声明的拒绝」，不能让视频隐身穿闸。
+        let video_and_pdf = json!({"input": [
+            {"type": "message", "role": "user", "content": [
+                {"type": "input_text", "text": "看这段视频"},
+                {"type": "input_video", "video_url": "https://example.com/a.mp4"}
+            ]},
+            {"type": "message", "role": "user", "content": [
+                {"type": "file", "file": {"filename": "a.pdf", "file_data": "data:application/pdf;base64,AAAA"}}
+            ]}
+        ]});
+        assert_eq!(requested_modalities(&video_and_pdf), vec!["video", "pdf"]);
+        let url_dialects = json!({"input": [
+            {"type": "message", "role": "user", "content": [
+                {"type": "video_url", "video_url": {"url": "https://example.com/b.mp4"}},
+                {"type": "input_pdf", "pdf": {}}
+            ]}
+        ]});
+        assert_eq!(requested_modalities(&url_dialects), vec!["video", "pdf"]);
     }
 
     #[test]

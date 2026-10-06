@@ -25,6 +25,13 @@ import type { FreeTierCatalog } from './freeTierPolicy';
  * 混元 Lite、硅基流动赠额查无出处）、「引用的模型已下架」3 条
  * （千帆 ERNIE-3.5、智谱 GLM-4.5-Flash、混元 Lite 不在免费名单里）、
  * 「链接失效」3 条（Fireworks /account 404、NVIDIA 落地页 404、Google 学生页落登录墙）。
+ *
+ * 在线刷新（2026-10-06 落地）：这份清单有一个导出件 `freeTierData.json`，由守卫测试
+ * 保证与这里逐字节一致（改了清单没重新导出，测试直接红）。重新导出：
+ *   FREE_TIER_EXPORT_UPDATE=1 pnpm vitest run src/features/content/freeTierData.export.test.ts
+ * 导出件提交进仓库后，应用打开免费额度页或点「检查更新」会从仓库 raw main 拉它
+ * （地址在 src-tauri 的 FREE_TIER_CATALOG_URL），界面只认 version 更新的一版——
+ * 所以**改清单必须连 version 一起抬**，否则已装的应用收不到这次更新。
  */
 export const FREE_TIER_CATALOG: FreeTierCatalog = {
   version: 3,

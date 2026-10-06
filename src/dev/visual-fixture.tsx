@@ -607,6 +607,10 @@ const client: DesktopClient = {
   }),
   contentGithubTokenStatus: async () => false,
   setContentGithubToken: async token => Boolean(token),
+  // 夹具不做在线刷新：自动检查失败是静默的，页头按钮留着给版面审计量位置。
+  fetchFreeTierCatalog: async () => {
+    throw new Error('fixture: 没有在线清单');
+  },
   // 范围原样透传：夹具以前把范围钳成 7/30/90，于是「近一年」只能画出一个月的格子（走查会误判）。
   usageReport: async (days: number) => usageFixture(days),
 };
