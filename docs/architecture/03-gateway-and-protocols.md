@@ -15,10 +15,14 @@
 | `POST /v1/responses` | 主路径；认证、校验、路由、响应/流式转发 |
 | `GET /v1/models` | 返回该实例已发布模型，不触发上游扫描 |
 | `POST /v1/responses/compact` | 只在适配器明确支持时代理；否则结构化 unsupported，绝不伪造成功摘要 |
+| `POST /v1/images/generations` | Codex 内置 `image_gen` 工具的生成端点。`model` 是**上游模型名**（当前宿主写死 `gpt-image-2`），先按 alias、再按上游 ID 在目录里精确匹配；命中后转发到该模型所属供应商的 `/v1/images/generations`，响应做最小归一化（补齐 `created`、只给 `url` 时取回并转 `b64_json`，宿主客户端两者缺一都会解码失败）。等待预算按生成时长放宽（≥300 s），与推理的首事件预算分开 |
+| `POST /v1/images/edits` | 同上的编辑端点，请求体（含参考图）原样转发 |
 | WebSocket Responses | 独立协商能力；首版基线为 HTTP SSE，不能声明已支持 WebSocket |
 | 内部健康检查 | 通过 IPC；若需要 HTTP，仅返回最小就绪信号且需认证 |
 
 默认只绑定 `127.0.0.1`。不监听 `0.0.0.0`，不增加“远程控制”端口。桌面管理使用 IPC，不共享 inference token 的权限。
+
+图像端点为什么存在：Codex 0.159 的内置图像生成不走对话链路，而是由宿主扩展直接 `POST {provider}/images/generations`；供应商配置必须带 `x-openai-actor-authorization` 能力信号头（见[配置生命周期](02-configuration-lifecycle.md) 第 3 节），对话模型还必须声明 `image` 输入模态，否则宿主根本不注册这个工具。2026-10-01 在本机实测：真实 codex 二进制 + 运行中的网关，模型成功发起 `image_gen` 调用并打到上游（当时的失败停在上游账号分组权限，`403 Image generation is not enabled for this group`，与链路无关）。
 
 ## 3. 协议适配顺序
 
@@ -30,13 +34,20 @@
 
 将 Codex 的 Responses 输入转换为 messages；工具声明映射 function tools；将流中 tool_call id、名称、分段 arguments 累积为正确的 Responses 事件。工具执行仍由 Codex 完成，网关不执行 shell。
 
+### 上游 400 的定向自救：上下文超限
+
+宿主对上游 400 既不重试也不压缩（0.160 二进制里没有这类 400 的分类），任务会死在原地。而网关在请求里注入了刚性输出预留（声明的输出上限），线程贴边时这恰恰是把「本可以成功」变成致命 400 的那一根稻草——2026-10-06 实测：deepseek 1M 线程单轮输入暴涨 14 万 token，下一请求输入 1,010,177 + 输出 38,400，超窗 1 个 token，任务死锁。
+
+所以网关对 400 做一次定向自救：上游这类错误正文自带真实窗口与本次输入计数（OpenAI/LiteLLM 同宗模板），两者相减扣除 2,048 裕度就是这次真正放得下的输出预算；**只缩不涨、只重发一次、请求体没有输出上限字段时不凭空注入**，救不回就走归类。救活的那次请求会把 usage 推过宿主的窗口触发线，下一轮宿主自己的压缩就会接手。救不回时错误单列为 `error.contextOverflow`（不再是泛化的 `error.upstreamRejected`），建议直接指向「新开线程 / 临时调低输出上限去压缩」；重发成功记 `result.outputBudgetRescued` 诊断事件。
+
 重要兼容表：
 
 | 项 | 处理要求 |
 | --- | --- |
 | system / developer 指令 | 按适配器能力保留；降级合并必须标记 degraded |
 | developer 角色（chat 上游） | chat 没有这个角色：`input` 里的 `developer` 消息与顶层 `instructions` 合成**一条**开头的 system 消息。原样转发会被只认 system/user/assistant/tool 的上游 400（moonshot 实测 `role 'developer' is not allowed`，宿主侧只看到 `error.upstreamRejected`）；拆成两条 system 又违反「system 必须在首位」。合成本身不记损失，只有该消息原本排在对话之后、位置被提前时才记 `input.developer` |
-| 多轮 tool call 与 output | 保持 call_id 对应、顺序和角色，不拼成普通聊天文字 |
+| 多轮 tool call 与 output | 保持 call_id 对应、顺序和角色，不拼成普通聊天文字。工具输出里的图片条目（内置图像生成会回传生成结果）没有 chat 表达：只取文本、图片记损失，绝不把 base64 原样塞进上下文 |
+| 命名空间工具（`{"type":"namespace"}`） | 宿主把扩展工具包在命名空间里下发（如 `image_gen` 里的 `imagegen`）；chat 协议没有这一层，过去整包被丢、模型根本看不到。现在折叠成单个函数名（`image_gen__imagegen`，默认 `functions` 命名空间不加前缀）逐个发送，并把折叠名→(namespace, name) 的映射带进流式状态机：回程的 `function_call` 条目还原 `name` 与 `namespace`，宿主注册表按两段查找实现；历史回放按同一规则重新折叠。命名空间里的 custom 工具仍记损失丢弃 |
 | 工具调用在真实上游的验收 | **2026-09-24 通过**（本机、真实 chat/completions 上游）：拿包内的 codex 二进制对运行中的网关卡发一次需要工具的任务——`CODEX_HOME=<临时 home> codex exec --skip-git-repo-check --sandbox workspace-write "用 shell 执行 echo tool-ok-42，然后只回它打印出来的那一行"`——宿主发起 `exec` 工具调用、网关把流里的 `tool_calls` 翻成 Responses 的 function call 事件、宿主执行、`tool_result` 折回 messages、模型续答并给出最终答案，全程没有 400。因此适配器**不再**在应用前的差异里标「实验状态」：那条警告断言的前提（工具调用没有在真实上游上验证过）已经不成立 |
 | parallel tool calls | 仅在全链路通过测试时声明；否则拒绝或使用预先公开策略 |
 | custom / freeform 工具 | 不是普通 function；有专用映射才允许，尤其 apply_patch |

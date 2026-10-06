@@ -495,6 +495,7 @@ fn main() {
             commands::content_status,
             commands::content_github_token_status,
             commands::content_set_github_token,
+            commands::free_tier_remote_catalog,
             commands::usage_report,
         ])
         .run(tauri::generate_context!())

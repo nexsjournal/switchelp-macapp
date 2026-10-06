@@ -1769,3 +1769,49 @@ pub async fn content_set_github_token(
     })
     .await
 }
+
+/// 免费额度在线清单的地址：本仓库 main 分支上的随包清单导出件
+/// （`src/features/content/freeTierData.json`，由导出守卫测试保证与随包 TS 逐字节一致）。
+/// 改清单后要重新导出并提交，见 `freeTierData.export.test.ts` 顶部的说明。
+const FREE_TIER_CATALOG_URL: &str = "https://raw.githubusercontent.com/nexsjournal/switchelp-macapp/main/src/features/content/freeTierData.json";
+
+/// 取一份在线免费额度清单的原文。地址由桌面壳固定，界面拿到的只是 JSON 文本：
+/// 解析、形状校验与版本取舍都在界面侧做（version 单调递增，只认更新的一版），
+/// 坏数据整份丢弃回落随包清单——这里不替界面做决定。
+fn free_tier_remote_catalog_body() -> Result<String, CoreError> {
+    use switch_core::content::{FeedFetcher, HttpFeedFetcher, DEFAULT_USER_AGENT};
+    let response = HttpFeedFetcher::new()
+        .get(FREE_TIER_CATALOG_URL, None, None, DEFAULT_USER_AGENT, None)
+        .map_err(|error| {
+            CoreError::new(ErrorCode::Internal, "error.freeTierRemote").with_detail(format!(
+                "拉取 {FREE_TIER_CATALOG_URL} 失败：{}",
+                error
+                    .safe_details
+                    .first()
+                    .map(String::as_str)
+                    .unwrap_or("未知错误")
+            ))
+        })?;
+    if response.status != 200 {
+        return Err(
+            CoreError::new(ErrorCode::Internal, "error.freeTierRemote").with_detail(format!(
+                "在线清单返回了 HTTP {}（预期 200）",
+                response.status
+            )),
+        );
+    }
+    if response.body.trim().is_empty() {
+        return Err(CoreError::new(ErrorCode::Internal, "error.freeTierRemote")
+            .with_detail("在线清单返回了空响应体".to_owned()));
+    }
+    Ok(response.body)
+}
+
+/// 抓取在线免费额度清单（免费额度页「检查更新」）。失败时界面回落随包清单。
+#[tauri::command]
+pub async fn free_tier_remote_catalog(window: WebviewWindow) -> Result<String, CoreError> {
+    authorize(&window)?;
+    tauri::async_runtime::spawn_blocking(free_tier_remote_catalog_body)
+        .await
+        .map_err(|_| CoreError::internal("后台操作异常退出"))?
+}

@@ -8,7 +8,7 @@ import { FieldHelp } from '@/components/FieldHelp';
 import { Switch } from '@/components/Switch';
 import { LevelChips } from './LevelChips';
 import {
-  DISCOVERY_DEFAULT_LIMITS, EDITABLE_INPUT_KINDS, capabilityState, defaultPolicy, inputBlocked, inputLabel,
+  DISCOVERY_DEFAULT_LIMITS, EDITABLE_INPUT_KINDS, capabilityState, defaultPolicy, inputLabel,
   parseTokens, policyFromCapability, reasoningKeptKey, reasoningLevelPresets, type CapabilityState,
 } from './policy';
 import styles from './ModelFormDialog.module.css';
@@ -170,10 +170,11 @@ export function ModelFormDialog({ client, providerId, model, onSaved, onClose }:
             <CheckCells>{EDITABLE_INPUT_KINDS.map(kind => <CheckCell key={kind}
               label={inputLabel(kind)}
               // 文本是链路底线：Codex 只会发它，所以永远勾着且不可取消。
-              hint={kind === 'text' ? t('editor.textAlways') : inputBlocked(kind) ? t('editor.inputBlockedNote') : t('editor.inputsHint')}
+              hint={kind === 'text' ? t('editor.textAlways')
+                : kind === 'video' || kind === 'pdf' ? t('editor.videoPdfNote') : t('editor.inputsHint')}
               checked={ability.inputs[kind] === 'supported'}
               locked={kind === 'text'}
-              disabled={kind === 'text' || inputBlocked(kind)}
+              disabled={kind === 'text'}
               onChange={next => setAbility(current => ({ ...current, inputs: { ...current.inputs, [kind]: next ? 'supported' : 'unsupported' } }))} />)}
             </CheckCells>
 

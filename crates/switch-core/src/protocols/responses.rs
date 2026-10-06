@@ -165,6 +165,8 @@ pub fn prepare(
         headers: vec![("content-type".to_owned(), "application/json".to_owned())],
         body: bytes,
         losses,
+        // 透传不改写工具名，回程也不需要还原命名空间。
+        tool_names: Vec::new(),
     })
 }
 

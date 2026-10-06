@@ -89,6 +89,9 @@ pub struct RequestRoute {
     pub reasoning_efforts: Vec<String>,
     /// 声明可由宿主原生发送的模态。
     pub native_modalities: Vec<String>,
+    /// 上游声明支持、但宿主协议发不出来的模态（视频 / PDF）；模态闸按上游协议使用。
+    #[serde(default)]
+    pub passthrough_modalities: Vec<String>,
     /// 该模型是否声明了上游自己执行的内置工具（`web_search` 等）。未声明即不转发。
     #[serde(default)]
     pub builtin_tools: Support,
@@ -126,6 +129,7 @@ impl RequestRoute {
             output_limit: entry.output_limit,
             reasoning_efforts: entry.reasoning_efforts.clone(),
             native_modalities: entry.native_modalities.clone(),
+            passthrough_modalities: entry.passthrough_modalities.clone(),
             builtin_tools: entry.builtin_tools,
         }
     }
@@ -251,6 +255,59 @@ impl GatewayRouter {
             .find(|entry| entry.alias == alias)
             .ok_or_else(|| AdmissionError::UnknownAlias {
                 alias: alias.to_owned(),
+                catalog_revision: catalog_revision.to_owned(),
+            })?;
+
+        Ok(Admission {
+            route: RequestRoute::from_entry(
+                snapshot.instance_id.clone(),
+                &snapshot.catalog_revision,
+                snapshot.revision_id.clone(),
+                entry,
+            ),
+            snapshot_revision: snapshot.revision_id.clone(),
+        })
+    }
+
+    /// 图像接口的模型解析：先按 alias 精确匹配，再按上游模型 ID 精确匹配。
+    ///
+    /// Codex 内置图像工具（`image_gen`）不走目录 alias——它写死发送上游模型名
+    /// （当前版本是 `gpt-image-2`），所以这条接口必须能按上游 ID 命中。两种都
+    /// 找不到时按 `UnknownAlias` 拒绝：绝不猜测、不按名字模糊匹配。
+    /// 多个供应商提供同名上游模型时取快照中的第一个（发布顺序固定，结果确定）。
+    pub fn admission_for_images(
+        &self,
+        catalog_revision: &str,
+        model: &str,
+        expected_instance: &InstanceId,
+    ) -> Result<Admission, AdmissionError> {
+        let snapshot = {
+            let snapshots = self.snapshots.lock().expect("锁未被污染");
+            snapshots.get(catalog_revision).cloned()
+        };
+        let snapshot = snapshot.ok_or_else(|| AdmissionError::UnknownPrefix {
+            catalog_revision: catalog_revision.to_owned(),
+        })?;
+
+        if &snapshot.instance_id != expected_instance {
+            return Err(AdmissionError::InstanceMismatch {
+                expected: expected_instance.as_str().to_owned(),
+                actual: snapshot.instance_id.as_str().to_owned(),
+            });
+        }
+
+        let entry = snapshot
+            .routes
+            .iter()
+            .find(|entry| entry.alias == model)
+            .or_else(|| {
+                snapshot
+                    .routes
+                    .iter()
+                    .find(|entry| entry.upstream_id == model)
+            })
+            .ok_or_else(|| AdmissionError::UnknownAlias {
+                alias: model.to_owned(),
                 catalog_revision: catalog_revision.to_owned(),
             })?;
 
@@ -393,6 +450,7 @@ mod tests {
             output_limit: None,
             reasoning_efforts: Vec::new(),
             native_modalities: Vec::new(),
+            passthrough_modalities: Vec::new(),
             builtin_tools: Support::Unknown,
         }
     }

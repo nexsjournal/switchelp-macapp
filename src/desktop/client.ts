@@ -371,6 +371,13 @@ export interface DesktopClient {
   setContentGithubToken(token: string | null): Promise<boolean>;
 
   /**
+   * 抓取在线免费额度清单的**原文**（免费额度页「检查更新」）。
+   * 地址由桌面壳固定指向本仓库的清单导出件；返回未解析的 JSON 文本，
+   * 解析、形状校验与版本取舍都在界面侧做，坏数据整份丢弃回落随包清单。
+   */
+  fetchFreeTierCatalog(): Promise<string>;
+
+  /**
    * 用量统计。只读扫描本机 Codex 会话记录，不联网、不写任何文件。
    * `days` 收 7 / 30 / 90，非法值由核心回落到 30。
    */

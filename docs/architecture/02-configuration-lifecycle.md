@@ -37,6 +37,9 @@ name = "Switchelp"
 base_url = "http://127.0.0.1:18765/i/local-main/c/rev_0007/v1"
 wire_api = "responses"
 
+[model_providers.gptswitch.http_headers]
+x-openai-actor-authorization = "switchelp"
+
 [model_providers.gptswitch.auth]
 command = "/absolute/path/gptswitch-auth"
 args = ["--instance", "local-main"]
@@ -45,6 +48,8 @@ refresh_interval_ms = 300000
 ```
 
 示例 18765 不是强制端口。Windows 使用 TOML 正确转义的绝对路径。auth helper 只输出本机网关访问令牌，不输出供应商 Key。旧宿主不支持 command auth 时，受管启动使用 `env_key` 注入本机令牌；若用户坚持非受管启动且无法安全提供认证，显示“不支持该启动方式”，不默默把上游 Key 写入 TOML。官方说明指出 command auth 与其他认证字段互斥。[高级配置](https://developers.openai.com/codex/config-advanced/)
+
+`http_headers` 里的 `x-openai-actor-authorization` 是**能力信号**而不是凭据：Codex 0.159 的内置图像生成扩展只对 OpenAI 自家供应商、或带本头的自定义供应商注册。本工具在网关侧真的实现了 `/v1/images/*`（见[网关与协议](03-gateway-and-protocols.md) 第 2 节），所以如实声明；缺它时模型根本看不到 `image_gen` 工具。
 
 路径中的实例和目录版本由核心生成并与令牌权限匹配，不能由请求中的模型名覆盖。Key/兼容请求策略的热更新不改变该目录路径；目录能力变化才创建新路径并要求宿主重载。已知旧路径在仍有客户端/续接引用时保留，过期后返回明确的版本失效错误，绝不静默转向最新版本。
 

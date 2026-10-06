@@ -142,5 +142,6 @@ export const desktopClient: DesktopClient = {
   contentStatus: () => call<ContentStatus>('content_status'),
   contentGithubTokenStatus: () => call<boolean>('content_github_token_status'),
   setContentGithubToken: token => call<boolean>('content_set_github_token', { token }),
+  fetchFreeTierCatalog: () => call<string>('free_tier_remote_catalog'),
   usageReport: days => call<UsageReport>('usage_report', { days }),
 };

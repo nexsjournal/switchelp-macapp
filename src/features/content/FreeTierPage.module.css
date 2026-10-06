@@ -7,6 +7,11 @@
 .head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .disclaimer { margin: 0; max-width: 640px; font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-secondary); }
 .version { font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: var(--line-height-caption); color: var(--text-muted); }
+/* 版本行 + 检查更新按钮：inline-flex 的基线取自版本文字，与左侧声明的首行对齐；
+   按钮样式与卡片操作按钮同一档（compact 高度 + caption 字号）。 */
+.versionBox { display: inline-flex; align-items: center; gap: 10px; }
+.refresh { height: var(--control-height-compact); font-size: var(--font-size-caption); line-height: var(--line-height-caption); padding: 0 10px; }
+.refresh:disabled { opacity: .6; cursor: default; }
 
 /* 卡片网格：grid 只拉伸 li 本身，里面的 article 要自己撑满高度（两层缺一不可）。 */
 .grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }

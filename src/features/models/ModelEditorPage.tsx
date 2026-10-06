@@ -8,7 +8,7 @@ import { FieldHelp } from '@/components/FieldHelp';
 import { Switch } from '@/components/Switch';
 import { LevelChips } from './LevelChips';
 import {
-  EDITABLE_INPUT_KINDS, capabilityState, inputBlocked, inputLabel, parseTokens,
+  EDITABLE_INPUT_KINDS, capabilityState, inputLabel, parseTokens,
   policyFromCapability, reasoningKeptKey, reasoningLevelPresets, recommendedPolicy, type CapabilityState,
 } from './policy';
 import styles from './ModelEditorPage.module.css';
@@ -153,10 +153,11 @@ export function ModelEditorPage({ client, providers, model, onSaved, onCancel, o
         <h3 className="form-section">{t('editor.inputsTitle')}</h3>
         <CheckCells>{EDITABLE_INPUT_KINDS.map(kind => <CheckCell key={kind}
           label={inputLabel(kind)}
-          hint={kind === 'text' ? t('editor.textAlways') : inputBlocked(kind) ? t('editor.inputBlockedNote') : t('editor.inputsHint')}
+          hint={kind === 'text' ? t('editor.textAlways')
+            : kind === 'video' || kind === 'pdf' ? t('editor.videoPdfNote') : t('editor.inputsHint')}
           checked={ability.inputs[kind] === 'supported'}
           locked={kind === 'text'}
-          disabled={kind === 'text' || inputBlocked(kind)}
+          disabled={kind === 'text'}
           onChange={next => { setAbility(current => ({ ...current, inputs: { ...current.inputs, [kind]: next ? 'supported' : 'unsupported' } })); updateDirty(true); }} />)}
         </CheckCells>
         <p className="field-hint">{t('editor.inputsHint')}</p>

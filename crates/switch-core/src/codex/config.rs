@@ -19,6 +19,15 @@ pub const PROVIDER_NAME: &str = "Switchelp";
 /// helper 安装时必须用同一个值，否则双方对不上，宿主拿不到令牌。
 pub const AUTH_HELPER_INSTANCE: &str = "local-main";
 
+/// 宿主判定「该供应商可承载内置图像生成」的信号头。
+///
+/// Codex 0.159 的内置 `image_gen` 扩展只对 OpenAI 自家供应商、或带本头的自定义
+/// 供应商注册；缺它时工具根本不出现，模型也就不会调用。本工具在网关侧真的实现了
+/// `/v1/images/*` 端点（见 gateway::server::handle_images），所以如实声明。
+/// 值不是秘密，只是一个能力信号。
+pub const ACTOR_AUTHORIZATION_HEADER: &str = "x-openai-actor-authorization";
+pub const ACTOR_AUTHORIZATION_VALUE: &str = "switchelp";
+
 /// 本工具允许管理的顶层键路径（不含 `[model_providers.gptswitch]` 子表）。
 pub const MANAGED_KEYS: [&str; 5] = [
     "model",
@@ -148,6 +157,16 @@ impl ConfigSnapshot {
             .unwrap_or("responses")
             .to_owned();
         let auth_table = table.get("auth").and_then(|i| i.as_table());
+        // 额外请求头：老配置没有这一节，读回为空；顺序按名字排序，保证比较口径稳定。
+        // 非字符串值的表视为结构不符，整体按“不是本工具的 provider”处理。
+        let mut http_headers: Vec<(String, String)> = Vec::new();
+        if let Some(headers) = table.get("http_headers").and_then(|i| i.as_table()) {
+            for (name, item) in headers.iter() {
+                let header_value = item.as_str()?;
+                http_headers.push((name.to_owned(), header_value.to_owned()));
+            }
+            http_headers.sort_by(|a, b| a.0.cmp(&b.0));
+        }
         let auth = match auth_table {
             Some(auth) => {
                 if let Some(command) = auth.get("command").and_then(|i| i.as_str()) {
@@ -178,6 +197,7 @@ impl ConfigSnapshot {
         Some(ManagedProvider {
             base_url,
             wire_api,
+            http_headers,
             auth,
         })
     }
@@ -306,6 +326,10 @@ pub struct ManagedProvider {
     pub base_url: String,
     /// 宿主侧 wire_api；当前版本只接受 responses。
     pub wire_api: String,
+    /// 额外请求头（按名字排序）。当前用途只有 `x-openai-actor-authorization`：
+    /// 见 [`ACTOR_AUTHORIZATION_HEADER`]。老计划里没有这一项，读回按空处理。
+    #[serde(default)]
+    pub http_headers: Vec<(String, String)>,
     /// 认证方式：`command` 或 `env_key`，具体值必须显式给出。
     pub auth: ProviderAuth,
 }
@@ -316,6 +340,15 @@ fn provider_table(provider: &ManagedProvider) -> Table {
     table["name"] = value(PROVIDER_NAME);
     table["base_url"] = value(provider.base_url.clone());
     table["wire_api"] = value(provider.wire_api.clone());
+    if !provider.http_headers.is_empty() {
+        let mut headers: Vec<&(String, String)> = provider.http_headers.iter().collect();
+        headers.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut headers_table = Table::new();
+        for (name, header_value) in headers {
+            headers_table[name] = value(header_value.clone());
+        }
+        table["http_headers"] = Item::Table(headers_table);
+    }
     let mut auth = Table::new();
     match &provider.auth {
         ProviderAuth::Command {
@@ -348,6 +381,11 @@ fn serialized_provider(provider: &ManagedProvider) -> Option<String> {
         "name = \"{}\"\nbase_url = \"{}\"\nwire_api = \"{}\"",
         PROVIDER_NAME, provider.base_url, provider.wire_api
     );
+    let mut headers: Vec<&(String, String)> = provider.http_headers.iter().collect();
+    headers.sort_by(|a, b| a.0.cmp(&b.0));
+    for (name, header_value) in headers {
+        text.push_str(&format!("\nhttp_headers.{name} = \"{header_value}\""));
+    }
     match &provider.auth {
         ProviderAuth::Command {
             command,
@@ -951,12 +989,62 @@ mod tests {
         ManagedProvider {
             base_url: "http://127.0.0.1:18765/i/inst_1/c/rev_1/v1".to_owned(),
             wire_api: "responses".to_owned(),
+            http_headers: vec![(
+                ACTOR_AUTHORIZATION_HEADER.to_owned(),
+                ACTOR_AUTHORIZATION_VALUE.to_owned(),
+            )],
             auth: ProviderAuth::Command {
                 command: "/tmp/helper".to_owned(),
                 timeout_ms: 5_000,
                 refresh_interval_ms: 300_000,
             },
         }
+    }
+
+    /// 图像能力信号头必须写进配置并被读回：宿主缺它就不会注册内置图像工具。
+    #[test]
+    fn actor_authorization_header_round_trips() {
+        let provider = command_provider();
+        let rendered = serialized_provider(&provider).unwrap();
+        assert!(
+            rendered.contains("http_headers.x-openai-actor-authorization"),
+            "渲染出的 provider 必须带能力信号头，实际：{rendered}"
+        );
+
+        // 走真实写入路径：空文档 → 应用 → 重新解析读回，必须一模一样。
+        let snapshot = ConfigSnapshot::parse("/tmp/config.toml", "model = \"gs/a/b\"\n").unwrap();
+        let managed = ManagedConfig {
+            provider: Some(provider.clone()),
+            ..ManagedConfig::default()
+        };
+        let (text, _) = apply_managed(&snapshot, &managed, &[]).unwrap();
+        assert!(
+            text.contains("x-openai-actor-authorization"),
+            "写出的 TOML 必须包含信号头：{text}"
+        );
+        let reparsed = ConfigSnapshot::parse("/tmp/config.toml", &text).unwrap();
+        let read_back = reparsed.read_provider().expect("provider 应能读回");
+        assert_eq!(read_back, provider, "写出去与读回来的 provider 必须一致");
+    }
+
+    /// 老配置（没有 http_headers 一节）读回为空，而不是解析失败。
+    #[test]
+    fn provider_without_headers_reads_as_empty() {
+        let text = "\
+[model_providers.gptswitch]
+name = \"Switchelp\"
+base_url = \"http://127.0.0.1:18765/i/inst_1/c/rev_1/v1\"
+wire_api = \"responses\"
+
+[model_providers.gptswitch.auth]
+command = \"/tmp/helper\"
+args = [\"--instance\", \"local-main\"]
+timeout_ms = 5000
+refresh_interval_ms = 300000
+";
+        let snapshot = ConfigSnapshot::parse("/tmp/config.toml", text).unwrap();
+        let provider = snapshot.read_provider().expect("老配置必须能读回");
+        assert!(provider.http_headers.is_empty());
     }
 
     /// 宿主只会照字面拼 `--instance <固定值>`；渲染与 helper 安装必须用同一个常量，
