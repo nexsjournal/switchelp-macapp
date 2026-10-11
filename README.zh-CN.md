@@ -87,6 +87,6 @@ scripts/check-publish-safety.sh
 
 **未验证**：Desktop 图形界面选择器的**视觉**表现（上面的证据来自 app-server 与日志层，不是看着那个菜单得出的）、Windows 真机、读屏实际表现。
 
-设计与调研文档在 [`docs/`](docs/README.md)，含证据等级与未决问题清单（目前只有中文）。
+设计与调研文档只在本机维护，不随仓库发布。
 
 以 [MIT 许可证](LICENSE) 发布。

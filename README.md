@@ -111,6 +111,6 @@ the built-in models are gone from Codex's picker and come back only through "res
 **Not verified** — the Desktop picker's on-screen rendering (the evidence above comes from the app-server and log
 layers, not from looking at the menu), real Windows hardware, and screen-reader behaviour.
 
-Design and research documents live in [`docs/`](docs/README.md); they are written in Chinese only for now.
+Design and research documents are maintained locally and are not published with this repository.
 
 [MIT licensed](LICENSE).
