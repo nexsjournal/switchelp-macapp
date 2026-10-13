@@ -730,6 +730,126 @@ fn restore_drops_managed_keys_but_keeps_an_externally_modified_field() {
     );
 }
 
+/// 造一份带 `threads` 表的 codex 状态库；只建对话记录对齐用到的三列。
+fn seed_threads(home: &std::path::Path, rows: &[(&str, Option<&str>, &str)]) {
+    let connection = rusqlite::Connection::open(home.join("state_5.sqlite")).unwrap();
+    connection
+        .execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, model TEXT, model_provider TEXT NOT NULL)",
+            [],
+        )
+        .unwrap();
+    for (id, model, provider) in rows {
+        connection
+            .execute(
+                "INSERT INTO threads (id, model, model_provider) VALUES (?1, ?2, ?3)",
+                rusqlite::params![id, model, provider],
+            )
+            .unwrap();
+    }
+}
+
+fn read_threads(home: &std::path::Path) -> Vec<(String, Option<String>, String)> {
+    let connection = rusqlite::Connection::open(home.join("state_5.sqlite")).unwrap();
+    let mut statement = connection
+        .prepare("SELECT id, model, model_provider FROM threads ORDER BY id")
+        .unwrap();
+    statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+/// 应用接管之后，网关模型的对话必须改走网关路由。
+///
+/// 真机上的表现：在账号配置下开的对话，切到我们的配置后选网关模型发送，换回的是
+/// ChatGPT 后端的 400 —— `The '<model>' model is not supported when using Codex with
+/// a ChatGPT account.`。根因是对话记录里固化的 provider 不会跟着配置切换更新。
+#[test]
+fn apply_moves_gateway_conversations_to_our_route() {
+    let harness = Harness::with_ready_model(Some("approval_policy = \"on-request\"\n"));
+    let home = harness.config_path.parent().unwrap().to_path_buf();
+    seed_threads(
+        &home,
+        &[
+            ("old-chat", Some("gs/prov/model-a"), "custom"),
+            ("native-chat", Some("gpt-5.6-sol"), "custom"),
+        ],
+    );
+    let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+    harness
+        .service
+        .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-threads-apply")
+        .unwrap();
+    assert_eq!(
+        read_threads(&home),
+        vec![
+            (
+                "native-chat".to_owned(),
+                Some("gpt-5.6-sol".to_owned()),
+                "custom".to_owned()
+            ),
+            (
+                "old-chat".to_owned(),
+                Some("gs/prov/model-a".to_owned()),
+                "gptswitch".to_owned()
+            ),
+        ],
+        "网关模型的对话要钉到网关 provider；原生模型的对话不动"
+    );
+}
+
+/// 还原之后，接管期间建立的对话要交还给账号路由：provider 回到配置里的值，
+/// 网关模型换成配置里的模型——不换就是下一次发送必被上游拒绝。
+#[test]
+fn restore_returns_conversations_to_the_account_route() {
+    let harness = Harness::with_ready_model(Some(
+        "model_provider = \"custom\"\nmodel = \"gpt-6.1-sol\"\n\
+         [model_providers.custom]\nname = \"OpenAI\"\n",
+    ));
+    let home = harness.config_path.parent().unwrap().to_path_buf();
+    let plan = harness.service.plan_apply(&harness.instance, None).unwrap();
+    let operation_id = harness
+        .service
+        .execute_apply(plan.id.as_str(), &plan.plan_hash, "idem-threads-setup")
+        .unwrap();
+    harness.service.confirm_reload(&operation_id, true).unwrap();
+
+    seed_threads(
+        &home,
+        &[
+            ("gs-chat", Some("gs/prov/model-a"), "gptswitch"),
+            ("native-chat", Some("gpt-5.6-sol"), "gptswitch"),
+        ],
+    );
+    let restore = harness.service.plan_restore(&harness.instance).unwrap();
+    harness
+        .service
+        .execute_restore(
+            restore.id.as_str(),
+            &restore.plan_hash,
+            "idem-threads-restore",
+        )
+        .unwrap();
+    assert_eq!(
+        read_threads(&home),
+        vec![
+            (
+                "gs-chat".to_owned(),
+                Some("gpt-6.1-sol".to_owned()),
+                "custom".to_owned()
+            ),
+            (
+                "native-chat".to_owned(),
+                Some("gpt-5.6-sol".to_owned()),
+                "custom".to_owned()
+            ),
+        ],
+        "接管期间建立的对话要回到账号路由，网关模型要换成配置里的模型"
+    );
+}
+
 /// 回归：配置里已经带着本工具早先写下的字段时，还原必须把 Codex 交还给原生，
 /// 而不是把我们自己的值当成「用户原值」再写回去。
 ///

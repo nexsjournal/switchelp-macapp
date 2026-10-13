@@ -20,6 +20,7 @@ use crate::{
             build_plan, check_cas, decide_recovery, ApplyOperation, ApplyPlan, ApplyStage,
             CasOutcome, RecoveryDecision, DEFAULT_PLAN_TTL_SECS,
         },
+        threads,
     },
     domain::{
         capability::{InputKind, Support},
@@ -508,6 +509,11 @@ impl ApplyService {
         state
             .operation
             .transition(ApplyStage::AwaitingReload, self.clock.now())?;
+        // 路由换了，对话记录里固化的 provider 也要跟着走：留着旧路由的对话再选网关
+        // 模型发送就会撞上游 400（见 codex::threads 的说明）。失败不改变已提交的结果。
+        if let Some(home) = Path::new(&state.plan.config_path).parent() {
+            threads::sync_for_takeover(home, PROVIDER_ID);
+        }
         let operation_id = state.operation.id.as_str().to_owned();
         let published_revision = state.plan.catalog_revision.clone();
         self.operations.save(state)?;
@@ -751,6 +757,14 @@ impl ApplyService {
         state.operation.written_hash = Some(hash(&text));
         self.operations.save(state.clone())?;
         write_atomic(Path::new(&state.plan.config_path), &text)?;
+        // 还原后配置里的 provider/模型：对话记录要落在同一套上（见 codex::threads 的说明），
+        // 否则接管期间创建的对话续接会失败、网关模型的对话发送必被上游拒绝。
+        if let (Some(route), Some(home)) = (
+            threads::route_from_config_text(&text),
+            Path::new(&state.plan.config_path).parent(),
+        ) {
+            threads::sync_for_restore(home, PROVIDER_ID, &route.0, route.1.as_deref());
+        }
         // 还原后本工具不再拥有任何受管字段。
         state.ownership = Vec::new();
         state

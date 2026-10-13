@@ -8,6 +8,7 @@ pub mod coexist;
 pub mod config;
 pub mod detect;
 pub mod plan;
+pub mod threads;
 
 pub use backup::{BackupEntry, BackupStore};
 pub use config::{ConfigSnapshot, ManagedConfig, ManagedProvider};

@@ -364,6 +364,11 @@ impl Routing {
         }
     }
 
+    /// 这个模型是不是我们目录里的（名单来自 `model/list` 的合并）。
+    pub fn is_managed(&self, model: &str) -> bool {
+        self.managed_keys.contains(model)
+    }
+
     /// 只按线程与模型判断，不做探测。探测在 `resolve_side` 里单独走。
     pub fn direct(&self, message: &Value) -> (Side, Why) {
         if let Some(thread_id) = thread_of(message) {
@@ -849,8 +854,57 @@ fn handle_host_message(
             }));
             send_result(stdout, &id, merged);
         }
+        "config/batchWrite" => {
+            // 减掉网关模型那笔写入之后再走普通路由（见 sanitize_config_write 的说明）。
+            let (sanitized, dropped) = routing
+                .lock()
+                .map(|state| sanitize_config_write(&message, &state))
+                .unwrap_or_else(|_| (message.clone(), 0));
+            if dropped > 0 {
+                log.event(json!({
+                    "event": "config-write-sanitized",
+                    "method": method,
+                    "dropped": dropped,
+                }));
+            }
+            route_request(sanitized, id, native, managed, routing, stdout, log);
+        }
         _ => route_request(message, id, native, managed, routing, stdout, log),
     }
+}
+
+/// 宿主往配置里落盘的「模型选择」都从这里过：网关模型那笔写入要摘掉。
+///
+/// 桌面端把模型选择器里的选择写进它看到的 `config.toml`——桥接里那份是**原生那根**的。
+/// 选的是我们目录里的模型（`gs/…`）时，这条写入会把原生配置写成一个自相矛盾的状态：
+/// 账号 provider + 网关模型；之后任何一次按老路由发送都会撞上 ChatGPT 后端的 400
+/// （The '<model>' model is not supported when using Codex with a ChatGPT account）。
+/// 我们模型的那份选择由托管那根的配置记住，所以这里只减去这一笔，其余键照常落盘；
+/// 全被减光时照样发一次空写入——空 `edits` 是合法请求，宿主拿到的是子进程的真实回执
+/// （`{status:"ok", version, filePath, overriddenMetadata}`，已按报文实测）。
+///
+/// 桌面端落盘模型选择用的是 `config/batchWrite`（真机日志里只有这一种）；
+/// `config/value/write` 是平铺的单条写入，形状里没有可减的余地，出现时原样转发。
+fn sanitize_config_write(message: &Value, routing: &Routing) -> (Value, usize) {
+    let mut out = message.clone();
+    let Some(edits) = out
+        .get_mut("params")
+        .and_then(|params| params.get_mut("edits"))
+        .and_then(Value::as_array_mut)
+    else {
+        return (out, 0);
+    };
+    let before = edits.len();
+    edits.retain(|edit| {
+        let key = edit.get("keyPath").and_then(Value::as_str);
+        let value = edit.get("value").and_then(Value::as_str);
+        !(key == Some("model")
+            && value
+                .map(|model| routing.is_managed(model))
+                .unwrap_or(false))
+    });
+    let dropped = before - edits.len();
+    (out, dropped)
 }
 
 fn route_request(
@@ -1020,5 +1074,96 @@ pub fn run() -> i32 {
         run_multiplex(&config)
     } else {
         run_passthrough(&config)
+    }
+}
+
+#[cfg(test)]
+mod config_write_tests {
+    use super::*;
+
+    /// 菜单合并记下的名单：`gs/` 开头那几条是我们的。
+    fn routing_with_managed() -> Routing {
+        let mut routing = Routing::default();
+        routing.remember_managed(&[
+            json!({"id": "gs/prov/model-a"}),
+            json!({"id": "gs/prov/model-b", "model": "gs/prov/model-b"}),
+        ]);
+        routing
+    }
+
+    fn write(edits: Value) -> Value {
+        json!({
+            "jsonrpc": "2.0",
+            "id": "w1",
+            "method": "config/batchWrite",
+            "params": {
+                "edits": edits,
+                "expectedVersion": null,
+                "filePath": "/Users/someone/.codex/config.toml",
+                "reloadUserConfig": true,
+            },
+        })
+    }
+
+    /// 网关模型那笔摘掉，其余键原样留下——原生配置不能被写成「账号 provider + 网关模型」。
+    #[test]
+    fn a_managed_model_edit_is_dropped_and_the_rest_keep_their_order() {
+        let message = write(json!([
+            {"keyPath": "model", "value": "gs/prov/model-a", "mergeStrategy": "replace"},
+            {"keyPath": "model_reasoning_effort", "value": "high", "mergeStrategy": "replace"},
+        ]));
+        let (out, dropped) = sanitize_config_write(&message, &routing_with_managed());
+        assert_eq!(dropped, 1);
+        let edits = out["params"]["edits"].as_array().unwrap();
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0]["keyPath"], json!("model_reasoning_effort"));
+        // 请求的其余部分一个字节都不动。
+        assert_eq!(out["params"]["filePath"], message["params"]["filePath"]);
+        assert_eq!(out["params"]["reloadUserConfig"], json!(true));
+    }
+
+    /// 全被减光时保留一条合法的空写入（空 edits 是合法请求，宿主拿的是子进程真实回执）。
+    #[test]
+    fn everything_dropped_leaves_an_empty_but_valid_write() {
+        let message = write(json!([
+            {"keyPath": "model", "value": "gs/prov/model-b", "mergeStrategy": "replace"},
+        ]));
+        let (out, dropped) = sanitize_config_write(&message, &routing_with_managed());
+        assert_eq!(dropped, 1);
+        assert_eq!(out["params"]["edits"], json!([]));
+    }
+
+    /// 原生模型、别的键、别的形状都不许碰。
+    #[test]
+    fn native_models_and_other_edits_pass_through() {
+        let routing = routing_with_managed();
+        let native = write(json!([
+            {"keyPath": "model", "value": "gpt-5.6-sol", "mergeStrategy": "replace"},
+        ]));
+        assert_eq!(sanitize_config_write(&native, &routing).1, 0);
+        let unrelated = write(json!([
+            {"keyPath": "model_providers.custom.name", "value": "gs/prov/model-a", "mergeStrategy": "replace"},
+        ]));
+        assert_eq!(
+            sanitize_config_write(&unrelated, &routing).1,
+            0,
+            "只有 keyPath=model 才是模型选择"
+        );
+        let flat = json!({
+            "jsonrpc": "2.0", "id": "w2", "method": "config/value/write",
+            "params": {"keyPath": "model", "value": "gs/prov/model-a", "mergeStrategy": "replace"},
+        });
+        let (out, dropped) = sanitize_config_write(&flat, &routing);
+        assert_eq!(dropped, 0, "平铺形状没有可减的余地，原样转发");
+        assert_eq!(out, flat);
+    }
+
+    /// 名单还没建立（菜单没取过）时一律不动手——认不出的写入宁可放行，也不能误伤。
+    #[test]
+    fn without_a_menu_every_write_passes_through() {
+        let message = write(json!([
+            {"keyPath": "model", "value": "gs/prov/model-a", "mergeStrategy": "replace"},
+        ]));
+        assert_eq!(sanitize_config_write(&message, &Routing::default()).1, 0);
     }
 }

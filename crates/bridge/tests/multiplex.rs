@@ -300,6 +300,64 @@ fn routes_by_model_choice() {
     );
 }
 
+/// 桌面端会把模型选择写进它看到的 `config.toml`；桥接里那份是**原生那根**的。
+///
+/// 网关模型不能落进原生配置：写进去就成了「账号 provider + 网关模型」，之后按老路由
+/// 发送必然撞上游 400（`The '<model>' model is not supported when using Codex with a
+/// ChatGPT account.`）。这一笔必须被摘掉，其余键照常落盘。
+#[test]
+fn config_writes_never_carry_our_models_into_the_native_config() {
+    let mut bridge = Bridge::start("config-write", true);
+    bridge.result("1", "initialize", json!({}));
+    // 名单来自菜单合并：先取一次菜单，bridge 才知道哪些模型是我们的。
+    let models = bridge.result("2", "model/list", json!({"limit": 100}));
+    assert!(model_ids(&models).contains(&"gs/mock-managed-1".to_owned()));
+
+    let written = bridge.result(
+        "3",
+        "config/batchWrite",
+        json!({
+            "edits": [
+                {"keyPath": "model", "value": "gs/mock-managed-1", "mergeStrategy": "replace"},
+                {"keyPath": "model_reasoning_effort", "value": "high", "mergeStrategy": "replace"}
+            ],
+            "expectedVersion": Value::Null,
+            "filePath": "/Users/someone/.codex/config.toml",
+            "reloadUserConfig": true
+        }),
+    );
+    assert_eq!(
+        written["mockSide"], "native",
+        "配置写入仍然走原生那根：{written}"
+    );
+    assert_eq!(
+        written["editsReceived"], 1,
+        "网关模型那一笔必须被摘掉：{written}"
+    );
+    assert_eq!(written["modelSeen"], Value::Null);
+
+    // 原生模型的写入照常落盘，一个字节都不动。
+    let native = bridge.result(
+        "4",
+        "config/batchWrite",
+        json!({
+            "edits": [{"keyPath": "model", "value": "gpt-5.6-sol", "mergeStrategy": "replace"}],
+            "expectedVersion": Value::Null,
+            "filePath": "/Users/someone/.codex/config.toml",
+            "reloadUserConfig": true
+        }),
+    );
+    assert_eq!(native["modelSeen"], "gpt-5.6-sol");
+
+    let sanitized = bridge
+        .events()
+        .into_iter()
+        .find(|event| event["event"] == "config-write-sanitized")
+        .expect("摘掉过一笔就必须留下证据");
+    assert_eq!(sanitized["dropped"], 1);
+    assert_eq!(sanitized["method"], "config/batchWrite");
+}
+
 /// 关键回归：只带 threadId 的续接必须跟着线程走，不看模型。
 ///
 /// 不钉住的话，一个已开的会话会在两根之间跳，表现是「聊到一半上下文丢了」。

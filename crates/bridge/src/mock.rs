@@ -96,6 +96,40 @@ fn handle(message: &Value) -> Value {
         "turn/start" | "thread/name/set" | "thread/items/list" => {
             json!({"ok": true, "mockSide": side()})
         }
+        // 配置写入：回执形状照真身实测的来，并附上「收到了几笔、model 那笔的值是什么」，
+        // 让测试能核对 host 写下去的内容。
+        "config/batchWrite" | "config/value/write" => {
+            let edits = params.get("edits").and_then(Value::as_array);
+            let (received, model_seen) = match edits {
+                Some(list) => (
+                    list.len(),
+                    list.iter().find_map(|edit| {
+                        let key = edit.get("keyPath").and_then(Value::as_str)?;
+                        let value = edit.get("value").and_then(Value::as_str)?;
+                        (key == "model").then(|| value.to_owned())
+                    }),
+                ),
+                None => (
+                    1,
+                    (params.get("keyPath").and_then(Value::as_str) == Some("model")).then(|| {
+                        params
+                            .get("value")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned()
+                    }),
+                ),
+            };
+            json!({
+                "status": "ok",
+                "version": "mock",
+                "filePath": params.get("filePath").cloned().unwrap_or(Value::Null),
+                "overriddenMetadata": null,
+                "mockSide": side(),
+                "editsReceived": received,
+                "modelSeen": model_seen,
+            })
+        }
         _ => json!({"error": {"code": -32601, "message": format!("mock 不认识的 {method}")}}),
     }
 }
