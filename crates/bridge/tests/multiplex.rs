@@ -65,15 +65,27 @@ mod tempdir {
 
 impl Bridge {
     fn start(tag: &str, managed: bool) -> Self {
-        let dir = tempdir::Dir::new(tag);
-        Self::start_in(&dir, tag, managed)
+        Self::launch(tempdir::Dir::new(tag), tag, managed)
     }
 
     /// 在**已有的**应用数据目录里起一个实例。
     ///
     /// 宿主对每根 app-server 各起一个 bridge，它们共享同一个应用数据目录，
     /// 因此也共享 `bridge-model-state`。这个入口就是用来验证跨实例的选择记忆的。
+    ///
+    /// 拿到的是一份**不删**的句柄：目录的收尾交给建它的那个 `start`（它才是所有者）。
     fn start_in(dir: &tempdir::Dir, tag: &str, managed: bool) -> Self {
+        Self::launch(tempdir::Dir(dir.path().to_path_buf(), true), tag, managed)
+    }
+
+    /// 目录**按值**传进来、最后由 `Bridge` 持有。
+    ///
+    /// 不能在前面那些入口里建一个局部 `Dir` 再借出去：那个局部变量在函数返回时就析构，
+    /// 于是一个还活着的 bridge 子进程会顺手把它正在写的日志 `create` 回来，
+    /// `remove_dir_all` 随即以 ENOTEMPTY 失败——本机因此攒过 142 个残留目录；
+    /// 而在删得掉的机器上（CI）日志真的没了，`events()` 读到空文件，测试就红。
+    /// 所有者必须活到 `Bridge::drop` 把孩子杀掉之后（字段在其后析构）。
+    fn launch(dir: tempdir::Dir, tag: &str, managed: bool) -> Self {
         let native_home = dir.path().join("native-home");
         let managed_home = dir.path().join("codex-home");
         std::fs::create_dir_all(&native_home).unwrap();
@@ -124,7 +136,7 @@ impl Bridge {
             stdin: Some(stdin),
             lines: receiver,
             log,
-            dir: tempdir::Dir(dir.path().to_path_buf(), true),
+            dir,
         }
     }
 
@@ -189,6 +201,9 @@ impl Bridge {
 }
 
 impl Drop for Bridge {
+    /// 顺序要紧：先让孩子退出，`dir` 才轮到析构（字段在 `drop` 之后按声明顺序析构）。
+    /// 孩子还活着就删目录的话，它会顺手把日志 `create` 回来，`remove_dir_all` 以
+    /// ENOTEMPTY 失败，临时目录就留在盘上了（本机实测攒过 142 个）。
     fn drop(&mut self) {
         self.stdin = None;
         let _ = self.child.kill();
