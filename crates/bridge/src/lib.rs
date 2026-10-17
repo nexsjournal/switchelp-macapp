@@ -52,6 +52,30 @@ pub const INSIDE: &str = "GPTSWITCH_BRIDGE_INSIDE";
 /// 托管那根没就绪时的错误码。JSON-RPC 的 server error 区间，宿主会如实显示。
 pub const NO_MANAGED_HOME: i64 = -32603;
 
+/// 托管那根的 provider 名。必须与 `switch-core` 的 `codex::config::PROVIDER_ID`
+/// 一致——它是我们写进托管 profile 的 `[model_providers.<这个名字>]`，
+/// 而宿主开线程时会把我们从 `config/read` 还回去的这个名字原样带给子进程。
+pub const PROVIDER_ID: &str = "gptswitch";
+
+/// 路由字段：这几个键的**归属权在我们**，原生那份配置里不该由宿主落我们的值。
+///
+/// 必须与 `switch-core` 的 `codex::config::MANAGED_KEYS` 保持一致——那份决定了
+/// 「复制用户配置当托管 profile 时去掉哪些键」，两份名单不一致会让同一份配置在两个
+/// 方向上都被改写。`crates/bridge/tests/multiplex.rs` 里有一条测试盯着这个对齐。
+pub const MANAGED_KEYS: [&str; 5] = [
+    "model",
+    "model_provider",
+    "model_catalog_json",
+    "model_context_window",
+    "model_reasoning_effort",
+];
+
+/// 这个 keyPath 的顶层键是不是路由字段。`model_providers.custom.name` 这类子路径
+/// 不属于路由字段：它改的是供应商表本身，宿主有权落盘。
+fn is_managed_key_path(key_path: &str) -> bool {
+    MANAGED_KEYS.contains(&key_path)
+}
+
 // ---------------------------------------------------------------- 配置
 
 /// 运行配置。全部可注入，便于在真机上做对照实验。
@@ -338,15 +362,58 @@ impl Why {
     }
 }
 
-/// 路由状态：线程归属 + 我们目录里的 slug。两根子进程各有一份自己的历史与菜单，
-/// 只有这张表能把它们缝成「一个宿主眼里的一份状态」。
+/// 路由状态：线程归属 + 我们目录里的 slug + 宿主当前的模型选择。两根子进程各有一份
+/// 自己的历史与菜单，只有这张表能把它们缝成「一个宿主眼里的一份状态」。
 #[derive(Default)]
 pub struct Routing {
     pins: HashMap<String, Side>,
     managed_keys: HashSet<String>,
+    /// 宿主模型选择器当前选中的模型；只记我们目录里的，选原生模型时是 None。
+    ///
+    /// 为什么还要落一份状态文件：宿主对每根 app-server 各起一个 bridge 实例，
+    /// **写模型的那根与读 config 的那根未必同一个**——只放内存会「写了不算数」。
+    selection: Option<String>,
+    state_path: Option<PathBuf>,
 }
 
 impl Routing {
+    /// 跨进程的选择记忆落点：`<bridge.log 同目录>/bridge-model-state`。
+    /// bridge.log 在应用数据目录里（`coexist::bridge_log`），与托管 home 同一屋檐。
+    pub fn state_path_for(log_path: Option<&Path>) -> Option<PathBuf> {
+        log_path.map(|path| path.with_file_name("bridge-model-state"))
+    }
+
+    /// 启动时把上次的选择读回来。状态文件坏了一律当「没选过」，不猜。
+    pub fn load_state(&mut self, state_path: Option<PathBuf>) {
+        self.state_path = state_path;
+        self.selection = self
+            .state_path
+            .as_ref()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|raw| {
+                let value = serde_json::from_str::<Value>(&raw).ok()?;
+                value
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            });
+    }
+
+    /// 记住宿主的模型选择（None = 选回了原生模型）。
+    /// 写穿到状态文件：别的 bridge 实例也在服务同一个宿主，它们得看得见。
+    pub fn set_selection(&mut self, model: Option<String>) {
+        self.selection = model;
+        if let Some(path) = &self.state_path {
+            let payload = json!({"model": self.selection});
+            let _ = std::fs::write(path, payload.to_string());
+        }
+    }
+
+    /// 宿主当前选中的网关模型（没有就是 None）。
+    pub fn selection(&self) -> Option<&str> {
+        self.selection.as_deref()
+    }
+
     pub fn pin(&mut self, thread_id: &str, side: Side) {
         self.pins.insert(thread_id.to_owned(), side);
     }
@@ -366,24 +433,39 @@ impl Routing {
 
     /// 这个模型是不是我们目录里的（名单来自 `model/list` 的合并）。
     pub fn is_managed(&self, model: &str) -> bool {
-        self.managed_keys.contains(model)
+        self.owns_model(model)
     }
 
     /// 只按线程与模型判断，不做探测。探测在 `resolve_side` 里单独走。
+    ///
+    /// **显式模型优先于线程归属**。这条顺序是被真机日志逼出来的：`thread/settings/update`
+    /// 带着 `gs/…`（用户在这个对话里换成了网关模型）却因为线程早先被钉在原生那根，
+    /// 被整条路由进原生子进程——那根根本没有这个模型，网关模型等于白选。
+    /// 用户在这次请求里明确点名了一个模型，就该按模型走；只有当请求没带模型时，
+    /// 线程归属才是唯一线索。
     pub fn direct(&self, message: &Value) -> (Side, Why) {
+        if let Some(model) = model_of(message) {
+            if self.owns_model(&model) {
+                return (Side::Managed, Why::ModelIsOurs);
+            }
+            // 带的不是我们的模型：这是「在这个对话里换回原生模型」，宁可重钉也不要
+            // 顺着旧钉子走到托管那根去。
+            return (Side::Native, Why::ModelIsNative);
+        }
         if let Some(thread_id) = thread_of(message) {
             if let Some(side) = self.pinned(&thread_id) {
                 return (side, Why::ThreadPinned);
             }
         }
-        if let Some(model) = model_of(message) {
-            return if self.managed_keys.contains(&model) {
-                (Side::Managed, Why::ModelIsOurs)
-            } else {
-                (Side::Native, Why::ModelIsNative)
-            };
-        }
         (Side::Native, Why::Default)
+    }
+
+    /// 这个模型是不是我们的。判据**不能只看菜单名单**：菜单要等宿主调一次
+    /// `model/list` 才填充，而配置写入可能早于它到达（真机 10-13 20:07:55 就发生过：
+    /// 菜单还没来，网关模型那笔写入原样落进了原生配置）。`gs/` 前缀是发布布局的约定
+    /// （与 `switch-core` 的 `MANAGED_KEYS` 判定同源），名单只是补充。
+    pub fn owns_model(&self, model: &str) -> bool {
+        model.starts_with("gs/") || self.managed_keys.contains(model)
     }
 
     /// 需要探测的冷路径：带 threadId 但我们没见过这条线程（例如 bridge 重启过）。
@@ -686,7 +768,11 @@ pub fn run_multiplex(config: &BridgeConfig) -> i32 {
         });
     }
 
-    let routing = Arc::new(Mutex::new(Routing::default()));
+    // 选择记忆要跨实例：宿主对每根 app-server 各起一个 bridge，写模型的那根与读 config
+    // 的那根未必是同一个进程。只放内存会「写了不算数」，所以启动时从状态文件读回来。
+    let mut routing = Routing::default();
+    routing.load_state(Routing::state_path_for(config.log_path.as_deref()));
+    let routing = Arc::new(Mutex::new(routing));
     let (host_tx, host_rx) = mpsc::channel::<String>();
     thread::spawn(move || {
         for line in std::io::stdin().lock().lines().map_while(Result::ok) {
@@ -856,18 +942,83 @@ fn handle_host_message(
         }
         "config/batchWrite" => {
             // 减掉网关模型那笔写入之后再走普通路由（见 sanitize_config_write 的说明）。
-            let (sanitized, dropped) = routing
+            let (sanitized, dropped, chosen) = routing
                 .lock()
                 .map(|state| sanitize_config_write(&message, &state))
-                .unwrap_or_else(|_| (message.clone(), 0));
+                .unwrap_or_else(|_| (message.clone(), 0, None));
+            // 宿主明确写了一个**原生模型**：那就是「选回原生」，记得的选择必须清掉，
+            // 否则 config/read 会一直把它盖回去，用户根本回不到原生模型。
+            let wrote_native_model = dropped == 0
+                && batch_write_model(&message)
+                    .map(|model| !model.starts_with("gs/"))
+                    .unwrap_or(false);
             if dropped > 0 {
+                // 选择被摘下了写入，但**不能就此丢掉**：记进路由状态，再由 config/read
+                // 的改写还给宿主。摘写 + 读回改写，合起来才是一次「成功但落在另一根」的写入。
+                if let (Ok(mut state), Some(model)) = (routing.lock(), chosen.clone()) {
+                    state.set_selection(Some(model));
+                }
+            } else if wrote_native_model {
+                if let Ok(mut state) = routing.lock() {
+                    state.set_selection(None);
+                }
+            }
+            if dropped > 0 || wrote_native_model {
                 log.event(json!({
                     "event": "config-write-sanitized",
                     "method": method,
                     "dropped": dropped,
+                    "remembered": chosen.is_some(),
                 }));
             }
             route_request(sanitized, id, native, managed, routing, stdout, log);
+        }
+        "config/value/write" => {
+            // 平铺写入是同一个病的另一个口子：`model_provider = "gptswitch"` 落在原生
+            // 配置里照样把那一根写成自相矛盾状态。这里拦下值，理由同 batchWrite。
+            let (sanitized, dropped, chosen) = routing
+                .lock()
+                .map(|state| sanitize_config_value_write(&message, &state))
+                .unwrap_or_else(|_| (message.clone(), 0, None));
+            if dropped > 0 {
+                let remembered = chosen.is_some();
+                if let (Ok(mut state), Some(model)) = (routing.lock(), chosen.clone()) {
+                    state.set_selection(Some(model));
+                }
+                log.event(json!({
+                    "event": "config-write-sanitized",
+                    "method": method,
+                    "dropped": dropped,
+                    "remembered": remembered,
+                }));
+            }
+            route_request(sanitized, id, native, managed, routing, stdout, log);
+        }
+        "config/read" => {
+            // 宿主读配置：路由字段要盖回它自己选的那个网关模型。
+            // 不这么做，界面在写完的选择被摘掉之后会把选择器勾回原生模型——
+            // 那正是「选了第三方模型，又被切回原生」的直接原因。
+            let chosen = routing
+                .lock()
+                .ok()
+                .and_then(|state| state.selection().map(str::to_owned));
+            let mut result = match native.request(&message, LIST_TIMEOUT, log) {
+                Ok(result) => result,
+                Err(error) => {
+                    return send_error(stdout, &id, NO_MANAGED_HOME, &format!("bridge: {error}"))
+                }
+            };
+            let overlaid = routing
+                .lock()
+                .map(|state| virtualize_config_read(&mut result, &state))
+                .unwrap_or(false);
+            if overlaid {
+                log.event(json!({
+                    "event": "config-read-virtualized",
+                    "model": chosen,
+                }));
+            }
+            send_result(stdout, &id, result);
         }
         _ => route_request(message, id, native, managed, routing, stdout, log),
     }
@@ -885,26 +1036,162 @@ fn handle_host_message(
 ///
 /// 桌面端落盘模型选择用的是 `config/batchWrite`（真机日志里只有这一种）；
 /// `config/value/write` 是平铺的单条写入，形状里没有可减的余地，出现时原样转发。
-fn sanitize_config_write(message: &Value, routing: &Routing) -> (Value, usize) {
+///
+/// 返回：改写后的报文、被摘掉的笔数、以及**被摘掉的那次模型选择**（如果有）。
+/// 第三项是这次修复的关键——摘掉写入不能等于把这选择丢了，它得被记进 [`Routing`]，
+/// 否则宿主读回旧值就会把界面切回去（见 `virtualize_config_read`）。
+fn sanitize_config_write(message: &Value, routing: &Routing) -> (Value, usize, Option<String>) {
     let mut out = message.clone();
+    let mut chosen: Option<String> = None;
     let Some(edits) = out
         .get_mut("params")
         .and_then(|params| params.get_mut("edits"))
         .and_then(Value::as_array_mut)
     else {
-        return (out, 0);
+        return (out, 0, None);
     };
     let before = edits.len();
     edits.retain(|edit| {
-        let key = edit.get("keyPath").and_then(Value::as_str);
+        let Some(key) = edit.get("keyPath").and_then(Value::as_str) else {
+            return true;
+        };
+        if !is_managed_key_path(key) {
+            return true;
+        }
         let value = edit.get("value").and_then(Value::as_str);
-        !(key == Some("model")
-            && value
-                .map(|model| routing.is_managed(model))
-                .unwrap_or(false))
+        // 值缺席（不是字符串）时不动它：我们只拦「明确写了我们的值」这一种。
+        let Some(value) = value else {
+            return true;
+        };
+        let ours = is_our_value(key, value, routing);
+        if key == "model" && ours {
+            chosen = Some(value.to_owned());
+        }
+        !ours
     });
     let dropped = before - edits.len();
-    (out, dropped)
+    (out, dropped, chosen)
+}
+
+/// 平铺的单条写入（`config/value/write`）。形状里没有可减的余地，但**路由字段那几种
+/// 值我们仍然要拦**：`model_provider = "gptswitch"` 或网关模型落进原生配置，
+/// 与 `config/batchWrite` 那条是同一个病。拦下整条请求而不是改内容——改写单条写入会
+/// 留下一个「宿主以为写了、其实没写」的谎，不如让它带着原值走空写入。
+fn sanitize_config_value_write(
+    message: &Value,
+    routing: &Routing,
+) -> (Value, usize, Option<String>) {
+    let mut out = message.clone();
+    let Some(params) = out.get_mut("params").and_then(Value::as_object_mut) else {
+        return (out, 0, None);
+    };
+    let key = params
+        .get("keyPath")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let value = params
+        .get("value")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let (Some(key), Some(value)) = (key, value) else {
+        return (out, 0, None);
+    };
+    if !is_managed_key_path(&key) || !is_our_value(&key, &value, routing) {
+        return (out, 0, None);
+    }
+    let chosen = (key == "model").then(|| value.clone());
+    // 摘成一笔空写入：值置空、并请求宿主重读。空写的回执形状与普通写一致。
+    params.insert("value".to_owned(), Value::String(String::new()));
+    (out, 1, chosen)
+}
+
+/// 这个值是不是「我们的」。
+///
+/// 判据**按键区分**，因为这几个键装的不是同一种东西：`model` 装模型标识（`gs/…`），
+/// `model_provider` 装 provider 名（`gptswitch`），`model_catalog_json` 装我们目录里
+/// 那份 json 的**路径**。拿一个统一的字符串前缀去套所有键，会漏掉后两种——真机
+/// 10-13 那次正是 `model_provider` 这类值漏进原生配置。
+fn is_our_value(key: &str, value: &str, routing: &Routing) -> bool {
+    if value.is_empty() {
+        // 空值 = 宿主在删这个键。我们的路由字段不许被它从配置里抹掉。
+        return true;
+    }
+    match key {
+        "model" => routing.owns_model(value),
+        "model_provider" => value == PROVIDER_ID,
+        "model_catalog_json" => value.contains("gptswitch") || value.contains("/catalogs/"),
+        _ => false,
+    }
+}
+
+/// `config/batchWrite` 里 `model` 那笔的值（不管是不是我们的）。用来判断宿主这次
+/// 是不是在「选回原生模型」——那种情况要把记得的选择清掉。
+fn batch_write_model(message: &Value) -> Option<String> {
+    message
+        .get("params")?
+        .get("edits")?
+        .as_array()?
+        .iter()
+        .find_map(|edit| {
+            let key = edit.get("keyPath").and_then(Value::as_str)?;
+            let value = edit.get("value").and_then(Value::as_str)?;
+            (key == "model").then(|| value.to_owned())
+        })
+}
+
+/// 把 `config/read` 结果里的路由字段**盖回宿主选中的那个网关模型**。
+///
+/// 这是整条修复链上最后、也是不可省的一环。只拦写入是不够的：宿主写完立刻重读，
+/// 读到的还是原生的旧值，选择器就自己勾回去（真机日志里 `config/batchWrite` 后面
+/// 永远紧跟 `config/read`，5 次点击 5 次回滚）。所以「摘掉写入」必须配一个
+/// 「读回时把选择还给它」，这两件事合起来才等价于一次成功的写入。
+///
+/// **`model` 与 `model_provider` 必须一起盖，只盖一个比不盖更糟。**
+/// 宿主把这一对当成「我要用哪个上游」的完整答案，开线程时原样发给子进程
+/// （真机 `thread/start` 的 params 里 `model` 与 `modelProvider` 相邻出现）。
+/// 只盖 `model` 的话，原生那根的 provider（用户配置里是 `custom`）会跟着网关模型
+/// 一起进托管子进程，而托管 profile 里只有 `[model_providers.gptswitch]`——
+/// 子进程当场报 "Model provider `custom` not found"，用户看到的是「选是选上了，
+/// 一发就错」。已按报文实测：`modelProvider=custom` 必失败，`gptswitch` 才开得出线程。
+///
+/// 只改这两个字段，其余原样透传；`origins` 里对应的那两条也要跟上，
+/// 否则宿主可能拿 origins 判定「值来自哪个文件」，看到原生文件却对不上号。
+/// `origins.model` 是对象（`{name:{type,file,profile}, version}`，已按真机报文核对），
+/// 不是字符串；形状不认识时整块 origins 不动——宁可少改一处，也不要把结构写坏。
+fn virtualize_config_read(result: &mut Value, routing: &Routing) -> bool {
+    let Some(chosen) = routing.selection().map(str::to_owned) else {
+        return false;
+    };
+    let Some(config) = result.get_mut("config").and_then(Value::as_object_mut) else {
+        return false;
+    };
+    let mut overlaid: Vec<&'static str> = Vec::new();
+    if config.get("model").and_then(Value::as_str) != Some(chosen.as_str()) {
+        config.insert("model".to_owned(), Value::String(chosen.clone()));
+        overlaid.push("model");
+    }
+    if config.get("model_provider").and_then(Value::as_str) != Some(PROVIDER_ID) {
+        config.insert(
+            "model_provider".to_owned(),
+            Value::String(PROVIDER_ID.to_owned()),
+        );
+        overlaid.push("model_provider");
+    }
+    if overlaid.is_empty() {
+        // 原生那根本来就是这个值：不必改，也不该记一次「改写」。
+        return false;
+    }
+    if let Some(origins) = result.get_mut("origins").and_then(Value::as_object_mut) {
+        for key in overlaid {
+            if let Some(version) = origins
+                .get_mut(key)
+                .and_then(|origin| origin.get_mut("version"))
+            {
+                *version = json!("bridge/selection");
+            }
+        }
+    }
+    true
 }
 
 fn route_request(
@@ -1112,8 +1399,13 @@ mod config_write_tests {
             {"keyPath": "model", "value": "gs/prov/model-a", "mergeStrategy": "replace"},
             {"keyPath": "model_reasoning_effort", "value": "high", "mergeStrategy": "replace"},
         ]));
-        let (out, dropped) = sanitize_config_write(&message, &routing_with_managed());
+        let (out, dropped, chosen) = sanitize_config_write(&message, &routing_with_managed());
         assert_eq!(dropped, 1);
+        assert_eq!(
+            chosen.as_deref(),
+            Some("gs/prov/model-a"),
+            "摘掉的那次选择必须被交出来，否则界面会回滚"
+        );
         let edits = out["params"]["edits"].as_array().unwrap();
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0]["keyPath"], json!("model_reasoning_effort"));
@@ -1128,42 +1420,303 @@ mod config_write_tests {
         let message = write(json!([
             {"keyPath": "model", "value": "gs/prov/model-b", "mergeStrategy": "replace"},
         ]));
-        let (out, dropped) = sanitize_config_write(&message, &routing_with_managed());
+        let (out, dropped, chosen) = sanitize_config_write(&message, &routing_with_managed());
         assert_eq!(dropped, 1);
+        assert_eq!(chosen.as_deref(), Some("gs/prov/model-b"));
         assert_eq!(out["params"]["edits"], json!([]));
     }
 
-    /// 原生模型、别的键、别的形状都不许碰。
+    /// 别的路由字段也归我们：`model_provider = "gptswitch"` 落进原生配置是同一个病。
+    ///
+    /// 值放的是真机上的形状（见 `~/Library/Application Support/app.gptswitch.desktop/
+    /// codex-home/config.toml`）：provider 名与目录 json 的路径，都不是 `gs/` 开头的模型标识。
+    #[test]
+    fn other_managed_keys_are_dropped_too() {
+        let message = write(json!([
+            {"keyPath": "model_provider", "value": "gptswitch", "mergeStrategy": "replace"},
+            {
+                "keyPath": "model_catalog_json",
+                "value": "/Users/someone/Library/Application Support/app.gptswitch.desktop/catalogs/rev_abc/models.json",
+                "mergeStrategy": "replace",
+            },
+            {"keyPath": "approval_policy", "value": "never", "mergeStrategy": "replace"},
+        ]));
+        let (out, dropped, chosen) = sanitize_config_write(&message, &routing_with_managed());
+        assert_eq!(dropped, 2, "两个路由字段都该被摘掉");
+        assert!(chosen.is_none(), "被摘的不是 model，就没有选择可记");
+        let edits = out["params"]["edits"].as_array().unwrap();
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0]["keyPath"], json!("approval_policy"));
+
+        // 原生那根的 provider / 目录不进我们的判定，一个字节都不动。
+        let native = write(json!([
+            {"keyPath": "model_provider", "value": "custom", "mergeStrategy": "replace"},
+            {"keyPath": "model_catalog_json", "value": "/Users/someone/.codex/models.json", "mergeStrategy": "replace"},
+        ]));
+        assert_eq!(sanitize_config_write(&native, &routing_with_managed()).1, 0);
+    }
+
+    /// 原生模型、无关键、供应商子路径都不许碰。
     #[test]
     fn native_models_and_other_edits_pass_through() {
         let routing = routing_with_managed();
         let native = write(json!([
             {"keyPath": "model", "value": "gpt-5.6-sol", "mergeStrategy": "replace"},
         ]));
-        assert_eq!(sanitize_config_write(&native, &routing).1, 0);
+        let (_, dropped, chosen) = sanitize_config_write(&native, &routing);
+        assert_eq!(dropped, 0);
+        assert!(chosen.is_none(), "原生模型不是我们的选择");
         let unrelated = write(json!([
             {"keyPath": "model_providers.custom.name", "value": "gs/prov/model-a", "mergeStrategy": "replace"},
         ]));
         assert_eq!(
             sanitize_config_write(&unrelated, &routing).1,
             0,
-            "只有 keyPath=model 才是模型选择"
+            "只有顶层键才是路由字段；供应商表的子路径改的是别的东西"
         );
+    }
+
+    /// 平铺写入（`config/value/write`）是同一个病的另一个口子，也要拦。
+    #[test]
+    fn flat_writes_are_sanitized_too() {
+        let routing = routing_with_managed();
         let flat = json!({
             "jsonrpc": "2.0", "id": "w2", "method": "config/value/write",
             "params": {"keyPath": "model", "value": "gs/prov/model-a", "mergeStrategy": "replace"},
         });
-        let (out, dropped) = sanitize_config_write(&flat, &routing);
-        assert_eq!(dropped, 0, "平铺形状没有可减的余地，原样转发");
-        assert_eq!(out, flat);
+        let (out, dropped, chosen) = sanitize_config_value_write(&flat, &routing);
+        assert_eq!(dropped, 1, "网关模型的平铺写入必须被拦下");
+        assert_eq!(chosen.as_deref(), Some("gs/prov/model-a"));
+        assert_eq!(
+            out["params"]["value"],
+            json!(""),
+            "拦下 = 写空值，宿主拿到的是子进程的真实回执，不是我们编的"
+        );
+        // 原生模型的平铺写入原样放过。
+        let native = json!({
+            "jsonrpc": "2.0", "id": "w3", "method": "config/value/write",
+            "params": {"keyPath": "model", "value": "gpt-5.6-sol", "mergeStrategy": "replace"},
+        });
+        let (out, dropped, _) = sanitize_config_value_write(&native, &routing);
+        assert_eq!(dropped, 0);
+        assert_eq!(out, native);
     }
 
-    /// 名单还没建立（菜单没取过）时一律不动手——认不出的写入宁可放行，也不能误伤。
+    /// 名单还没建立（菜单没取过）时也不能误伤——`gs/` 前缀本身就说明是我们的。
+    ///
+    /// 这条是拿真机日志换来的：10-13 20:07:55，菜单还没来，`config/batchWrite` 原样
+    /// 落盘，网关模型进了原生配置。只靠菜单名单判定的写法在那一刻是瞎的。
     #[test]
-    fn without_a_menu_every_write_passes_through() {
+    fn a_gateway_prefix_is_ours_even_before_the_menu_arrives() {
         let message = write(json!([
             {"keyPath": "model", "value": "gs/prov/model-a", "mergeStrategy": "replace"},
         ]));
-        assert_eq!(sanitize_config_write(&message, &Routing::default()).1, 0);
+        let (_, dropped, chosen) = sanitize_config_write(&message, &Routing::default());
+        assert_eq!(dropped, 1, "没有菜单时也要认出网关模型");
+        assert_eq!(chosen.as_deref(), Some("gs/prov/model-a"));
+    }
+
+    /// 冷启动时菜单还没到，模型选择也必须路由进托管那根，而不是被当成原生模型。
+    #[test]
+    fn a_gateway_model_routes_to_managed_without_a_menu() {
+        let message = json!({"method": "thread/start", "params": {"model": "gs/prov/model-a"}});
+        assert_eq!(
+            Routing::default().direct(&message),
+            (Side::Managed, Why::ModelIsOurs)
+        );
+    }
+
+    /// **显式模型优先于线程归属**：在原生线程里换成网关模型，必须路由进托管那根。
+    ///
+    /// 真机日志里 `thread/settings/update` 带着 `gs/…` 却被 `thread-pinned` 送进原生，
+    /// 那根没有这个模型——用户以为换了模型，其实整条请求都发错了地方。
+    #[test]
+    fn an_explicit_model_beats_a_thread_pin() {
+        let mut routing = routing_with_managed();
+        routing.pin("t-1", Side::Native);
+        let switch_to_ours = json!({
+            "method": "thread/settings/update",
+            "params": {"threadId": "t-1", "model": "gs/prov/model-a"},
+        });
+        assert_eq!(
+            routing.direct(&switch_to_ours),
+            (Side::Managed, Why::ModelIsOurs),
+            "在这次请求里点名了网关模型，就该按模型走"
+        );
+        // 没带模型时，线程归属仍然是唯一线索。
+        let no_model = json!({"method": "turn/start", "params": {"threadId": "t-1"}});
+        assert_eq!(routing.direct(&no_model), (Side::Native, Why::ThreadPinned));
+    }
+
+    /// 没带模型时，线程归属仍然是唯一线索。
+    ///
+    /// 真机上 `thread/resume` 会**声明** `model` 这个键但值是 null（15 次实测都是
+    /// `model= None` 而 paramKeys 里有 `model`）。`model_of` 只认非空字符串，所以那种
+    /// 形状不会误触发上面的「显式模型优先」，续接照旧跟着线程走。
+    #[test]
+    fn a_null_model_key_does_not_override_the_thread_pin() {
+        let mut routing = routing_with_managed();
+        routing.pin("t-managed", Side::Managed);
+        let resume = json!({
+            "method": "thread/resume",
+            "params": {
+                "threadId": "t-managed",
+                "model": Value::Null,
+                "modelProvider": "gptswitch",
+            },
+        });
+        assert_eq!(
+            routing.direct(&resume),
+            (Side::Managed, Why::ThreadPinned),
+            "声明了 model 键但值是 null，不能当成「换模型」"
+        );
+        // 空串同理：那是「没填」，不是「选了空模型」。
+        let empty =
+            json!({"method": "thread/resume", "params": {"threadId": "t-managed", "model": ""}});
+        assert_eq!(routing.direct(&empty), (Side::Managed, Why::ThreadPinned));
+    }
+
+    /// 读配置时把路由字段盖回选中的网关模型——这是「选择不再回滚」的那一半。
+    #[test]
+    fn config_read_gives_the_selection_back() {
+        let mut routing = Routing::default();
+        let mut result = json!({
+            "config": {
+                "model": "gpt-5.6-sol",
+                "model_provider": "custom",
+                "model_reasoning_effort": "high",
+            },
+            "origins": {
+                "model": {"name": {"type": "user"}, "version": "sha256:abc"},
+                "model_provider": {"name": {"type": "user"}, "version": "sha256:abc"},
+            },
+        });
+        // 没选过网关模型：一个字节都不改。
+        assert!(!virtualize_config_read(&mut result, &routing));
+        assert_eq!(result["config"]["model"], json!("gpt-5.6-sol"));
+        assert_eq!(result["config"]["model_provider"], json!("custom"));
+
+        routing.set_selection(Some("gs/prov/model-a".to_owned()));
+        assert!(virtualize_config_read(&mut result, &routing));
+        assert_eq!(result["config"]["model"], json!("gs/prov/model-a"));
+        assert_eq!(
+            result["config"]["model_reasoning_effort"],
+            json!("high"),
+            "只改路由字段，别的字段原样透传"
+        );
+        assert_eq!(
+            result["origins"]["model"]["version"],
+            json!("bridge/selection")
+        );
+        // 已经是我们的值：不必改写，也不该记一次「改写」。
+        assert!(!virtualize_config_read(&mut result, &routing));
+
+        // 形态不符（没有 config 对象）时不能慌，也不能写坏。
+        let mut odd = json!({"unexpected": true});
+        assert!(!virtualize_config_read(&mut odd, &routing));
+        assert_eq!(odd, json!({"unexpected": true}));
+    }
+
+    /// **provider 也要一起盖**：只把 model 换成网关模型、provider 留着原生那根的
+    /// `custom`，宿主会把这一对原样发给托管子进程，而那根只有 `[model_providers.gptswitch]`。
+    ///
+    /// 报文实测（`scripts/g0/selection-check.mjs`）：`modelProvider=custom` 必失败
+    /// （`Model provider `custom` not found`），`gptswitch` 才开得出线程。
+    #[test]
+    fn config_read_hands_back_the_provider_that_can_serve_our_model() {
+        let routing = {
+            let mut routing = Routing::default();
+            routing.set_selection(Some("gs/prov/model-a".to_owned()));
+            routing
+        };
+        let mut result = json!({
+            "config": {"model": "gpt-6-luna", "model_provider": "custom"},
+            "origins": {"model_provider": {"name": {"type": "user"}, "version": "sha256:abc"}},
+        });
+        assert!(virtualize_config_read(&mut result, &routing));
+        assert_eq!(result["config"]["model"], json!("gs/prov/model-a"));
+        assert_eq!(
+            result["config"]["model_provider"],
+            json!("gptswitch"),
+            "provider 不跟着换，托管那根会报 provider not found"
+        );
+        assert_eq!(
+            result["origins"]["model_provider"]["version"],
+            json!("bridge/selection")
+        );
+
+        // 只有 provider 不对（model 已经是我们的）时也要盖，且算一次改写。
+        let mut partial = json!({
+            "config": {"model": "gs/prov/model-a", "model_provider": "custom"},
+        });
+        assert!(virtualize_config_read(&mut partial, &routing));
+        assert_eq!(partial["config"]["model_provider"], json!("gptswitch"));
+
+        // 两个键都对 = 没有可改的，不该记一次「改写」。
+        let mut aligned = json!({
+            "config": {"model": "gs/prov/model-a", "model_provider": "gptswitch"},
+        });
+        assert!(!virtualize_config_read(&mut aligned, &routing));
+    }
+
+    /// 选择记忆要能跨进程：同一个状态文件，一个实例写、另一个读。
+    #[test]
+    fn the_selection_survives_a_restart_through_the_state_file() {
+        let dir =
+            std::env::temp_dir().join(format!("gptswitch-bridge-state-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("bridge.log");
+        let path = Routing::state_path_for(Some(&log)).unwrap();
+        assert_eq!(path.file_name().unwrap(), "bridge-model-state");
+
+        let mut writer = Routing::default();
+        writer.load_state(Some(path.clone()));
+        writer.set_selection(Some("gs/prov/model-a".to_owned()));
+        assert!(path.exists(), "选择要落盘，别的 bridge 实例才看得见");
+
+        // 另一个实例（宿主会给每根 app-server 各起一个）起来时要读到同一个选择。
+        let mut reader = Routing::default();
+        reader.load_state(Some(path.clone()));
+        assert_eq!(reader.selection(), Some("gs/prov/model-a"));
+
+        // 选回原生 = 清掉，别人读到的也必须是「没选过」。
+        reader.set_selection(None);
+        let mut third = Routing::default();
+        third.load_state(Some(path.clone()));
+        assert_eq!(third.selection(), None);
+
+        // 状态文件坏了当「没选过」，不猜。
+        std::fs::write(&path, "{ 这不是 JSON").unwrap();
+        let mut broken = Routing::default();
+        broken.load_state(Some(path.clone()));
+        assert_eq!(broken.selection(), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// bridge 的名单必须与 switch-core 的 `MANAGED_KEYS` 一致。
+    ///
+    /// 两份名单分开演化会让同一份配置在两个方向上被改写：一份去掉了某些键当托管 profile,
+    /// 另一份却认为那些键可以落进原生配置。
+    #[test]
+    fn managed_keys_match_switch_core() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../switch-core/src/codex/config.rs"
+        ))
+        .expect("读不到 switch-core 的 config.rs");
+        for key in MANAGED_KEYS {
+            assert!(
+                source.contains(&format!("\"{key}\"")),
+                "switch-core 的 MANAGED_KEYS 里没有 {key}，两份名单已经不一致了"
+            );
+        }
+        // provider 名同理：它是托管 profile 里 `[model_providers.<名字>]` 的那个名字，
+        // 也是宿主开线程时带给子进程的 `modelProvider`。名字对不上，子进程会
+        // 报 provider not found——配置里写的是 A，我们回报给宿主的是 B。
+        assert!(
+            source.contains(&format!("PROVIDER_ID: &str = \"{PROVIDER_ID}\"")),
+            "switch-core 的 PROVIDER_ID 已经不是 {PROVIDER_ID} 了"
+        );
     }
 }

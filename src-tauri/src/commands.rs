@@ -641,6 +641,10 @@ pub async fn coexist_set(
             switch_core::codex::coexist::launch_env(&desktop.app_data_dir(), &instance)?;
             // 原生那份还带着我们的路由？先还原，再开共存。
             restore_native_if_needed(desktop, &instance)?;
+        } else {
+            // 退出共存：选择记忆是托管 profile 的一部分，留着它会在下次开启时
+            // 让桥接拿一个早已不存在的模型去盖 config/read。
+            switch_core::codex::coexist::clear_bridge_state(&desktop.app_data_dir());
         }
         desktop.apply.set_coexist_enabled(enabled)?;
         coexist_state_of(desktop, &instance_id)
@@ -666,6 +670,8 @@ pub async fn coexist_resync(
             ));
         }
         switch_core::codex::coexist::clear_managed_config(&desktop.app_data_dir())?;
+        // 托管 profile 重建了，那份选择记忆也跟着作废：它记的是旧 profile 里的模型。
+        switch_core::codex::coexist::clear_bridge_state(&desktop.app_data_dir());
         coexist_state_of(desktop, &instance_id)
     })
     .await

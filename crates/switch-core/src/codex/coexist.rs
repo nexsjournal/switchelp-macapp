@@ -202,6 +202,23 @@ pub fn clear_managed_config(app_data_dir: &Path) -> Result<(), CoreError> {
     }
 }
 
+/// bridge 记「宿主模型选择器选了哪个网关模型」的状态文件，与 [`bridge_log`] 同目录。
+///
+/// 它必须与托管 profile 同生共死：那份选择是**托管 profile 的一部分**（原生配置里
+/// 从来不该有它）。托管 profile 被丢掉重建、或者用户退出共存模式之后还留着这个文件，
+/// 桥接就会拿一个已经不存在的模型去盖 `config/read`，界面显示的选择与实际路由分家。
+///
+/// 名字与 `crates/bridge` 的 `Routing::state_path_for` 必须一致。
+pub fn bridge_state_file(app_data_dir: &Path) -> PathBuf {
+    bridge_log(app_data_dir).with_file_name("bridge-model-state")
+}
+
+/// 丢掉 bridge 的选择记忆。删不掉不算失败：下次写入会覆盖它，
+/// 而失败形态只是「选择被多记了一轮」，不该拦住用户本来要做的事。
+pub fn clear_bridge_state(app_data_dir: &Path) {
+    let _ = std::fs::remove_file(bridge_state_file(app_data_dir));
+}
+
 /// bridge 日志里最近一次「我起来了」的 Unix 秒。
 ///
 /// 读不到、或从来没起来过，都返回 `None`——「没证据」不能当成「没有」，调用方据此
@@ -392,6 +409,28 @@ mod tests {
         .unwrap();
         assert_eq!(last_start_unix(&log), Some(4200));
         assert_eq!(last_start_unix(&dir.path().join("没有这个文件")), None);
+    }
+
+    /// 选择记忆与 bridge.log 同目录，且删得掉、删不存在的不报错。
+    ///
+    /// 这条路径必须与 `crates/bridge` 的 `Routing::state_path_for` 算出的一致——
+    /// 两边各算一次，不一致就会「应用以为清干净了，bridge 其实还在读旧文件」。
+    #[test]
+    fn the_bridge_state_file_sits_next_to_the_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = bridge_state_file(dir.path());
+        assert_eq!(
+            state,
+            bridge_log(dir.path()).with_file_name("bridge-model-state")
+        );
+        assert_eq!(state.parent(), bridge_log(dir.path()).parent());
+
+        // 删不掉/不存在都不算失败：失败形态只是「选择多记了一轮」。
+        clear_bridge_state(dir.path());
+        std::fs::write(&state, "{\"model\":\"gs/a/b\"}").unwrap();
+        assert!(state.exists());
+        clear_bridge_state(dir.path());
+        assert!(!state.exists());
     }
 
     #[test]

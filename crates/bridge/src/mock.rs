@@ -130,6 +130,35 @@ fn handle(message: &Value) -> Value {
                 "modelSeen": model_seen,
             })
         }
+        // 配置读取：形状照真身实测的来（`{config:{model,…},origins:{model:{…}}}`）。
+        // 原生那根报 `gpt-5.6-sol` + `custom`（用户真实配置里就是这个）——桥接要把
+        // 网关模型与托管 provider 一起盖回去，测试才能证明「选择不再回滚」，
+        // 也证明宿主拿去开线程的那对取值是对的。
+        "config/read" => {
+            let model = if is_managed() {
+                "gs/mock-managed-1"
+            } else {
+                "gpt-5.6-sol"
+            };
+            json!({
+                "config": {
+                    "model": model,
+                    "model_provider": if is_managed() { "gptswitch" } else { "custom" },
+                    "model_reasoning_effort": "high",
+                },
+                "origins": {
+                    "model": {
+                        "name": {"type": "user", "file": "/mock/config.toml", "profile": null},
+                        "version": "mock",
+                    },
+                    "model_provider": {
+                        "name": {"type": "user", "file": "/mock/config.toml", "profile": null},
+                        "version": "mock",
+                    },
+                },
+                "mockSide": side(),
+            })
+        }
         _ => json!({"error": {"code": -32601, "message": format!("mock 不认识的 {method}")}}),
     }
 }

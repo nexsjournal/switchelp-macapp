@@ -23,14 +23,17 @@ struct Bridge {
     stdin: Option<ChildStdin>,
     lines: mpsc::Receiver<String>,
     log: PathBuf,
-    _dir: tempdir::Dir,
+    dir: tempdir::Dir,
 }
 
 /// 极简临时目录（不引第三方依赖）：测试结束即删。
+///
+/// `shared` 为真时**不删**：几个实例共用同一个应用数据目录（宿主对每根 app-server
+/// 各起一个 bridge），谁先析构都不能把别人的目录端掉。
 mod tempdir {
     use std::path::{Path, PathBuf};
 
-    pub struct Dir(pub PathBuf);
+    pub struct Dir(pub PathBuf, pub bool);
 
     impl Dir {
         pub fn new(tag: &str) -> Self {
@@ -43,7 +46,7 @@ mod tempdir {
                 std::process::id()
             ));
             std::fs::create_dir_all(&path).unwrap();
-            Self(path)
+            Self(path, false)
         }
 
         pub fn path(&self) -> &Path {
@@ -53,7 +56,9 @@ mod tempdir {
 
     impl Drop for Dir {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
+            if !self.1 {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
         }
     }
 }
@@ -61,11 +66,19 @@ mod tempdir {
 impl Bridge {
     fn start(tag: &str, managed: bool) -> Self {
         let dir = tempdir::Dir::new(tag);
+        Self::start_in(&dir, tag, managed)
+    }
+
+    /// 在**已有的**应用数据目录里起一个实例。
+    ///
+    /// 宿主对每根 app-server 各起一个 bridge，它们共享同一个应用数据目录，
+    /// 因此也共享 `bridge-model-state`。这个入口就是用来验证跨实例的选择记忆的。
+    fn start_in(dir: &tempdir::Dir, tag: &str, managed: bool) -> Self {
         let native_home = dir.path().join("native-home");
         let managed_home = dir.path().join("codex-home");
         std::fs::create_dir_all(&native_home).unwrap();
         std::fs::create_dir_all(&managed_home).unwrap();
-        let log = dir.path().join("bridge.log");
+        let log = dir.path().join(format!("bridge-{tag}.log"));
 
         let mut env: HashMap<String, String> = std::env::vars().collect();
         env.insert("GPTSWITCH_BRIDGE_CODEX".into(), BRIDGE.to_owned());
@@ -111,7 +124,7 @@ impl Bridge {
             stdin: Some(stdin),
             lines: receiver,
             log,
-            _dir: dir,
+            dir: tempdir::Dir(dir.path().to_path_buf(), true),
         }
     }
 
@@ -298,6 +311,193 @@ fn routes_by_model_choice() {
         vec!["native:model-is-native", "managed:model-is-ours"],
         "路由理由要留在日志里，出错时才有得查"
     );
+}
+
+/// 关键回归：**选了网关模型之后，读回来的必须还是它**，不能被切回原生模型。
+///
+/// 这是用户报的那个症状本身。真机日志里它是这样发生的：宿主写 `model=gs/…` →
+/// 被摘掉 → 宿主立刻 `config/read` → 读到原生模型 `gpt-6-luna` → 选择器自己勾回去。
+/// 5 次点击，5 次回滚（10-17 12:32:40 / :45、12:33:06 / :39 / :43）。
+///
+/// 修复的判据就在这一条：写入还是被摘（原生配置不许被污染），但读回来的选择是用户的。
+#[test]
+fn a_gateway_selection_does_not_get_reverted_by_config_read() {
+    let mut bridge = Bridge::start("selection-sticks", true);
+    bridge.result("1", "initialize", json!({}));
+    bridge.result("2", "model/list", json!({"limit": 100}));
+
+    // 选之前：读到的就是原生模型。
+    let before = bridge.result("3", "config/read", json!({"includeLayers": false}));
+    assert_eq!(before["config"]["model"], json!("gpt-5.6-sol"));
+
+    // 用户点了网关模型：这一笔照旧被摘掉，不许进原生配置。
+    let written = bridge.result(
+        "4",
+        "config/batchWrite",
+        json!({
+            "edits": [{"keyPath": "model", "value": "gs/mock-managed-1", "mergeStrategy": "replace"}],
+            "expectedVersion": Value::Null,
+            "filePath": "/Users/someone/.codex/config.toml",
+            "reloadUserConfig": true
+        }),
+    );
+    assert_eq!(
+        written["mockSide"], "native",
+        "写入仍然落在原生那根：{written}"
+    );
+    assert_eq!(
+        written["editsReceived"], 0,
+        "网关模型那一笔必须被摘掉：{written}"
+    );
+
+    // 宿主写完立刻重读（真机上每次都紧跟一次）——**读到的必须是刚选的那个**。
+    let after = bridge.result("5", "config/read", json!({"includeLayers": false}));
+    assert_eq!(
+        after["config"]["model"],
+        json!("gs/mock-managed-1"),
+        "读回来还得是用户选的那个网关模型，否则界面会自己切回原生：{after}"
+    );
+    // provider 必须跟着换：宿主开线程时把 `model` 与 `modelProvider` 一起发给子进程，
+    // 留着原生那根的 provider 就是「选是选上了、一发就报 provider not found」。
+    assert_eq!(
+        after["config"]["model_provider"],
+        json!("gptswitch"),
+        "provider 不跟着盖，托管那根会拒收：{after}"
+    );
+    // 只改路由字段，别的字段与 origins 结构都得留着。
+    assert_eq!(after["config"]["model_reasoning_effort"], json!("high"));
+    assert_eq!(after["origins"]["model"]["name"]["type"], json!("user"));
+    assert_eq!(
+        after["origins"]["model_provider"]["version"],
+        json!("bridge/selection")
+    );
+
+    // 用这个选择开对话：必须路由进托管那根，而不是又走原生账号额度。
+    // `modelProvider` 按宿主的行为带上——值就是刚从 `config/read` 读到的那个。
+    let thread = bridge.result(
+        "6",
+        "thread/start",
+        json!({
+            "model": "gs/mock-managed-1",
+            "modelProvider": after["config"]["model_provider"],
+        }),
+    );
+    assert_eq!(
+        thread["thread"]["mockSide"], "managed",
+        "开出来的线程要在托管那根：{thread}"
+    );
+
+    // 选回原生模型：选择要被清掉，此后读到的就是原生模型，不能一直被盖回去。
+    bridge.result(
+        "7",
+        "config/batchWrite",
+        json!({
+            "edits": [{"keyPath": "model", "value": "gpt-5.6-sol", "mergeStrategy": "replace"}],
+            "expectedVersion": Value::Null,
+            "filePath": "/Users/someone/.codex/config.toml",
+            "reloadUserConfig": true
+        }),
+    );
+    let back = bridge.result("8", "config/read", json!({"includeLayers": false}));
+    assert_eq!(
+        back["config"]["model"],
+        json!("gpt-5.6-sol"),
+        "要能回到原生模型：{back}"
+    );
+}
+
+/// 选择要跨 bridge 实例活着：宿主对每根 app-server 各起一个 bridge，
+/// **写模型的那根与读 config 的那根未必是同一个进程**。只放内存会「写了不算数」。
+#[test]
+fn the_selection_survives_a_bridge_restart() {
+    let mut first = Bridge::start("selection-restart", true);
+    first.result("1", "initialize", json!({}));
+    first.result("2", "model/list", json!({"limit": 100}));
+    first.result(
+        "3",
+        "config/batchWrite",
+        json!({
+            "edits": [{"keyPath": "model", "value": "gs/mock-managed-2", "mergeStrategy": "replace"}],
+            "expectedVersion": Value::Null,
+            "filePath": "/Users/someone/.codex/config.toml",
+            "reloadUserConfig": true
+        }),
+    );
+    let state = first.dir.path().join("bridge-model-state");
+    assert!(state.exists(), "选择要落在 bridge.log 旁边的状态文件里");
+    first.close_stdin();
+    first.wait_exit(Duration::from_secs(10));
+
+    // 同一个应用数据目录（同一个状态文件）里新起一个实例，扮演「读 config 的那根」。
+    let mut second = Bridge::start_in(&first.dir, "selection-restart-2", true);
+    second.result("1", "initialize", json!({}));
+    let read = second.result("2", "config/read", json!({"includeLayers": false}));
+    assert_eq!(
+        read["config"]["model"],
+        json!("gs/mock-managed-2"),
+        "新实例没读回选择，宿主就会把界面切回原生：{read}"
+    );
+    assert_eq!(
+        read["config"]["model_provider"],
+        json!("gptswitch"),
+        "provider 也得从状态文件那一侧对齐，否则新实例开线程会被托管那根拒收：{read}"
+    );
+}
+
+/// 网关模型落进原生配置的**冷启动口子**：菜单还没到，判定不能是瞎的。
+///
+/// 真机 10-13 20:07:55 就这样漏过一次：`model/list` 还没被调用，那份写入被原样放行，
+/// 网关模型进了 `~/.codex/config.toml`。`gs/` 前缀本身就该被认出来。
+#[test]
+fn a_gateway_write_is_caught_before_the_menu_arrives() {
+    let mut bridge = Bridge::start("cold-start", true);
+    bridge.result("1", "initialize", json!({}));
+    // 故意不调 model/list：这时名单还是空的。
+    let written = bridge.result(
+        "2",
+        "config/batchWrite",
+        json!({
+            "edits": [{"keyPath": "model", "value": "gs/mock-managed-1", "mergeStrategy": "replace"}],
+            "expectedVersion": Value::Null,
+            "filePath": "/Users/someone/.codex/config.toml",
+            "reloadUserConfig": true
+        }),
+    );
+    assert_eq!(
+        written["editsReceived"], 0,
+        "没有菜单时也必须认出网关模型，否则它直接落进原生配置：{written}"
+    );
+}
+
+/// 平铺写入（`config/value/write`）是同一个病的另一个口子。
+#[test]
+fn flat_config_writes_cannot_smuggle_our_provider_in() {
+    let mut bridge = Bridge::start("flat-write", true);
+    bridge.result("1", "initialize", json!({}));
+    bridge.result("2", "model/list", json!({"limit": 100}));
+    // 平铺写 gateway provider 名：这是我们托管那根的 provider，不属于原生配置。
+    bridge.result(
+        "3",
+        "config/value/write",
+        json!({
+            "keyPath": "model_provider",
+            "value": "gptswitch",
+            "mergeStrategy": "replace",
+            "filePath": "/Users/someone/.codex/config.toml",
+        }),
+    );
+    let sanitized = bridge
+        .events()
+        .into_iter()
+        .filter(|event| event["event"] == "config-write-sanitized")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sanitized.len(),
+        1,
+        "平铺写入也要留下拦下的证据：{sanitized:?}"
+    );
+    assert_eq!(sanitized[0]["method"], json!("config/value/write"));
+    assert_eq!(sanitized[0]["dropped"], json!(1));
 }
 
 /// 桌面端会把模型选择写进它看到的 `config.toml`；桥接里那份是**原生那根**的。
