@@ -80,6 +80,10 @@ pub fn install(
         let helper = helper_path(app_data_dir);
         std::fs::write(&helper, script(instance_id))
             .map_err(|_| CoreError::internal("无法写入凭据 helper"))?;
+        // 与 bridge 同理：`fs::write` 也不会清目的地已有的扩展属性，残留的隔离属性会让
+        // codex 拉起这个 helper 时被系统杀掉。理由见 `platform::clear_quarantine`。
+        crate::platform::clear_quarantine(&helper)
+            .map_err(|_| CoreError::internal("凭据 helper 上残留着 com.apple.quarantine"))?;
         restrict(&helper, 0o700)?;
         Ok(helper)
     }

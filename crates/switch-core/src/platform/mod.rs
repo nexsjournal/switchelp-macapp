@@ -594,6 +594,43 @@ pub fn restrict(path: &Path, mode: Option<u32>) -> std::io::Result<()> {
     }
 }
 
+/// 清掉文件上的隔离属性（`com.apple.quarantine`）。非 macOS 上是空操作。
+///
+/// 为什么必须清：**`std::fs::copy` 与 `std::fs::write` 都不会清掉目的地已有的扩展属性**。
+/// 只要这些可执行件被标过一次隔离属性（例如某次是从带隔离属性的包拷出来的——用户从
+/// 下载来的 dmg 装就是这样），之后每次重装都把它原样留在原地。而带隔离属性的可执行文件
+/// 被宿主拉起时会被系统直接杀掉，崩溃报告里是 `CODESIGNING / Invalid Page`
+/// （`SIGKILL (Code Signature Invalid)`），表现为「配置都写着已启用，共存模式却整个起不来」。
+///
+/// 本机 2026-10-17 实测：同一个文件 `codesign --verify` 报 valid、在终端里手敲能跑，
+/// 唯独宿主 spawn 它时被杀；`xattr -d com.apple.quarantine` 之后就正常。
+///
+/// 属性本来就不存在时不算失败（`ENOATTR`）——调用方不必先探测。
+pub fn clear_quarantine(path: &Path) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::CString;
+        let file = CString::new(path.display().to_string())
+            .map_err(|_| std::io::Error::other("路径里有 NUL"))?;
+        let name = CString::new("com.apple.quarantine").expect("字面量没有 NUL");
+        let result = unsafe { libc::removexattr(file.as_ptr(), name.as_ptr(), 0) };
+        if result == 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        // 本来就没有这个属性：`xattr -d` 的同类情形，不算失败。
+        if error.raw_os_error() == Some(libc::ENOATTR) {
+            return Ok(());
+        }
+        Err(error)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
 /// 宿主应用在本平台的可执行名，供“需要重载”的提示使用。
 pub fn host_executable_names(platform: Platform) -> &'static [&'static str] {
     match platform {

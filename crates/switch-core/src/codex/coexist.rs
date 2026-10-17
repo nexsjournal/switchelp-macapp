@@ -158,6 +158,16 @@ pub fn install_bridge(app_data_dir: &Path, source: &Path) -> Result<PathBuf, Cor
     )
     .map_err(|_| CoreError::internal("无法设置 bin 目录权限"))?;
     std::fs::copy(source, &target).map_err(|_| CoreError::internal("无法写入 bridge"))?;
+    // 隔离属性必须清掉，而且**每次**都要清：`fs::copy` 不会清目的地已有的扩展属性，
+    // 那份属性一旦在（例如先前是从带隔离属性的包拷的）就会一直留着，而带它的可执行文件
+    // 被宿主拉起时会被系统直接杀掉（崩溃报告是 CODESIGNING / Invalid Page），现象是
+    // 「共存已启用，宿主却起不来」。理由与实测见 `platform::clear_quarantine`。
+    crate::platform::clear_quarantine(&target).map_err(|_| {
+        CoreError::internal(
+            "bridge 上残留着 com.apple.quarantine，宿主拉起它时会被系统杀掉。请手动执行 \
+             `xattr -d com.apple.quarantine` 后再重试。",
+        )
+    })?;
     crate::platform::restrict(
         &target,
         crate::platform::private_file_mode(crate::platform::Platform::current()),
@@ -356,6 +366,43 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let error = install_bridge(dir.path(), &dir.path().join("不存在")).unwrap_err();
         assert!(error.safe_details[0].contains("无法安装共存模式"));
+    }
+
+    /// 装上来的 bridge 不能带隔离属性——带它的可执行文件被宿主拉起时会被系统杀掉。
+    ///
+    /// 这条必须**先手工给目的地打上属性**再重装：`fs::copy` 不清目的地已有的扩展属性，
+    /// 所以「以前被标过一次」正是真实故障的形态（本机 2026-10-17 那 3 份崩溃报告）。
+    /// 只断言结果，不依赖 `xattr` 命令的退出码。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn install_bridge_clears_a_leftover_quarantine_attribute() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("from-bundle");
+        std::fs::write(&source, b"\xcf\xfa\xed\xfe fake executable").unwrap();
+        let target = bridge_path(dir.path());
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, b"stale placeholder").unwrap();
+        // 打上隔离属性（用系统 xattr，避免自己实现写 xattr 的那一套）。
+        let set = std::process::Command::new("xattr")
+            .args(["-w", "com.apple.quarantine", "03c1;deadbeef;;TEST"])
+            .arg(&target)
+            .status()
+            .expect("xattr 命令不可用");
+        assert!(
+            set.success(),
+            "没给测试文件打上隔离属性，这条用例就没有意义"
+        );
+
+        install_bridge(dir.path(), &source).unwrap();
+        let listed = std::process::Command::new("xattr")
+            .arg(&target)
+            .output()
+            .expect("xattr 命令不可用");
+        let attributes = String::from_utf8_lossy(&listed.stdout);
+        assert!(
+            !attributes.contains("com.apple.quarantine"),
+            "装上来的 bridge 还带着隔离属性，宿主启动它时会被系统杀掉：{attributes}"
+        );
     }
 
     #[cfg(not(windows))]
